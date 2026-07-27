@@ -532,27 +532,29 @@ async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
   return results;
 }
 
-// ─── Soroban RPC: SAC transfer events (last ~7 days) ─────────────────────────
+// ─── Soroban RPC: SAC transfer events (last several hours) ──────────────────
 //
 // Catches: incoming transfers from ANY sender (external wallets, other Latch
 // users, passkey accounts). Queries ALL contracts — no contractIds filter —
 // so any SAC (including custom tokens) is covered.
 //
-// A single wide-range getEvents call (previously 17,000 ledgers) reliably
-// errors on mainnet with "request exceeded processing limit threshold" —
-// confirmed live: 8,000-ledger windows pass, 12,000-ledger windows fail. The
-// wildcard topic (any sender/recipient) makes the scan too expensive for the
-// RPC to run over a wide range once mainnet has real event volume, unlike
-// testnet where the same call succeeds. The old code retried once on error
-// with a 4,320-ledger window and stopped there — silently capping real-world
-// mainnet coverage at ~6 hours despite the ~7-day retention window the
-// comment above claims.
-//
-// walkTransferEvents below chunks the walk into windows small enough to
-// clear the processing limit, shrinking further on repeated errors, and
-// keeps paging backward until it hits the RPC's self-reported retention
-// floor (`oldestLedger`) — so coverage matches what the provider actually
-// retains instead of one oversized request that always fails on mainnet.
+// getEvents has no end-ledger parameter — every call scans from `startLedger`
+// to the CURRENT chain tip, so its cost is purely a function of how far back
+// startLedger reaches, regardless of filters or how many events actually
+// match. That means there is no way to page further into the past: an
+// earlier "chunk" doesn't scan a separate, cheaper window — it scans a wider
+// one (further start, same tip), so it costs *more*, not the same. Verified
+// live against mainnet.sorobanrpc.com: a wildcard-topic query passes at an
+// 8,000-ledger reach and fails with "request exceeded processing limit
+// threshold" at 12,000; scoping to a single known contractId (native XLM
+// SAC) does not change this — the cost is the ledger range, not the filter.
+// A prior version of this function tried to walk further back in chunks;
+// every chunk after the first re-scans from an even earlier start to the
+// same tip, so it reliably fails once the cumulative reach passes the
+// threshold. There is no client-side way around this on this RPC — anything
+// older than the safe reach below needs a proper indexer (see the
+// commented-out wallet-backend GraphQL path atop this file), not a client
+// scan.
 
 let sacContractInfoCache: Map<string, { code: string; assetType: string }> | null = null;
 
@@ -585,51 +587,39 @@ function getSacContractInfo(): Map<string, { code: string; assetType: string }> 
   return map;
 }
 
-// Largest window that clears mainnet's processing-limit error for a
-// wildcard-topic query (verified: 8,000 passes, 12,000 fails) — kept a
-// margin below that since the limit tracks event volume scanned, which
-// varies with network load.
-const SAC_EVENTS_CHUNK_LEDGERS = 6_000;
-const SAC_EVENTS_MIN_CHUNK_LEDGERS = 500;
-// Safety cap on chunk count per direction so a pathological RPC response
-// (e.g. oldestLedger never reported) can't turn this into an unbounded walk.
-const SAC_EVENTS_MAX_CHUNKS = 24;
+// Largest reach that clears mainnet's processing-limit error for a
+// wildcard-topic query (verified live: 8,000 passes, 12,000 fails) — kept a
+// margin below that since the limit tracks total ledger range, which is a
+// hard ceiling on this RPC regardless of chunking (see comment above).
+const SAC_EVENTS_REACH_LEDGERS = 6_000;
+const SAC_EVENTS_MIN_REACH_LEDGERS = 500;
 
 /**
- * Pages a single-direction transfer-event filter backward from latestLedger,
- * shrinking the window on a processing-limit error and stopping once the
- * RPC's self-reported retention floor (`oldestLedger`) is reached.
+ * Fetches one direction of transfer events, shrinking the reach on a
+ * processing-limit error. Only ever shrinks from SAC_EVENTS_REACH_LEDGERS —
+ * never grows past it — since a wider startLedger costs more, not less.
  */
-async function walkTransferEvents(
+async function fetchTransferEvents(
   buildParams: (start: number) => object,
   latestLedger: number,
 ): Promise<any[]> {
-  const events: any[] = [];
-  let cursor = latestLedger;
-  let chunkSize = SAC_EVENTS_CHUNK_LEDGERS;
-  let floor = 1;
+  let reach = SAC_EVENTS_REACH_LEDGERS;
 
-  for (let i = 0; i < SAC_EVENTS_MAX_CHUNKS && cursor > floor; i++) {
-    const start = Math.max(floor, cursor - chunkSize);
+  for (;;) {
+    const start = Math.max(1, latestLedger - reach);
     const resp = await sorobanRpc('getEvents', buildParams(start));
 
     if (resp?.error) {
-      if (chunkSize <= SAC_EVENTS_MIN_CHUNK_LEDGERS) {
-        if (__DEV__) console.warn('[SAC events] giving up at min chunk size:', resp.error);
-        break;
+      if (reach <= SAC_EVENTS_MIN_REACH_LEDGERS) {
+        if (__DEV__) console.warn('[SAC events] giving up at min reach:', resp.error);
+        return [];
       }
-      chunkSize = Math.max(SAC_EVENTS_MIN_CHUNK_LEDGERS, Math.floor(chunkSize / 2));
-      continue; // retry the same cursor with a smaller window
+      reach = Math.max(SAC_EVENTS_MIN_REACH_LEDGERS, Math.floor(reach / 2));
+      continue;
     }
 
-    events.push(...(resp?.result?.events ?? []));
-    if (typeof resp?.result?.oldestLedger === 'number') {
-      floor = resp.result.oldestLedger;
-    }
-    cursor = start;
+    return resp?.result?.events ?? [];
   }
-
-  return events;
 }
 
 async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[]> {
@@ -658,8 +648,8 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
   });
 
   const [incoming, outgoing] = await Promise.all([
-    walkTransferEvents(buildParams(wildcard, cAddressVal), latestLedger), // incoming
-    walkTransferEvents(buildParams(cAddressVal, wildcard), latestLedger), // outgoing
+    fetchTransferEvents(buildParams(wildcard, cAddressVal), latestLedger), // incoming
+    fetchTransferEvents(buildParams(cAddressVal, wildcard), latestLedger), // outgoing
   ]);
 
   if (__DEV__) {
@@ -759,7 +749,8 @@ function classifyTxTypes(payments: StellarPayment[], cAddress: string): StellarP
 // ─── Merge + deduplicate ──────────────────────────────────────────────────────
 //
 // G-addr ops: outgoing + all G-addr-signed txs (full history via asset_balance_changes)
-// SAC events: incoming from other users, passkey accounts, last ~7 days
+// SAC events: incoming from other users, passkey accounts, last several hours only —
+// see the reach-limit comment on fetchSacTransferEvents
 //
 // Dedup key: composite of hash+from+to+asset — preserves swap legs (different
 // assets in the same tx) while dropping true duplicates across sources.
