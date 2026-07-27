@@ -22,12 +22,17 @@ import {
   SignedPairingChallenge,
   verifySignedChallenge,
 } from '@/src/lib/pairing-payload';
+import {
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { AccountSigner } from '@/src/lib/account-signers';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
-import { Networks } from '@stellar/stellar-sdk';
 import { useTheme } from '@shopify/restyle';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
@@ -216,11 +221,13 @@ async function runAdminTx(
   newSigner: AccountSigner,
   updateAccountDevices: ReturnType<typeof useWalletStore.getState>['updateAccountDevices'],
 ) {
-  const rpcUrl = process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
-  const networkPassphrase = process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
-  const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!factoryAddress || !bundlerSecret) throw new Error('Missing factory/bundler env');
+  const rpcUrl = STELLAR_RPC_URL;
+  const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
+  if (!factoryAddress || !bundlerSecret) {
+    throw new Error('Factory/bundler secret is not configured for the active network');
+  }
 
   const mnemonic = await SecureStore.getItemAsync(SECURE_KEYS.MNEMONIC);
   if (!mnemonic) throw new Error('Passkey-initiator pairing not yet supported (P2.6 TODO)');

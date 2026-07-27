@@ -28,7 +28,12 @@
  */
 
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
-import { getNetworkId, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  getNetworkId,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
 import { aggregateAuthEntries } from '@/src/lib/soroban-auth-payload';
 import {
@@ -474,7 +479,7 @@ async function waitForConfirmation(hash: string): Promise<void> {
 }
 
 function bundlerSecret(): string {
-  const secret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!secret) throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is not set');
+  const secret = STELLAR_BUNDLER_SECRET;
+  if (!secret) throw new Error('Bundler secret is not configured for the active network');
   return secret;
 }

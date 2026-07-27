@@ -1,7 +1,11 @@
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Networks } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
@@ -554,9 +558,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return false;
     }
 
-    const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
+    const factoryAddress = STELLAR_FACTORY_ADDRESS;
     if (!factoryAddress) {
-      if (__DEV__) console.log('[syncSigners] abort: EXPO_PUBLIC_FACTORY_ADDRESS not set in bundle');
+      if (__DEV__) console.log('[syncSigners] abort: factory address not configured for the active network');
       return false;
     }
     if (__DEV__) {
@@ -564,9 +568,8 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         `[syncSigners] start: account=${account.smartAccountAddress.slice(0, 8)}… factory=${factoryAddress.slice(0, 8)}…`,
       );
     }
-    const rpcUrl =
-      process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
-    const networkPassphrase = process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
+    const rpcUrl = STELLAR_RPC_URL;
+    const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
 
     let rule;
     try {

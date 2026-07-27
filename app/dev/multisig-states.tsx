@@ -27,7 +27,11 @@ import InvitationCard from '@/src/components/multisig/InvitationCard';
 import PendingWalletCard from '@/src/components/multisig/PendingWalletCard';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import type { AccountSigner } from '@/src/lib/account-signers';
 import {
   decryptForWallet,
@@ -74,7 +78,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
  * pattern in multisig-send.ts but for a plain bundler-authorized SAC transfer.
  */
 async function fundMultisigXlm(multisig: string, amount: string): Promise<void> {
-  const bundler = Keypair.fromSecret(process.env.EXPO_PUBLIC_BUNDLER_SECRET ?? '');
+  const bundler = Keypair.fromSecret(STELLAR_BUNDLER_SECRET);
   const source = await loadAccount(bundler.publicKey());
   const sac = new Contract(Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE));
   const tx = new TransactionBuilder(source, {
@@ -195,9 +199,7 @@ const MultisigStatesSandbox = () => {
       addLog('✓ funded');
 
       const sac = Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE);
-      const bundlerPk = Keypair.fromSecret(
-        process.env.EXPO_PUBLIC_BUNDLER_SECRET ?? '',
-      ).publicKey();
+      const bundlerPk = Keypair.fromSecret(STELLAR_BUNDLER_SECRET).publicKey();
 
       addLog('building transfer (1 XLM → bundler)…');
       const assembled = await buildAssembledTransfer({

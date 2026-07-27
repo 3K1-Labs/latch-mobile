@@ -8,7 +8,11 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { fetchDefaultContextRule, fetchRuleThreshold } from '@/src/api/account-admin';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { getMySignerKey } from '@/src/lib/cosign-packet-flow';
 
 export interface RosterMember {
@@ -31,7 +35,7 @@ function simParams() {
   return {
     rpcUrl: STELLAR_RPC_URL,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+    factoryAddress: STELLAR_FACTORY_ADDRESS,
   };
 }
 

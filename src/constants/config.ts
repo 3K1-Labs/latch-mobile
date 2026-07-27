@@ -16,6 +16,13 @@ export interface NetworkDetails {
   networkPassphrase: string;
   sorobanRpcUrl: string;
   friendbotUrl?: string;
+  // Deploy-time-pinned contract config — differs per network, see
+  // reference/LATCH_REFERENCE.md. The ed25519 verifier is the only one passed
+  // client-side; secp256k1/webauthn verifiers are read on-chain from the
+  // active factory (see fetchFactoryVerifiers in src/api/account-admin.ts).
+  factoryAddress: string;
+  bundlerSecret: string;
+  verifierAddress: string;
 }
 
 export const TESTNET_NETWORK: NetworkDetails = {
@@ -25,6 +32,10 @@ export const TESTNET_NETWORK: NetworkDetails = {
   networkPassphrase: Networks.TESTNET,
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
   friendbotUrl: 'https://friendbot.stellar.org',
+  factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET ?? '',
+  verifierAddress:
+    process.env.EXPO_PUBLIC_VERIFIER_ADDRESS ?? 'CCRB63MFFBYXBZCRLRGLJVTHC7O4SUGAYTO5ZZEUNVY5W5DVGKHETI67',
 };
 
 export const MAINNET_NETWORK: NetworkDetails = {
@@ -32,7 +43,10 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkName: 'Main Net',
   horizonUrl: 'https://horizon.stellar.org',
   networkPassphrase: Networks.PUBLIC,
-  sorobanRpcUrl: 'https://mainnet.sorobanrpc.com',
+  sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
+  factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
+  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET_MAINNET ?? '',
+  verifierAddress: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET ?? '',
 };
 
 // `let`, not `const` — switchActiveNetwork() (src/lib/network-switch.ts) reassigns
@@ -49,9 +63,9 @@ export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
 let STELLAR_NETWORK_PASSPHRASE = ACTIVE_NETWORK.networkPassphrase;
 let STELLAR_RPC_URL = ACTIVE_NETWORK.sorobanRpcUrl;
-const STELLAR_VERIFIER_ADDRESS =
-  process.env.EXPO_PUBLIC_VERIFIER_ADDRESS ??
-  'CCRB63MFFBYXBZCRLRGLJVTHC7O4SUGAYTO5ZZEUNVY5W5DVGKHETI67';
+let STELLAR_FACTORY_ADDRESS = ACTIVE_NETWORK.factoryAddress;
+let STELLAR_BUNDLER_SECRET = ACTIVE_NETWORK.bundlerSecret;
+let STELLAR_VERIFIER_ADDRESS = ACTIVE_NETWORK.verifierAddress;
 
 // Minimum XLM reserve per Stellar protocol:
 //   (BASE_RESERVE_MIN_COUNT + subentry_count + num_sponsoring - num_sponsored) × BASE_RESERVE
@@ -95,6 +109,9 @@ function applyNetworkDetails(details: NetworkDetails): void {
   HORIZON_URL = details.horizonUrl;
   STELLAR_NETWORK_PASSPHRASE = details.networkPassphrase;
   STELLAR_RPC_URL = details.sorobanRpcUrl;
+  STELLAR_FACTORY_ADDRESS = details.factoryAddress;
+  STELLAR_BUNDLER_SECRET = details.bundlerSecret;
+  STELLAR_VERIFIER_ADDRESS = details.verifierAddress;
   SOROSWAP_NETWORK = getNetworkId();
 }
 
@@ -133,6 +150,8 @@ export {
   SOROSWAP_API_URL,
   SOROSWAP_NETWORK,
   STELLAR_AUTH_PREFIX,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
   STELLAR_VERIFIER_ADDRESS,

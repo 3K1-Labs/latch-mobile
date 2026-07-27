@@ -21,7 +21,11 @@
 import * as SecureStore from 'expo-secure-store';
 
 import { fetchRuleThreshold } from '@/src/api/account-admin';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import {
   addEntryToPacket,
   createPacket,
@@ -53,7 +57,7 @@ function simParams() {
   return {
     rpcUrl: STELLAR_RPC_URL,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+    factoryAddress: STELLAR_FACTORY_ADDRESS,
   };
 }
 

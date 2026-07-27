@@ -26,7 +26,11 @@ import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 import {
@@ -282,7 +286,7 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
     const simParams = {
       rpcUrl: STELLAR_RPC_URL,
       networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-      factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+      factoryAddress: STELLAR_FACTORY_ADDRESS,
     };
     const pendingInvites: string[] = [];
     const invalidAddresses: string[] = [];

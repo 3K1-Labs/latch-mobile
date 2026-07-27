@@ -18,7 +18,11 @@
  */
 
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 
 export type AuthFailureKind =
   | 'multisig' // rule holds delegated signers — needs the cosign flow, not single-device signing
@@ -58,7 +62,7 @@ export async function diagnoseAuthFailure(
   accountAddress: string,
   presentedKeyDataHex: string | null,
 ): Promise<AuthFailureDiagnosis> {
-  const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
   if (!factoryAddress) {
     return { kind: 'unknown', presentedKeyRegistered: false, registered: [] };
   }

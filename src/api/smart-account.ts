@@ -12,12 +12,11 @@
  *   deploySmartAccountForGAddress(gAddress)
  *   lookupSmartAccountByGAddress(gAddress)
  *
- * ⚠️  SECURITY NOTE — EXPO_PUBLIC_BUNDLER_SECRET
+ * ⚠️  SECURITY NOTE — EXPO_PUBLIC_BUNDLER_SECRET / EXPO_PUBLIC_BUNDLER_SECRET_MAINNET
  * EXPO_PUBLIC_* variables are baked into the JS bundle at build time and are
  * readable by anyone who extracts the APK/IPA. The bundler keypair should be
  * moved server-side (a backend endpoint that receives { publicKeyHex } and
- * returns { smartAccountAddress }) before production. This is safe for testnet
- * development only.
+ * returns { smartAccountAddress }) before shipping either network build.
  */
 
 import {
@@ -25,7 +24,6 @@ import {
   Address,
   Contract,
   Keypair,
-  Networks,
   rpc,
   scValToNative,
   SorobanDataBuilder,
@@ -36,6 +34,14 @@ import {
 import QuickCrypto from 'react-native-quick-crypto';
 
 import { AccountSigner, encodeAccountInitParams } from '@/src/lib/account-signers';
+import {
+  ACTIVE_NETWORK,
+  HORIZON_URL,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import {
   deriveMultisigSalt,
   generateMultisigNonce,
@@ -134,12 +140,13 @@ export function parseSimResult(raw: any): rpc.Api.SimulateTransactionSuccessResp
   } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
 }
 
-// Load configuration lazily so we don't crash at module initialization
-const getTestnetConfig = () => ({
-  rpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org',
-  networkPassphrase: process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET,
-  factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS,
-  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET,
+// Reads live off ACTIVE_NETWORK (src/constants/config.ts) on every call, not
+// module-top-level, so it follows switchActiveNetwork() without a restart.
+const getActiveNetworkConfig = () => ({
+  rpcUrl: STELLAR_RPC_URL,
+  networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
+  factoryAddress: STELLAR_FACTORY_ADDRESS,
+  bundlerSecret: STELLAR_BUNDLER_SECRET,
 });
 
 // ─── Unified deployment cache ─────────────────────────────────────────────────
@@ -191,9 +198,16 @@ function deriveGAddressFromPubkey(pubkeyHex: string): string {
 
 async function fundAccountIfNeeded(gAddress: string): Promise<void> {
   try {
-    const horizonResponse = await fetch(`https://horizon-testnet.stellar.org/accounts/${gAddress}`);
+    const horizonResponse = await fetch(`${HORIZON_URL}/accounts/${gAddress}`);
     if (horizonResponse.ok) return;
   } catch {}
+
+  // Friendbot only exists on testnet — on mainnet an unfunded account means
+  // the user hasn't sent it XLM yet (e.g. via the onramp), which we can't
+  // paper over here.
+  if (ACTIVE_NETWORK.network !== 'TESTNET') {
+    throw new Error(`Account ${gAddress} is not funded and Friendbot is unavailable on mainnet.`);
+  }
 
   if (__DEV__) console.log(`Funding account ${gAddress} via Friendbot...`);
   const response = await fetch(
@@ -207,7 +221,7 @@ async function fundAccountIfNeeded(gAddress: string): Promise<void> {
 // rpc.Server.getAccount() uses getLedgerEntries on the Soroban RPC, which can
 // return empty even when the account exists. Horizon is authoritative for sequence.
 async function getAccountFromHorizon(publicKey: string): Promise<Account> {
-  const response = await fetch(`https://horizon-testnet.stellar.org/accounts/${publicKey}`);
+  const response = await fetch(`${HORIZON_URL}/accounts/${publicKey}`);
   if (!response.ok) throw new Error(`Account not found: ${publicKey}`);
   const data = await response.json();
   return new Account(publicKey, data.sequence);
@@ -274,15 +288,17 @@ export async function deploySmartAccount(
 
     if (__DEV__) console.log(`Deploying smart account for pubkey: ${publicKeyHex}`);
 
-    const config = getTestnetConfig();
+    const config = getActiveNetworkConfig();
 
     if (!config.bundlerSecret) {
       throw new Error(
-        'EXPO_PUBLIC_BUNDLER_SECRET environment variable is required and currently missing from .env.',
+        `Missing bundler secret for ${ACTIVE_NETWORK.networkName} (EXPO_PUBLIC_BUNDLER_SECRET${ACTIVE_NETWORK.network === 'PUBLIC' ? '_MAINNET' : ''}).`,
       );
     }
     if (!config.factoryAddress) {
-      throw new Error('Missing EXPO_PUBLIC_FACTORY_ADDRESS in environment variables.');
+      throw new Error(
+        `Missing factory address for ${ACTIVE_NETWORK.networkName} (EXPO_PUBLIC_FACTORY_ADDRESS${ACTIVE_NETWORK.network === 'PUBLIC' ? '_MAINNET' : ''}).`,
+      );
     }
 
     const bundlerKeypair = Keypair.fromSecret(config.bundlerSecret);
@@ -383,7 +399,7 @@ export async function lookupSmartAccount(publicKeyHex: string): Promise<LookupRe
       throw new Error('Missing or invalid pubkey query param (expected 64-char hex).');
     }
 
-    const config = getTestnetConfig();
+    const config = getActiveNetworkConfig();
     if (!config.factoryAddress) {
       return { deployed: false, smartAccountAddress: '' };
     }
@@ -447,7 +463,7 @@ export async function deploySmartAccountForGAddress(gAddress: string): Promise<D
 
     await fundAccountIfNeeded(gAddress);
 
-    const cfg = getTestnetConfig();
+    const cfg = getActiveNetworkConfig();
     const bundlerKeypair = Keypair.fromSecret(cfg.bundlerSecret || '');
     const salt = await deriveSalt(gAddress);
     const paramsMap = buildParamsMap(gAddress, salt);
@@ -530,7 +546,7 @@ export async function lookupSmartAccountByGAddress(gAddress: string): Promise<Lo
       return { deployed: true, smartAccountAddress: cached.smartAccountAddress };
     }
 
-    const config = getTestnetConfig();
+    const config = getActiveNetworkConfig();
     if (!config.factoryAddress) {
       return { deployed: false, smartAccountAddress: '' };
     }
@@ -602,12 +618,12 @@ export async function deployMultiSigSmartAccount(
     );
   }
 
-  const config = getTestnetConfig();
+  const config = getActiveNetworkConfig();
   if (!config.bundlerSecret) {
-    throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is required.');
+    throw new Error(`Missing bundler secret for ${ACTIVE_NETWORK.networkName}.`);
   }
   if (!config.factoryAddress) {
-    throw new Error('Missing EXPO_PUBLIC_FACTORY_ADDRESS.');
+    throw new Error(`Missing factory address for ${ACTIVE_NETWORK.networkName}.`);
   }
 
   const canonicalSigners = sortSignersCanonical(signers);
@@ -704,8 +720,8 @@ export async function predictMultiSigAddress(
   nonceHex?: string,
 ): Promise<string> {
   if (signers.length < 1) throw new Error('predictMultiSigAddress: at least one signer required');
-  const config = getTestnetConfig();
-  if (!config.factoryAddress) throw new Error('Missing EXPO_PUBLIC_FACTORY_ADDRESS.');
+  const config = getActiveNetworkConfig();
+  if (!config.factoryAddress) throw new Error(`Missing factory address for ${ACTIVE_NETWORK.networkName}.`);
 
   const canonicalSigners = sortSignersCanonical(signers);
   const salt = deriveMultisigSalt({ signers: canonicalSigners, threshold, nonceHex });

@@ -243,16 +243,24 @@
 // export { BUNDLER_G_ADDRESS };
 import { Address, Asset, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { HORIZON_URL, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '../constants/config';
+import {
+  HORIZON_URL,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '../constants/config';
 import { getWellKnownTokens } from '../constants/known-tokens';
 import { useWalletStore } from '../store/wallet';
 
-// Derived once at module load — safe since the secret is EXPO_PUBLIC_* (client-visible)
-let BUNDLER_G_ADDRESS: string | null = null;
-try {
-  const s = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (s) BUNDLER_G_ADDRESS = Keypair.fromSecret(s).publicKey();
-} catch {}
+// Computed per call (not module load) so it follows switchActiveNetwork() —
+// the bundler G-address differs between testnet and mainnet.
+function getBundlerGAddress(): string | null {
+  try {
+    return STELLAR_BUNDLER_SECRET ? Keypair.fromSecret(STELLAR_BUNDLER_SECRET).publicKey() : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface StellarPayment {
   id: string;
@@ -477,10 +485,11 @@ async function fetchGAddressOps(gAddress: string, cAddress: string): Promise<Ste
 // (Latch-to-Latch transfers go through the same bundler on both sides).
 
 async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
-  if (!BUNDLER_G_ADDRESS) return [];
+  const bundlerGAddress = getBundlerGAddress();
+  if (!bundlerGAddress) return [];
 
   const resp = await horizonGet(
-    `${HORIZON_URL}/accounts/${BUNDLER_G_ADDRESS}/operations?limit=200&order=desc&include_failed=false`,
+    `${HORIZON_URL}/accounts/${bundlerGAddress}/operations?limit=200&order=desc&include_failed=false`,
   );
 
   const allOps = (resp?._embedded?.records ?? []) as any[];
