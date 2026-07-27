@@ -536,9 +536,23 @@ async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
 //
 // Catches: incoming transfers from ANY sender (external wallets, other Latch
 // users, passkey accounts). Queries ALL contracts — no contractIds filter —
-// so any SAC (including custom tokens) is covered. Just 2 XHR requests vs the
-// previous 14+ batched requests.
-// Coverage limited to the RPC retention window (~7 days / ~17,000 ledgers).
+// so any SAC (including custom tokens) is covered.
+//
+// A single wide-range getEvents call (previously 17,000 ledgers) reliably
+// errors on mainnet with "request exceeded processing limit threshold" —
+// confirmed live: 8,000-ledger windows pass, 12,000-ledger windows fail. The
+// wildcard topic (any sender/recipient) makes the scan too expensive for the
+// RPC to run over a wide range once mainnet has real event volume, unlike
+// testnet where the same call succeeds. The old code retried once on error
+// with a 4,320-ledger window and stopped there — silently capping real-world
+// mainnet coverage at ~6 hours despite the ~7-day retention window the
+// comment above claims.
+//
+// walkTransferEvents below chunks the walk into windows small enough to
+// clear the processing limit, shrinking further on repeated errors, and
+// keeps paging backward until it hits the RPC's self-reported retention
+// floor (`oldestLedger`) — so coverage matches what the provider actually
+// retains instead of one oversized request that always fails on mainnet.
 
 let sacContractInfoCache: Map<string, { code: string; assetType: string }> | null = null;
 
@@ -571,22 +585,68 @@ function getSacContractInfo(): Map<string, { code: string; assetType: string }> 
   return map;
 }
 
+// Largest window that clears mainnet's processing-limit error for a
+// wildcard-topic query (verified: 8,000 passes, 12,000 fails) — kept a
+// margin below that since the limit tracks event volume scanned, which
+// varies with network load.
+const SAC_EVENTS_CHUNK_LEDGERS = 6_000;
+const SAC_EVENTS_MIN_CHUNK_LEDGERS = 500;
+// Safety cap on chunk count per direction so a pathological RPC response
+// (e.g. oldestLedger never reported) can't turn this into an unbounded walk.
+const SAC_EVENTS_MAX_CHUNKS = 24;
+
+/**
+ * Pages a single-direction transfer-event filter backward from latestLedger,
+ * shrinking the window on a processing-limit error and stopping once the
+ * RPC's self-reported retention floor (`oldestLedger`) is reached.
+ */
+async function walkTransferEvents(
+  buildParams: (start: number) => object,
+  latestLedger: number,
+): Promise<any[]> {
+  const events: any[] = [];
+  let cursor = latestLedger;
+  let chunkSize = SAC_EVENTS_CHUNK_LEDGERS;
+  let floor = 1;
+
+  for (let i = 0; i < SAC_EVENTS_MAX_CHUNKS && cursor > floor; i++) {
+    const start = Math.max(floor, cursor - chunkSize);
+    const resp = await sorobanRpc('getEvents', buildParams(start));
+
+    if (resp?.error) {
+      if (chunkSize <= SAC_EVENTS_MIN_CHUNK_LEDGERS) {
+        if (__DEV__) console.warn('[SAC events] giving up at min chunk size:', resp.error);
+        break;
+      }
+      chunkSize = Math.max(SAC_EVENTS_MIN_CHUNK_LEDGERS, Math.floor(chunkSize / 2));
+      continue; // retry the same cursor with a smaller window
+    }
+
+    events.push(...(resp?.result?.events ?? []));
+    if (typeof resp?.result?.oldestLedger === 'number') {
+      floor = resp.result.oldestLedger;
+    }
+    cursor = start;
+  }
+
+  return events;
+}
+
 async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[]> {
   const latestLedgerResp = await sorobanRpc('getLatestLedger', {});
   const latestLedger: number = latestLedgerResp?.result?.sequence ?? 0;
   if (latestLedger === 0) return [];
 
-  const startLedger = Math.max(1, latestLedger - 17_000);
   const transferSym = scValB64(xdr.ScVal.scvSymbol('transfer'));
   const cAddressVal = scValB64(new Address(cAddress).toScVal());
   const wildcard = '*';
 
   if (__DEV__) {
-    console.log('[SAC events] cAddress:', cAddress, '| startLedger:', startLedger);
+    console.log('[SAC events] cAddress:', cAddress, '| latestLedger:', latestLedger);
   }
 
   // No contractIds filter — catches transfers from any SAC, including unknown tokens
-  const buildParams = (sender: string, recipient: string, start: number) => ({
+  const buildParams = (sender: string, recipient: string) => (start: number) => ({
     startLedger: start,
     filters: [
       {
@@ -597,25 +657,13 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
     pagination: { limit: 200 },
   });
 
-  const runQueries = (start: number) =>
-    Promise.all([
-      sorobanRpc('getEvents', buildParams(wildcard, cAddressVal, start)), // incoming
-      sorobanRpc('getEvents', buildParams(cAddressVal, wildcard, start)), // outgoing
-    ]);
-
-  let responses = await runQueries(startLedger);
-
-  if (responses.some((r) => r?.error)) {
-    if (__DEV__) console.warn('[SAC events] error — retrying with 4,320-ledger window');
-    responses = await runQueries(Math.max(1, latestLedger - 4_320));
-  }
+  const [incoming, outgoing] = await Promise.all([
+    walkTransferEvents(buildParams(wildcard, cAddressVal), latestLedger), // incoming
+    walkTransferEvents(buildParams(cAddressVal, wildcard), latestLedger), // outgoing
+  ]);
 
   if (__DEV__) {
-    const total = responses.reduce((s, r) => s + (r?.result?.events?.length ?? 0), 0);
-    console.log('[SAC events] total raw events:', total);
-    responses.forEach((r, i) => {
-      if (r?.error) console.warn('[SAC events] response', i, 'error:', JSON.stringify(r.error));
-    });
+    console.log('[SAC events] incoming:', incoming.length, '| outgoing:', outgoing.length);
   }
 
   const mapEvent = (event: any): StellarPayment | null => {
@@ -660,8 +708,7 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
   };
 
   const seen = new Set<string>();
-  return responses
-    .flatMap((r) => r?.result?.events ?? [])
+  return [...incoming, ...outgoing]
     .map(mapEvent)
     .filter((tx): tx is StellarPayment => {
       if (!tx) return false;
