@@ -113,6 +113,10 @@ function applyNetworkDetails(details: NetworkDetails): void {
   STELLAR_BUNDLER_SECRET = details.bundlerSecret;
   STELLAR_VERIFIER_ADDRESS = details.verifierAddress;
   SOROSWAP_NETWORK = getNetworkId();
+
+  const isTestnet = details.network === 'TESTNET';
+  AQUARIUS_AMM_API_URL = isTestnet ? TESTNET_AQUARIUS_API_URL : MAINNET_AQUARIUS_API_URL;
+  AQUARIUS_ROUTER_ADDRESS = isTestnet ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
 }
 
 /**
@@ -130,16 +134,29 @@ export async function hydrateActiveNetwork(): Promise<void> {
   }
 }
 
-// ─── Aquarius AMM (testnet swap liquidity) ────────────────────────────────────
-// Soroswap has no testnet pools, but Aquarius does. These are TESTNET values —
-// Aquarius resets testnet quarterly, so the router can be overridden via env.
-// (Mainnet swaps use Soroswap, not Aquarius.)
-const AQUARIUS_AMM_API_URL =
+// ─── Aquarius AMM (swap liquidity, both networks) ─────────────────────────────
+// Aquarius is the swap provider on BOTH networks — see services/swap/registry.ts.
+// Testnet: Aquarius resets testnet quarterly, so the router can be overridden via env.
+const TESTNET_AQUARIUS_API_URL =
   process.env.EXPO_PUBLIC_AQUARIUS_API_URL ??
   'https://amm-api-testnet.aqua.network/api/external/v1';
-const AQUARIUS_ROUTER_ADDRESS =
+const TESTNET_AQUARIUS_ROUTER =
   process.env.EXPO_PUBLIC_AQUARIUS_ROUTER ??
   'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD';
+// Mainnet router taken from the XLM/USDC pool's own on-chain `Router` storage
+// entry (pool CA6PUJLB…, the deep ~9.6M-XLM constant-product pool), not guessed.
+const MAINNET_AQUARIUS_API_URL =
+  process.env.EXPO_PUBLIC_AQUARIUS_API_URL_MAINNET ??
+  'https://amm-api.aqua.network/api/external/v1';
+const MAINNET_AQUARIUS_ROUTER =
+  process.env.EXPO_PUBLIC_AQUARIUS_ROUTER_MAINNET ??
+  'CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK';
+
+// Reassigned by applyNetworkDetails() on a live switch, same as the values above.
+let AQUARIUS_AMM_API_URL =
+  ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_AQUARIUS_API_URL : MAINNET_AQUARIUS_API_URL;
+let AQUARIUS_ROUTER_ADDRESS =
+  ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
 
 export {
   AQUARIUS_AMM_API_URL,

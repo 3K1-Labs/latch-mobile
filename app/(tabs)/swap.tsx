@@ -2,17 +2,18 @@ import { Swap as SwapIcon } from '@/src/components/CustomTabBar';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import SwapCard from '@/src/components/swap/SwapCard';
+import SwapRoutePickerSheet from '@/src/components/swap/SwapRoutePickerSheet';
 import SwapTokenPickerSheet from '@/src/components/swap/SwapTokenPickerSheet';
 import { swapTokenImage } from '@/src/components/swap/token-image';
 import { STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
 import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
-import { useSwapQuote } from '@/src/hooks/use-swap-quote';
+import { ImplausibleQuoteError, useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
-import { getActiveSwapProvider } from '@/src/services/swap/registry';
+import { getActiveSwapProvider, listSwapProviders } from '@/src/services/swap/registry';
 import type { SwapToken } from '@/src/services/swap/types';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -24,7 +25,7 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFormik } from 'formik';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -64,10 +65,15 @@ const Swap = () => {
     useCallback(() => {
       queryClient.invalidateQueries({ queryKey: ['prices'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      // Cached quotes are priced at the moment they were fetched. Returning to
+      // this screen must never re-render one as if it were current.
+      queryClient.invalidateQueries({ queryKey: ['swap-quote'] });
     }, [queryClient]),
   );
 
-  // Tokens the account actually HOLDS (non-zero balance) — valid "From" options.
+  // Tokens the account actually HOLDS (non-zero balance). Used to seed the
+  // From leg and to supply real balances; both pickers list the full
+  // swappable universe so a quote can be fetched without holding the token.
   const tokens = useMemo(() => portfolio ?? [], [portfolio]);
 
   // Full swappable universe for the "To" leg: well-known + tracked tokens (which
@@ -99,11 +105,17 @@ const Swap = () => {
     tokens,
   ]);
 
-  const provider = getActiveSwapProvider();
+  // undefined → use the network's default (first) provider. A stale id from a
+  // previous network is harmless: getActiveSwapProvider falls back to the
+  // default when the id isn't registered for the active network.
+  const [selectedProviderId, setSelectedProviderId] = useState<string | undefined>(undefined);
+  const provider = getActiveSwapProvider(selectedProviderId);
+  const availableProviders = listSwapProviders();
 
   const [fromToken, setFromToken] = useState<SwapToken | null>(null);
   const [toToken, setToToken] = useState<SwapToken | null>(null);
   const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null);
+  const [showRoutePicker, setShowRoutePicker] = useState(false);
   const [slippageBps, setSlippageBps] = useState(DEFAULT_SLIPPAGE_BPS);
   const [showSlippageOptions, setShowSlippageOptions] = useState(false);
   const [customSlippage, setCustomSlippage] = useState('');
@@ -120,12 +132,16 @@ const Swap = () => {
   const fromIconUrl = useTokenIcon(fromToken?.code, fromToken?.issuer);
   const toIconUrl = useTokenIcon(toToken?.code, toToken?.issuer);
 
-  // Seed From from a held token, To from the swappable universe (which may be a
-  // token the account doesn't hold yet).
+  // Seed From from a held token when there is one, otherwise fall back to the
+  // swappable universe. Quoting is a read-only price lookup, so an empty
+  // portfolio must not leave From null — that would disable useSwapQuote and
+  // hide the whole details block (route/rate/slippage) behind `quote &&`.
+  // Approve stays correctly blocked by `insufficient` below.
   useEffect(() => {
-    if (!fromToken && tokens.length > 0) setFromToken(tokens[0]);
+    const fromCandidates = tokens.length > 0 ? tokens : swappableTokens;
+    if (!fromToken && fromCandidates.length > 0) setFromToken(fromCandidates[0]);
     if (!toToken && swappableTokens.length > 0) {
-      const fromSac = fromToken?.sacContractId ?? tokens[0]?.sacContractId;
+      const fromSac = fromToken?.sacContractId ?? fromCandidates[0]?.sacContractId;
       setToToken(swappableTokens.find((t) => t.sacContractId !== fromSac) ?? null);
     }
   }, [tokens, swappableTokens, fromToken, toToken]);
@@ -168,6 +184,28 @@ const Swap = () => {
     return () => clearTimeout(id);
   }, [formik.values.amount]);
 
+  // Tab screens stay mounted, so leaving the tab clears nothing on its own —
+  // the typed amount and its quote would still be on screen, with Approve
+  // still armed, when the user comes back minutes later. Clear on blur.
+  // Read through a ref: Formik hands back a new object every render, so
+  // depending on it directly would re-run this effect (and its cleanup) on
+  // every keystroke and wipe the field as it is typed.
+  const formikRef = useRef(formik);
+  formikRef.current = formik;
+  // Pushing the confirm screen also blurs this one, but that is still the same
+  // swap in progress — backing out of confirm should return to what was typed.
+  const goingToConfirm = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      goingToConfirm.current = false;
+      return () => {
+        if (goingToConfirm.current) return;
+        formikRef.current.resetForm();
+        setDebouncedAmount('');
+      };
+    }, []),
+  );
+
   const {
     data: quote,
     isFetching: quoteFetching,
@@ -178,10 +216,13 @@ const Swap = () => {
     amountIn: debouncedAmount,
     slippageBps,
     providerId: provider.id,
+    fromCode: fromToken?.code,
+    toCode: toToken?.code,
   });
   // A debounce gap or an in-flight refetch means "waiting", not "no route".
   const quotePending = quoteFetching || debouncedAmount !== formik.values.amount;
-  const noRoute = !!quoteError && !quotePending;
+  const badPrice = quoteError instanceof ImplausibleQuoteError && !quotePending;
+  const noRoute = !!quoteError && !quotePending && !badPrice;
 
   const fromBalance = parseFloat(fromToken?.amount ?? '0');
   const amountNum = parseFloat(formik.values.amount || '0');
@@ -191,6 +232,7 @@ const Swap = () => {
 
   const handleApprove = () => {
     if (!canApprove || !fromToken || !toToken) return;
+    goingToConfirm.current = true;
     router.push({
       pathname: '/swap/confirm',
       params: {
@@ -367,9 +409,11 @@ const Swap = () => {
                     ? 'Insufficient Balance'
                     : quotePending
                       ? 'Fetching Quote…'
-                      : noRoute
-                        ? 'No route for this pair'
-                        : 'Approve Swap'}
+                      : badPrice
+                        ? 'Price unavailable — try again'
+                        : noRoute
+                          ? 'No route for this pair'
+                          : 'Approve Swap'}
               </Text>
             </Box>
           </TouchableOpacity>
@@ -381,7 +425,12 @@ const Swap = () => {
                 <Text variant="p7" color="textSecondary">
                   Route
                 </Text>
-                <Box flexDirection="row" alignItems="center">
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setShowRoutePicker(true)}
+                  disabled={availableProviders.length < 2}
+                  style={{ flexDirection: 'row', alignItems: 'center' }}
+                >
                   <Image
                     source={provider.icon}
                     style={{ width: 24, height: 24, borderRadius: 6, marginRight: 8 }}
@@ -389,24 +438,28 @@ const Swap = () => {
                   <Text variant="p7" color="textPrimary" style={{ marginRight: 8 }}>
                     {provider.name}
                   </Text>
-                  <Box
-                    backgroundColor="bg800"
-                    paddingHorizontal="s"
-                    paddingVertical="xs"
-                    borderRadius={4}
-                    style={{ backgroundColor: '#211B0C' }}
-                  >
-                    <Text variant="p8" color="primary" style={{ fontSize: 10 }}>
-                      Recommend
-                    </Text>
-                  </Box>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={14}
-                    color={theme.colors.textSecondary}
-                    style={{ marginLeft: 8 }}
-                  />
-                </Box>
+                  {provider.id === availableProviders[0]?.id && (
+                    <Box
+                      backgroundColor="bg800"
+                      paddingHorizontal="s"
+                      paddingVertical="xs"
+                      borderRadius={4}
+                      style={{ backgroundColor: '#211B0C' }}
+                    >
+                      <Text variant="p8" color="primary" style={{ fontSize: 10 }}>
+                        Recommend
+                      </Text>
+                    </Box>
+                  )}
+                  {availableProviders.length > 1 && (
+                    <Ionicons
+                      name="chevron-forward"
+                      size={14}
+                      color={theme.colors.textSecondary}
+                      style={{ marginLeft: 8 }}
+                    />
+                  )}
+                </TouchableOpacity>
               </Box>
 
               <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
@@ -531,10 +584,21 @@ const Swap = () => {
       <SwapTokenPickerSheet
         visible={pickerSide !== null}
         title={pickerSide === 'from' ? 'Swap From' : 'Swap To'}
-        tokens={pickerSide === 'from' ? tokens : swappableTokens}
+        tokens={swappableTokens}
         excludeSacId={pickerSide === 'from' ? toToken?.sacContractId : fromToken?.sacContractId}
         onClose={() => setPickerSide(null)}
         onSelect={handleSelectToken}
+      />
+
+      <SwapRoutePickerSheet
+        visible={showRoutePicker}
+        providers={availableProviders}
+        selectedId={provider.id}
+        onClose={() => setShowRoutePicker(false)}
+        onSelect={(id) => {
+          setSelectedProviderId(id);
+          setShowRoutePicker(false);
+        }}
       />
     </Box>
   );

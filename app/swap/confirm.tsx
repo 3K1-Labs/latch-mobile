@@ -69,6 +69,8 @@ const ConfirmSwap = () => {
     amountIn: params.amountIn,
     slippageBps,
     providerId: params.providerId,
+    fromCode: params.fromCode,
+    toCode: params.toCode,
   });
 
   const [showAuthModal, setShowAuthModal] = useState(false);

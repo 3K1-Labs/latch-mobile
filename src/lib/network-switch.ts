@@ -3,6 +3,7 @@ import { type NetworkDetails, setActiveNetworkDetails } from '@/src/constants/co
 import { resetSacAssetCodeCache } from '@/src/lib/sac-asset-code';
 import { disconnectAllSessions } from '@/src/lib/walletconnect';
 import { resetSacContractInfoCache } from '@/src/hooks/use-stellar-transactions';
+import { resetAquariusPoolCache } from '@/src/services/swap/providers/aquarius';
 import { resetMockSwapCache } from '@/src/services/swap/providers/mock';
 
 /**
@@ -23,5 +24,6 @@ export async function switchActiveNetwork(details: NetworkDetails): Promise<void
   queryClient.clear();
   resetSacAssetCodeCache();
   resetSacContractInfoCache();
+  resetAquariusPoolCache();
   resetMockSwapCache();
 }
