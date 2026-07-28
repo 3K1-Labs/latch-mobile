@@ -312,13 +312,20 @@ const Explore = () => {
 
           {/* Banner Carousel */}
           {!q && (
-            <Box mb="xl">
+            // Full-bleed: pagingEnabled snaps by the list's own viewport width,
+            // so the slides must be exactly that wide. Inside the parent's
+            // paddingHorizontal="m" the viewport is SCREEN_WIDTH - 32 while each
+            // slide is SCREEN_WIDTH, which drifts a further 32px every page.
+            // Cancel the padding here and inset the card instead.
+            <Box mb="xl" style={{ marginHorizontal: -theme.spacing.m }}>
               <FlatList
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 data={banners}
-                onScroll={(e) => {
+                // The page has settled here, so this is exact — onScroll without
+                // scrollEventThrottle barely fires on iOS and desynced the dots.
+                onMomentumScrollEnd={(e) => {
                   const x = e.nativeEvent.contentOffset.x;
                   setBannerIndex(Math.round(x / SCREEN_WIDTH));
                 }}
@@ -336,9 +343,9 @@ const Explore = () => {
                 )}
               />
               <Box flexDirection="row" justifyContent="center" mt="m" gap="xs">
-                {[0, 1, 2].map((i) => (
+                {banners.map((banner, i) => (
                   <Box
-                    key={i}
+                    key={banner.id}
                     width={bannerIndex === i ? 20 : 6}
                     height={6}
                     borderRadius={3}
