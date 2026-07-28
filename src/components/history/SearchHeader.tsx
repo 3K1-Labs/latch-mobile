@@ -7,7 +7,7 @@ import Box from '../shared/Box';
 import Input from '../shared/Input';
 import Text from '../shared/Text';
 
-const FILTERS = ['All', 'Pending', 'Sent', 'Received', 'Contract'];
+const FILTERS = ['All', 'Pending', 'Sent', 'Received', 'Swap'];
 
 const SearchHeader = ({
   search,

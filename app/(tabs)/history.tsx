@@ -94,8 +94,6 @@ const History = () => {
       );
     } else if (activeFilter === 'Swap') {
       result = result.filter((tx) => tx.txType === 'swap');
-    } else if (activeFilter === 'Contract') {
-      result = result.filter((tx) => tx.type === 'invoke_host_function');
     }
 
     if (search.trim()) {
