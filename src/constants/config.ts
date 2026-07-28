@@ -54,10 +54,10 @@ export const MAINNET_NETWORK: NetworkDetails = {
 // (hook, event handler, render), never a module-top-level computation, so the
 // live binding is picked up on the next call/render — see network-switch.ts.
 //
-// Starts on testnet and is corrected by hydrateActiveNetwork() during startup.
+// Starts on mainnet and is corrected by hydrateActiveNetwork() during startup.
 // The app root gates rendering on that hydration, so nothing reads a network
 // value before the persisted choice has been applied.
-export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
+export let ACTIVE_NETWORK: NetworkDetails = MAINNET_NETWORK;
 
 // Convenience shortcuts derived from the active network
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
@@ -124,9 +124,9 @@ function applyNetworkDetails(details: NetworkDetails): void {
 export async function hydrateActiveNetwork(): Promise<void> {
   try {
     const stored = await AsyncStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
-    if (stored === 'mainnet') applyNetworkDetails(MAINNET_NETWORK);
+    if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
   } catch {
-    // Storage unavailable — keep the testnet default rather than blocking launch.
+    // Storage unavailable — keep the mainnet default rather than blocking launch.
   }
 }
 
