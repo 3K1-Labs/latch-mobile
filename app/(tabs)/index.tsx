@@ -380,6 +380,11 @@ const Home = () => {
                   if (item.label === 'Fund') {
                     setFundVisible(true);
                     if (smartAccountAddress) createDepositIntent.mutate(smartAccountAddress);
+                  } else if (item.label === 'Swap') {
+                    // Swap is a tab, not a stacked screen — navigate() switches
+                    // to it (matching the tab bar) instead of pushing a second
+                    // copy on top of Home with no way back to the tab bar.
+                    router.navigate('/swap');
                   } else if ('route' in item && item.route) {
                     router.push(item.route as any);
                   }
