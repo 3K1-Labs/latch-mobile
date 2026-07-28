@@ -26,7 +26,6 @@ const SharedWalletResultModal = ({
 }: Props) => {
   const insets = useSafeAreaInsets();
   const [qrVisible, setQrVisible] = useState(false);
-  console.log({ errorMessage });
 
   return (
     <Modal
