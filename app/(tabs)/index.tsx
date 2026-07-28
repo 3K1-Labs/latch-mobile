@@ -200,6 +200,18 @@ const Home = () => {
     });
   }, [portfolio, livePrices]);
 
+  // Tint the 24h badge by direction. Null when flat (or when the balance is
+  // hidden) so it falls back to the neutral chip rather than claiming a gain of
+  // exactly 0.00% is "up". dayChange is a toFixed string, so parse before
+  // comparing — '-0.00' and '0.00' both land on 0 and stay neutral.
+  const dayChangeTint = useMemo(() => {
+    const value = parseFloat(dayChange);
+    if (!showBalance || !Number.isFinite(value) || value === 0) return null;
+    return value > 0
+      ? { background: 'rgba(0,199,53,0.16)', text: theme.colors.success600 }
+      : { background: 'rgba(254,95,56,0.16)', text: theme.colors.danger900 };
+  }, [dayChange, showBalance, theme.colors.success600, theme.colors.danger900]);
+
   const xlmToken = useMemo(() => portfolio?.find((t) => t.code === 'XLM'), [portfolio]);
   const spendableXlm = useMemo(() => parseFloat(xlmToken?.amount ?? '0') || 0, [xlmToken]);
   const recentTx = useMemo(() => transactions?.slice(0, 3) ?? [], [transactions]);
@@ -349,9 +361,20 @@ const Home = () => {
               justifyContent={'center'}
               alignItems={'center'}
               paddingVertical="xs"
-              style={!isDark ? { borderWidth: 1, borderColor: '#F0F0F0' } : {}}
+              style={
+                dayChangeTint
+                  ? { backgroundColor: dayChangeTint.background }
+                  : !isDark
+                    ? { borderWidth: 1, borderColor: '#F0F0F0' }
+                    : {}
+              }
             >
-              <Text variant="p7" color="textPrimary" fontWeight="700">
+              <Text
+                variant="p7"
+                color="textPrimary"
+                fontWeight="700"
+                style={dayChangeTint ? { color: dayChangeTint.text } : undefined}
+              >
                 {showBalance ? `${dayChange ?? 0.0}%` : '****'}
               </Text>
             </Box>
