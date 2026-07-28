@@ -48,7 +48,11 @@ export default function CustomToast({ variant, text1, text2, actionLabel, onActi
       borderColor="bg800"
       backgroundColor="cardBackground"
       style={{
-        width: '90%',
+        // Hug the content instead of a fixed 90% — a short toast ("Copied")
+        // shouldn't span the screen. maxWidth still caps long messages, and the
+        // text box shrinks rather than grows to fill.
+        alignSelf: 'center',
+        maxWidth: '90%',
         shadowColor: theme.colors.black,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.25,
@@ -69,7 +73,7 @@ export default function CustomToast({ variant, text1, text2, actionLabel, onActi
         <Ionicons name={styles.icon} size={24} color={styles.color} />
       </Box>
 
-      <Box flex={1} marginLeft="s" marginRight="xs">
+      <Box marginLeft="s" marginRight="xs" style={{ flexShrink: 1 }}>
         {text1 ? (
           <Text
             style={{ fontFamily: 'SFproSemibold', fontSize: 15, lineHeight: 20 }}

@@ -15,10 +15,9 @@ import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import 'react-native-reanimated';
-import Toast from 'react-native-toast-message';
 import '../shim';
 import { queryClient } from '../src/api/client';
-import { toastConfig } from '../src/components/toast/toastConfig';
+import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
@@ -86,7 +85,7 @@ function RootLayoutContent() {
         <Stack.Screen name="wc-session-request" options={{ presentation: 'modal' }} />
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Toast config={toastConfig} />
+      <AppToast />
     </>
   );
 }

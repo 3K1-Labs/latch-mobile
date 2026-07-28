@@ -25,7 +25,7 @@ import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
@@ -103,7 +103,7 @@ const Profile = () => {
           image={activeAccount ? (avatars[activeAccount.publicKeyHex] ?? null) : null}
           onCopyAddress={async () => {
             if (activeAccount?.smartAccountAddress) {
-              await Clipboard.setStringAsync(activeAccount?.smartAccountAddress);
+              await copyToClipboard(activeAccount.smartAccountAddress);
             }
           }}
           onPress={() => setSwitcherVisible(true)}

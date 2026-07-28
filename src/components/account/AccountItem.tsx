@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
 import React from 'react';
 import { Image, TouchableOpacity } from 'react-native';
 
@@ -10,6 +9,7 @@ import { WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { shortenAddress } from '@/src/utils';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 
 interface AccountItemProps {
   account: WalletAccount;
@@ -36,7 +36,7 @@ const AccountItem = ({
   const handleCopy = async () => {
     const address = account.smartAccountAddress || account.gAddress;
     if (address) {
-      await Clipboard.setStringAsync(address);
+      await copyToClipboard(address);
     }
   };
 

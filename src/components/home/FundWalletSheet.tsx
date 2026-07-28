@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
 import { TouchableOpacity } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
@@ -11,6 +10,8 @@ import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { useDepositIntentStatus } from '@/src/hooks/use-deposit';
+import AppToast from '@/src/components/toast/AppToast';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import FundInfoSheet from './FundInfoSheet';
@@ -79,9 +80,7 @@ const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Pro
   const { data: depositStatusData } = useDepositIntentStatus(memo ?? null, statusVisible);
   const statusProps = depositStatusData?.forwards ? deriveStatusProps(depositStatusData.forwards) : null;
 
-  const copyToClipboard = async (text: string) => {
-    await Clipboard.setStringAsync(text);
-  };
+
 
   return (
     <>
@@ -237,7 +236,7 @@ const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Pro
                     <Text variant="p7" color="textSecondary">
                       {memo}
                     </Text>
-                    <TouchableOpacity onPress={() => copyToClipboard(memo)}>
+                    <TouchableOpacity onPress={() => copyToClipboard(memo, 'Memo')}>
                       <Ionicons name="copy-outline" size={20} color={theme.colors.textSecondary} />
                     </TouchableOpacity>
                   </Box>
@@ -290,6 +289,12 @@ const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Pro
         onClose={() => setStatusVisible(false)}
         {...(statusProps ?? {})}
       />
+
+      {/* Rendered after the sheet so it paints above it — the root <Toast/> sits
+          below this subtree. Gated on `visible` because a BottomSheetModal stays
+          mounted while dismissed, and an always-mounted instance would capture
+          the library's ref stack and swallow toasts meant for other screens. */}
+      {visible && <AppToast />}
     </>
   );
 };

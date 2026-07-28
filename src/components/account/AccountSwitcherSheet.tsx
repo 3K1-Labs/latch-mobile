@@ -25,6 +25,7 @@ import CreateWalletButton from '@/src/components/shared-wallet-review/CreateWall
 import MemberReviewList from '@/src/components/shared-wallet-review/MemberReviewList';
 import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard';
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
+import AppToast from '@/src/components/toast/AppToast';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import {
@@ -911,6 +912,13 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
             />
           </>
         )}
+
+        {/* This sheet is a Modal stacked on top of the drawer's Modal, and each
+            Modal is its own native window — so neither the root host nor the
+            drawer's can paint over it. Last child so it sits above the sheet
+            body; gated on the same condition as the Modal so a closed sheet
+            never sits on top of the toast library's ref stack. */}
+        {visible && multisigResult === null && <AppToast />}
       </Modal>
 
       <SharedWalletResultModal
