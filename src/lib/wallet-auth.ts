@@ -243,13 +243,23 @@ function isJwtExpired(token: string, skewSeconds = 30): boolean {
  * sign-in. If the refresh fails the (stale) cached token is returned so the
  * caller's own 401 handling still applies — never worse than before.
  */
-export async function ensureWalletSession(account: WalletAccount): Promise<string> {
+/**
+ * Return a usable session token without ever signing in, or null if that isn't
+ * possible. Signing in reads this device's passkey private key, and on a
+ * biometric-gated key that read raises an OS Face ID / Touch ID prompt — which
+ * must never happen on background work the user didn't ask for. Callers running
+ * off a timer or an app-foreground event use this and skip when it returns null.
+ */
+export async function getWalletSessionWithoutSignIn(): Promise<string | null> {
   const existing = await SecureStore.getItemAsync(SECURE_KEYS.WALLET_ACCESS_TOKEN);
-  if (existing && !isJwtExpired(existing)) return existing;
-  if (existing) {
-    const refreshed = await refreshWalletSession();
-    return refreshed ?? existing;
-  }
+  if (!existing) return null;
+  if (!isJwtExpired(existing)) return existing;
+  return (await refreshWalletSession()) ?? existing;
+}
+
+export async function ensureWalletSession(account: WalletAccount): Promise<string> {
+  const cached = await getWalletSessionWithoutSignIn();
+  if (cached) return cached;
   const tokens = await signInWithWallet(account);
   return tokens.accessToken;
 }

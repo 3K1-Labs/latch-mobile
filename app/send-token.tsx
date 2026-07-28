@@ -16,6 +16,7 @@ import { useAddressBook } from '@/src/hooks/use-address-book';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
+import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createTransfer } from '@/src/lib/cosign-transport';
 import { diagnoseAuthFailure, isAuthFailure } from '@/src/lib/tx-diagnostics';
 import { friendlyTxError } from '@/src/lib/tx-errors';
@@ -30,7 +31,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Dimensions, Image, TouchableOpacity } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -69,6 +70,15 @@ const SendToken = () => {
   const [isRedeploying, setIsRedeploying] = useState(false);
 
   const tokens = portfolio ?? [];
+
+  // When signing raises its own OS prompt, TxAuthModal must not raise a second
+  // one — see signingRaisesBiometricPrompt.
+  const [signingPromptsForBiometrics, setSigningPromptsForBiometrics] = useState(false);
+  useEffect(() => {
+    signingRaisesBiometricPrompt()
+      .then(setSigningPromptsForBiometrics)
+      .catch(() => setSigningPromptsForBiometrics(false));
+  }, [activeAccountIndex]);
 
   const requestAuth = (message: string): Promise<boolean> =>
     new Promise((resolve) => {
@@ -433,6 +443,7 @@ const SendToken = () => {
         visible={showAuthModal}
         promptMessage={authPromptMessage}
         onResult={handleAuthResult}
+        signingPromptsForBiometrics={signingPromptsForBiometrics}
       />
 
       <AddressBookSheet

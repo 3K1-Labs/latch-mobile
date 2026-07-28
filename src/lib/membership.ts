@@ -23,11 +23,35 @@ import {
   STELLAR_RPC_URL,
 } from '@/src/constants/config';
 import { getMySignerKey, pickSigner } from '@/src/lib/cosign-packet-flow';
-import { ensureWalletSession } from '@/src/lib/wallet-auth';
+import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
 import { useSharedWalletNaming } from '@/src/store/shared-wallet-naming';
 import { useWalletStore } from '@/src/store/wallet';
 
 const MEMBERSHIP_SCHEME = 'latch-membership:v1:';
+
+export interface MembershipSweepOptions {
+  /**
+   * Whether this run may sign in to latch-api when no cached session exists.
+   * Signing in reads the device passkey, and a biometric-gated key raises an OS
+   * prompt on read — so a background sweep (mount, app-foreground) that signs in
+   * shows Face ID with no user action behind it. Worse, the prompt itself
+   * backgrounds the app, so dismissing it re-fires the `active` handler that
+   * started the sweep. Background callers pass false and defer instead; anything
+   * running off a user action leaves the default.
+   */
+  allowSignIn?: boolean;
+}
+
+// Resolves the latch-api token under the caller's sign-in policy. Returns null
+// only when signing in was disallowed and no cached session was usable.
+async function resolveSessionToken(
+  account: Parameters<typeof ensureWalletSession>[0],
+  opts?: MembershipSweepOptions,
+): Promise<string | null> {
+  return opts?.allowSignIn === false
+    ? getWalletSessionWithoutSignIn()
+    : ensureWalletSession(account);
+}
 
 // Accounts whose announce hasn't durably landed yet (e.g. a 429 ate it). Held
 // in plain AsyncStorage — the value is just public C-addresses already in the
@@ -92,7 +116,10 @@ export function membershipBlindId(keyDataHex: string): string {
  * Announce a freshly-created shared wallet to every on-chain device-key member
  * so their devices can discover it. Fire-and-forget after deploy; non-fatal.
  */
-export async function announceMembership(account: string): Promise<void> {
+export async function announceMembership(
+  account: string,
+  opts?: MembershipSweepOptions,
+): Promise<void> {
   const me = pickSigner();
   if (!me) return;
 
@@ -123,7 +150,11 @@ export async function announceMembership(account: string): Promise<void> {
     return;
   }
 
-  const token = await ensureWalletSession(me.account);
+  const token = await resolveSessionToken(me.account, opts);
+  if (!token) {
+    if (__DEV__) console.log('[membership] announce: no session, deferring (sign-in not allowed)');
+    return; // stays pending; a user-initiated run picks it up
+  }
   await announceMemberships(token, account, blindIds);
   await clearPendingAnnounce(account);
   if (__DEV__) console.log('[membership] announced ok');
@@ -134,13 +165,13 @@ export async function announceMembership(account: string): Promise<void> {
  * on every foreground alongside discovery; each success clears its marker, each
  * failure leaves it for the next sweep. Safe to call when nothing is pending.
  */
-export async function retryPendingAnnouncements(): Promise<void> {
+export async function retryPendingAnnouncements(opts?: MembershipSweepOptions): Promise<void> {
   const pending = await getPendingAnnounces();
   if (pending.length === 0) return;
   if (__DEV__) console.log('[membership] re-announce sweep:', pending);
   for (const account of pending) {
     try {
-      await announceMembership(account);
+      await announceMembership(account, opts);
     } catch (e: any) {
       if (__DEV__) console.log('[membership] re-announce failed', account, e?.message);
       // stays pending; the next foreground sweep retries
@@ -155,7 +186,7 @@ export async function retryPendingAnnouncements(): Promise<void> {
  * triggers re-verifies on-chain membership, so forged announcements are
  * rejected at store time.
  */
-export async function discoverSharedWallets(): Promise<number> {
+export async function discoverSharedWallets(opts?: MembershipSweepOptions): Promise<number> {
   const me = pickSigner();
   if (!me) {
     if (__DEV__) console.log('[membership] discover: no signable personal account');
@@ -168,7 +199,11 @@ export async function discoverSharedWallets(): Promise<number> {
   }
 
   const blindId = membershipBlindId(myKey);
-  const token = await ensureWalletSession(me.account);
+  const token = await resolveSessionToken(me.account, opts);
+  if (!token) {
+    if (__DEV__) console.log('[membership] discover: no session, deferring (sign-in not allowed)');
+    return 0;
+  }
   const wallets = await listMemberships(token, blindId);
   if (__DEV__) {
     console.log('[membership] discover: blindId', blindId.slice(0, 10), '→ found', wallets.length, 'wallet(s):',

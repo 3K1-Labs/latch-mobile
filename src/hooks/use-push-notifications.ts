@@ -60,10 +60,16 @@ export function usePushNotifications(): void {
       lastSweepRef.current = now;
       // Re-fire any announce a transient failure (e.g. 429) dropped, then poll
       // for wallets this device was added to. Both are non-fatal.
-      retryPendingAnnouncements().catch((err) => {
+      // allowSignIn: false — this sweep runs on mount and on app-foreground, so
+      // it must never sign in. Sign-in reads the device passkey, and a
+      // biometric-gated key raises Face ID on read: an unexplained prompt the
+      // user didn't ask for, which also backgrounds the app and re-fires the
+      // `active` handler below. Both calls defer instead when there's no cached
+      // session; the throttle alone only bounded that, it didn't prevent it.
+      retryPendingAnnouncements({ allowSignIn: false }).catch((err) => {
         if (__DEV__) console.log('[membership] re-announce sweep failed:', err?.message);
       });
-      discoverSharedWallets().catch((err) => {
+      discoverSharedWallets({ allowSignIn: false }).catch((err) => {
         if (__DEV__) console.log('[membership] discovery failed:', err?.message);
       });
     };
