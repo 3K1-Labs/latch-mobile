@@ -25,10 +25,14 @@ interface Props {
    * Mints a funding intent with an on-ramp-length TTL, resolving undefined if it
    * can't. Awaited before handing the tag to a provider, since the intent the
    * sheet was opened with is sized for a direct wallet send.
+   *
+   * Takes the fiat amount the user confirmed so the intent records what the
+   * deposit is expected to be worth; the caller owns converting it to the
+   * asset units the relayer stores.
    */
-  prepareOnrampIntent?: () => Promise<
-    { intent_id: string; pool_address: string; memo_id: string } | undefined
-  >;
+  prepareOnrampIntent?: (
+    fiatAmount: string,
+  ) => Promise<{ intent_id: string; pool_address: string; memo_id: string } | undefined>;
 }
 
 const BuyXLMSheet = ({
@@ -55,7 +59,7 @@ const BuyXLMSheet = ({
       // swept to recovery rather than credited. Fall back to the intent we were
       // opened with if this fails — a short tag still works for a fast card
       // purchase, whereas no tag at all is swept unconditionally.
-      const fresh = await prepareOnrampIntent?.();
+      const fresh = await prepareOnrampIntent?.(amount);
       if (fresh) {
         address = fresh.pool_address;
         tag = fresh.memo_id;

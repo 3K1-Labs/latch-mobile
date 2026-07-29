@@ -126,6 +126,33 @@ function TokenRow({
   );
 }
 
+/**
+ * Convert the fiat amount the user entered into the XLM figure the relayer
+ * expects on an intent's `expected_amt`.
+ *
+ * The on-ramp screen collects USD (MoonPay's baseCurrencyAmount) but the
+ * relayer compares expected_amt against what actually lands in the pool, which
+ * is XLM — handing it a dollar figure would flag a mismatch on every single
+ * deposit, which is worse than sending nothing.
+ *
+ * Necessarily an estimate: it's the GROSS fiat figure, so the provider's card
+ * and network fees mean the XLM that actually arrives is meaningfully lower,
+ * and the price moves between checkout and settlement. That's tolerable because
+ * expected_amt is advisory — the relayer logs a mismatch but still credits the
+ * deposit — and an order-of-magnitude sanity check is the point.
+ *
+ * Returns undefined rather than a wrong number when either input is unusable,
+ * since the field is optional and an omitted estimate beats a bogus one.
+ */
+function estimateXlmForFiat(fiatAmount?: string, xlmUsdPrice?: string): string | undefined {
+  if (!fiatAmount || !xlmUsdPrice) return undefined;
+  const fiat = parseFloat(fiatAmount);
+  const price = parseFloat(xlmUsdPrice);
+  if (!Number.isFinite(fiat) || fiat <= 0) return undefined;
+  if (!Number.isFinite(price) || price <= 0) return undefined;
+  return (fiat / price).toFixed(7);
+}
+
 const Home = () => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
@@ -176,12 +203,19 @@ const Home = () => {
   //
   // Returns undefined on failure so the caller can fall back to the intent it
   // already holds instead of opening a provider with no tag at all.
-  const prepareOnrampIntent = async () => {
+  //
+  // fiatAmount is what the user typed on the amount screen (USD). expected_amt
+  // is denominated in the deposited asset, so it's converted here rather than
+  // passed straight through — see estimateXlmForFiat.
+  const prepareOnrampIntent = async (fiatAmount?: string) => {
     if (!smartAccountAddress || !isDepositRelayerAvailable()) return undefined;
     try {
       return await createDepositIntent.mutateAsync({
         smartAccountAddress,
         expiresIn: ONRAMP_INTENT_TTL_SECONDS,
+        expectedAmt: pricesArePlaceholder
+          ? undefined
+          : estimateXlmForFiat(fiatAmount, prices?.XLM?.price),
       });
     } catch {
       return undefined;
@@ -196,7 +230,11 @@ const Home = () => {
 
   const { tokens: trackedTokens } = useTrackedTokens();
 
-  const { data: prices, refetch: refetchPrices } = usePrices();
+  const {
+    data: prices,
+    refetch: refetchPrices,
+    isPlaceholderData: pricesArePlaceholder,
+  } = usePrices();
   const {
     data: portfolio,
     isLoading: portfolioLoading,
