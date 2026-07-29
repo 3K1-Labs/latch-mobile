@@ -21,7 +21,22 @@ import { resetMockSwapCache } from '@/src/services/swap/providers/mock';
 export async function switchActiveNetwork(details: NetworkDetails): Promise<void> {
   await setActiveNetworkDetails(details);
   await disconnectAllSessions();
-  queryClient.clear();
+
+  // resetQueries, NOT clear(). clear() removes each query via query.destroy(),
+  // which cancels in-flight fetches but never dispatches a state change — so
+  // every mounted observer keeps rendering the result it last saw, and the old
+  // network's balances stay on screen until some unrelated re-render happens to
+  // rebuild the query. reset() destroys AND setStates back to initial, which
+  // notifies observers, so the UI drops to its loading state at once.
+  //
+  // Deliberately not awaited: the reset + notify runs synchronously inside
+  // resetQueries' batch, and the returned promise only settles once every
+  // active query has refetched. Awaiting it would hold the switching spinner
+  // for the length of the slowest refetch instead of handing straight back to
+  // the screens, which have loading states of their own. It never rejects —
+  // refetchQueries catches per-query errors unless throwOnError is set.
+  void queryClient.resetQueries();
+
   resetSacAssetCodeCache();
   resetSacContractInfoCache();
   resetAquariusPoolCache();
