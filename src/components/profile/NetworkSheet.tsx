@@ -3,7 +3,6 @@ import { useTheme } from '@shopify/restyle';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Modal,
@@ -63,22 +62,8 @@ const NetworkSheet = ({ visible, onClose, onNetworkChanged }: Props) => {
 
   const handleSelect = (network: NetworkId) => {
     if (network === selectedNetwork || switching) return;
-
-    Alert.alert(
-      `Switch to ${network === 'testnet' ? 'Testnet' : 'Public Network'}?`,
-      'Any connected apps will be disconnected. Balances and transactions are network-specific, so what you see may not reflect this network until refreshed.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Switch',
-          style: 'destructive',
-          onPress: () => {
-            setSelectedNetwork(network);
-            void applyNetwork(network);
-          },
-        },
-      ],
-    );
+    setSelectedNetwork(network);
+    void applyNetwork(network);
   };
 
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
