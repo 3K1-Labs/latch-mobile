@@ -9,7 +9,17 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
-import { getPasskeyStorageKeys, SECURE_KEYS, type WalletAccount } from '../store/wallet';
+import {
+  ensureWalletSession,
+  getWalletSessionWithoutSignIn,
+  reSignInWallet,
+} from '../lib/wallet-auth';
+import {
+  getPasskeyStorageKeys,
+  SECURE_KEYS,
+  useWalletStore,
+  type WalletAccount,
+} from '../store/wallet';
 
 const API_ROOT = process.env.EXPO_PUBLIC_WALLET_BACKEND_URL ?? '';
 const API_BASE = `${API_ROOT}/v1`;
@@ -529,6 +539,38 @@ export interface DepositIntentOptions {
 export const ONRAMP_INTENT_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
+ * Bearer token for the deposit endpoints.
+ *
+ * Funding is the one latch-api feature reachable by a user who never entered an
+ * email — onboarding's collect-email step is skippable — so the email-scope
+ * ACCESS_TOKEN cannot be the only credential we look for, or those users hit
+ * "Not authenticated" and the request never leaves the device. Prefer the email
+ * token when it exists (unchanged for users who did back up), then fall back to
+ * the wallet-scope session every user has by definition.
+ *
+ * `allowSignIn` is false on timer-driven callers: minting a wallet session reads
+ * a biometric-gated passkey key, and a Face ID prompt raised by a 15s poll the
+ * user didn't trigger is worse than a skipped refresh.
+ */
+async function depositAccessToken(allowSignIn: boolean): Promise<string> {
+  const emailToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
+  if (emailToken) return emailToken;
+
+  const account = activeWalletAccount();
+  const walletToken =
+    account && allowSignIn
+      ? await ensureWalletSession(account)
+      : await getWalletSessionWithoutSignIn();
+  if (!walletToken) throw new Error('Not authenticated');
+  return walletToken;
+}
+
+function activeWalletAccount(): WalletAccount | undefined {
+  const { accounts, activeAccountIndex } = useWalletStore.getState();
+  return accounts[activeAccountIndex];
+}
+
+/**
  * Mints a fresh, TTL-bound funding intent for smartAccountAddress. Call this
  * when the user opens the Fund flow — not cached across sessions, since
  * latch-relayer intents are one-per-funding-session (default 1hr expiry),
@@ -543,17 +585,26 @@ export async function createDepositIntent(
   smartAccountAddress: string,
   options: DepositIntentOptions = {},
 ): Promise<DepositIntent> {
-  const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
-  if (!accessToken) throw new Error('Not authenticated');
+  const accessToken = await depositAccessToken(true);
   const body: Record<string, string | number> = { smart_account_address: smartAccountAddress };
   if (options.expectedAmt) body.expected_amt = options.expectedAmt;
   if (options.externalId) body.external_id = options.externalId;
   if (options.expiresIn) body.expires_in = options.expiresIn;
-  return latchFetch(
-    '/accounts/deposit-intent',
-    { method: 'POST', body: JSON.stringify(body) },
-    accessToken,
-  );
+  const request = { method: 'POST', body: JSON.stringify(body) };
+
+  try {
+    return await latchFetch('/accounts/deposit-intent', request, accessToken);
+  } catch (err) {
+    // latchFetch's built-in 401 retry refreshes the EMAIL session, so a rejected
+    // wallet-scope token still lands here. Re-sign-in once and retry — the same
+    // recovery use-portfolio applies to its own wallet-scope 401s. Safe to
+    // prompt: this call only ever runs off a user opening the Fund flow.
+    const account = activeWalletAccount();
+    if (err instanceof LatchAPIError && err.status === 401 && account) {
+      return latchFetch('/accounts/deposit-intent', request, await reSignInWallet(account));
+    }
+    throw err;
+  }
 }
 
 /**
@@ -575,7 +626,6 @@ export function isDepositIntentExpired(expiresAt: string | undefined): boolean {
  * Polls the status of a previously-created funding intent by memo_id.
  */
 export async function fetchDepositIntentStatus(memoId: string): Promise<DepositStatus> {
-  const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
-  if (!accessToken) throw new Error('Not authenticated');
+  const accessToken = await depositAccessToken(false);
   return latchFetch(`/accounts/deposit/status/${encodeURIComponent(memoId)}`, {}, accessToken);
 }
