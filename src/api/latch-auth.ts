@@ -504,7 +504,12 @@ export interface DepositStatus {
 }
 
 export interface DepositIntentOptions {
-  /** Fiat-equivalent or asset amount the deposit is expected to be, for reconciliation. */
+  /**
+   * Expected deposit size, in the deposited asset's own units (e.g. XLM) — not
+   * fiat. The relayer compares it against what actually arrives and logs a
+   * mismatch; a fiat figure here would differ from every real deposit. Advisory
+   * only: a mismatch never blocks crediting.
+   */
   expectedAmt?: string;
   /** On-ramp provider's order/transaction ID, so a deposit can be traced end to end. */
   externalId?: string;

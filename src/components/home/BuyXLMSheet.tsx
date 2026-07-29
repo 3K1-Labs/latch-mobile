@@ -26,7 +26,9 @@ interface Props {
    * can't. Awaited before handing the tag to a provider, since the intent the
    * sheet was opened with is sized for a direct wallet send.
    */
-  prepareOnrampIntent?: () => Promise<{ pool_address: string; memo_id: string } | undefined>;
+  prepareOnrampIntent?: () => Promise<
+    { intent_id: string; pool_address: string; memo_id: string } | undefined
+  >;
 }
 
 const BuyXLMSheet = ({
@@ -47,6 +49,7 @@ const BuyXLMSheet = ({
     setPreparing(true);
     let address = poolAddress;
     let tag = memo;
+    let intentId: string | undefined;
     try {
       // A bank transfer can outlive the default 1h intent, and an expired memo is
       // swept to recovery rather than credited. Fall back to the intent we were
@@ -56,6 +59,7 @@ const BuyXLMSheet = ({
       if (fresh) {
         address = fresh.pool_address;
         tag = fresh.memo_id;
+        intentId = fresh.intent_id;
       }
     } finally {
       setPreparing(false);
@@ -76,6 +80,11 @@ const BuyXLMSheet = ({
     // sends as MEMO_TEXT is swept to its recovery address. Confirm MoonPay
     // emits this tag as an ID memo for XLM before enabling on mainnet.
     if (tag) params.walletAddressTag = tag;
+    // Carries our intent ID into MoonPay's record of the order, which is the only
+    // half of reconciliation we can do at handoff: their transaction ID does not
+    // exist until checkout completes. The return leg — binding that ID back to the
+    // intent — is a webhook calling the relayer's PATCH /intents/{memo_id}.
+    if (intentId) params.externalTransactionId = intentId;
     // Present the browser from the amount screen and only dismiss that screen
     // once the browser closes. Dismissing it first races the presentation: the
     // browser ends up presented by a view controller that is already going away,
