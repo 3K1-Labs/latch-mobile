@@ -158,9 +158,26 @@ let AQUARIUS_AMM_API_URL =
 let AQUARIUS_ROUTER_ADDRESS =
   ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
 
+// ─── Deposit relayer (latch-relayer) ──────────────────────────────────────────
+// The relayer is a single deployment bound to ONE Stellar network by its own
+// NETWORK env var; it watches exactly one pool G-address on that network.
+// ACTIVE_NETWORK, by contrast, is user-switchable at runtime. Handing out a
+// pool address + memo while the app sits on the other network would tell the
+// user to send funds nowhere the relayer is watching, so every deposit-intent
+// caller must gate on isDepositRelayerAvailable() first.
+const DEPOSIT_RELAYER_NETWORK = (
+  process.env.EXPO_PUBLIC_RELAYER_NETWORK ?? 'testnet'
+).toLowerCase() as 'testnet' | 'mainnet';
+
+/** True when ACTIVE_NETWORK matches the network the deposit relayer is deployed against. */
+export function isDepositRelayerAvailable(): boolean {
+  return getNetworkId() === DEPOSIT_RELAYER_NETWORK;
+}
+
 export {
   AQUARIUS_AMM_API_URL,
   AQUARIUS_ROUTER_ADDRESS,
+  DEPOSIT_RELAYER_NETWORK,
   HORIZON_URL,
   PASSKEY_RP_ID,
   SOROSWAP_API_KEY,

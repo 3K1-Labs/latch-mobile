@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TouchableOpacity } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { DepositForward } from '@/src/api/latch-auth';
+import { isDepositIntentExpired, type DepositStatus } from '@/src/api/latch-auth';
 import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
@@ -34,31 +34,52 @@ function formatDate(iso: string): string {
   return `${mm}-${dd} ${hh}:${min}:${ss}`;
 }
 
-function deriveStatusProps(forwards: DepositForward[]) {
-  const latest = forwards[0];
-  if (!latest) return null;
+function deriveStatusProps(deposit: DepositStatus) {
+  const latest = deposit.forwards[0];
+
+  // No inbound payment seen yet. An intent that has run out its TTL without a
+  // deposit is terminal — the relayer will sweep anything that arrives against
+  // it to its recovery address rather than credit the smart account.
+  if (!latest) {
+    const dead = deposit.status === 'expired' || deposit.status === 'failed';
+    return {
+      amount: '—',
+      statusLabel: dead ? 'Expired' : 'Awaiting Deposit',
+      steps: [
+        { label: 'Deposit\nInitiated', status: dead ? 'error' : 'success' },
+        { label: 'Deposit\nDetected', status: 'inactive' },
+        { label: 'Forwarding to\nSmart Account', status: 'inactive' },
+        { label: 'Deposit\nCompleted', status: 'inactive' },
+      ] as FundingStep[],
+      txHash: '',
+    };
+  }
 
   const amount = parseFloat(latest.amount).toFixed(2);
   const unit = latest.asset === 'native' ? 'XLM' : latest.asset;
+  // The relayer records a sweep-to-recovery (missing/unknown/expired memo) as a
+  // failed forward, so a failed row means the funds did not reach the user.
+  const failed = latest.status === 'failed' || deposit.status === 'failed';
+  const done = latest.status === 'done';
   const steps: FundingStep[] = [
     { label: 'Deposit\nInitiated', status: 'success', time: formatDate(latest.created_at) },
     { label: 'Deposit\nDetected', status: 'success' },
     {
       label: 'Forwarding to\nSmart Account',
-      status: latest.status === 'done' ? 'success' : latest.status === 'failed' ? 'error' : 'inactive',
+      status: done ? 'success' : failed ? 'error' : 'inactive',
     },
     {
       label: 'Deposit\nCompleted',
-      status: latest.status === 'done' ? 'success' : 'inactive',
-      time: latest.status === 'done' ? formatDate(latest.created_at) : undefined,
+      status: done ? 'success' : 'inactive',
+      time: done ? formatDate(latest.created_at) : undefined,
     },
   ];
 
   return {
     amount: `+${amount} ${unit}`,
-    statusLabel: latest.status === 'done' ? 'Completed' : latest.status === 'failed' ? 'Failed' : 'Pending',
+    statusLabel: done ? 'Completed' : failed ? 'Failed' : 'Pending',
     steps,
-    txHash: latest.tx_hash,
+    txHash: latest.forward_tx ?? latest.tx_hash,
   };
 }
 
@@ -68,17 +89,41 @@ interface Props {
   cAddress: string;
   proxyAddress?: string;
   memo?: string;
+  /** RFC3339 TTL of the funding intent the memo belongs to. */
+  memoExpiresAt?: string;
 }
 
-const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Props) => {
+const FundWalletSheet = ({
+  visible,
+  onClose,
+  cAddress,
+  proxyAddress,
+  memo,
+  memoExpiresAt,
+}: Props) => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [infoVisible, setInfoVisible] = useState(false);
   const [statusVisible, setStatusVisible] = useState(false);
+  const [expired, setExpired] = useState(() => isDepositIntentExpired(memoExpiresAt));
+
+  // The intent can lapse while the sheet is open. Nothing else would re-render
+  // at that moment, so schedule the flip — leaving a dead memo on screen invites
+  // a deposit the relayer sweeps to recovery instead of crediting the user.
+  useEffect(() => {
+    setExpired(isDepositIntentExpired(memoExpiresAt));
+    if (!memoExpiresAt) return;
+    const msLeft = Date.parse(memoExpiresAt) - Date.now();
+    if (Number.isNaN(msLeft) || msLeft <= 0) return;
+    const timer = setTimeout(() => setExpired(true), msLeft);
+    return () => clearTimeout(timer);
+  }, [memoExpiresAt]);
+
+  const memoLive = !!memo && !expired;
 
   const { data: depositStatusData } = useDepositIntentStatus(memo ?? null, statusVisible);
-  const statusProps = depositStatusData?.forwards ? deriveStatusProps(depositStatusData.forwards) : null;
+  const statusProps = depositStatusData ? deriveStatusProps(depositStatusData) : null;
 
 
 
@@ -184,8 +229,10 @@ const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Pro
             </Text>
           </Box>
 
-          {/* Proxy G-Address (alternate funding path via relayer) */}
-          {!!proxyAddress && (
+          {/* Proxy G-Address (alternate funding path via relayer). Hidden once
+              the intent's memo has lapsed — the pool address is only safe to
+              deposit to while a live memo pairs with it. */}
+          {!!proxyAddress && memoLive && (
             <>
               <Box flexDirection="row" alignItems="center" mb="l">
                 <Box flex={1} height={1} backgroundColor="gray800" />
@@ -222,7 +269,7 @@ const FundWalletSheet = ({ visible, onClose, cAddress, proxyAddress, memo }: Pro
               {!!memo && (
                 <Box mb="l">
                   <Text variant="p7" color="textPrimary" fontWeight="700" mb="s">
-                    Memo (Required)
+                    Memo — type ID (Required)
                   </Text>
                   <Box
                     backgroundColor={isDark ? 'gray900' : 'btnDisabled'}

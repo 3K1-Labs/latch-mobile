@@ -2,6 +2,8 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
 import FundWalletSheet from '@/src/components/home/FundWalletSheet';
+import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
+import { isDepositRelayerAvailable } from '@/src/constants/config';
 import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import PendingApprovalBanner from '@/src/components/home/PendingApprovalBanner';
 import Box from '@/src/components/shared/Box';
@@ -138,6 +140,53 @@ const Home = () => {
   const [receiveVisible, setReceiveVisible] = useState(false);
 
   const createDepositIntent = useCreateDepositIntent();
+
+  // A minted intent is only usable while it belongs to the account on screen
+  // and its TTL hasn't elapsed. Once either fails, the memo must not be shown:
+  // the relayer sweeps deposits carrying an expired or unknown memo_id to its
+  // recovery address instead of crediting the user.
+  const depositIntent =
+    createDepositIntent.data &&
+    createDepositIntent.variables?.smartAccountAddress === smartAccountAddress &&
+    !isDepositIntentExpired(createDepositIntent.data.expires_at)
+      ? createDepositIntent.data
+      : undefined;
+
+  // Mint only when there isn't already a live intent. Re-minting on every Fund
+  // press would orphan a memo the user may have already copied into a sending
+  // wallet — the old intent stays valid until its TTL, but the status sheet
+  // would then be polling the wrong memo_id.
+  //
+  // Gated on the relayer's network: its pool address exists on one network
+  // only, so on a mismatch we mint nothing and the sheets fall back to the
+  // direct C-address path (their proxy/memo blocks are already `!!`-gated).
+  const ensureDepositIntent = () => {
+    if (!smartAccountAddress || !isDepositRelayerAvailable()) return;
+    if (depositIntent || createDepositIntent.isPending) return;
+    createDepositIntent.mutate({ smartAccountAddress });
+  };
+
+  // The Fund-sheet intent above is minted at the backend's default 1h TTL, which
+  // suits someone about to paste an address into a wallet they already hold funds
+  // in. An on-ramp is a different bet: card purchases usually settle inside the
+  // hour, but a bank transfer can take days, and an expired memo_id is swept to
+  // recovery just like an unknown one. So re-mint with a long TTL at the moment
+  // the user actually commits to a provider, rather than widening the window for
+  // every deposit.
+  //
+  // Returns undefined on failure so the caller can fall back to the intent it
+  // already holds instead of opening a provider with no tag at all.
+  const prepareOnrampIntent = async () => {
+    if (!smartAccountAddress || !isDepositRelayerAvailable()) return undefined;
+    try {
+      return await createDepositIntent.mutateAsync({
+        smartAccountAddress,
+        expiresIn: ONRAMP_INTENT_TTL_SECONDS,
+      });
+    } catch {
+      return undefined;
+    }
+  };
 
   const activeAccount = accounts[activeAccountIndex];
   const activeAccountName = activeAccount?.name ?? 'Account 1';
@@ -402,7 +451,7 @@ const Home = () => {
                 onPress={() => {
                   if (item.label === 'Fund') {
                     setFundVisible(true);
-                    if (smartAccountAddress) createDepositIntent.mutate(smartAccountAddress);
+                    ensureDepositIntent();
                   } else if (item.label === 'Swap') {
                     // Swap is a tab, not a stacked screen — navigate() switches
                     // to it (matching the tab bar) instead of pushing a second
@@ -592,15 +641,17 @@ const Home = () => {
           setFundVisible(false);
           setReceiveVisible(true);
         }}
-        poolAddress={createDepositIntent.data?.pool_address ?? ''}
-        memo={createDepositIntent.data?.memo_id}
+        poolAddress={depositIntent?.pool_address ?? ''}
+        memo={depositIntent?.memo_id}
+        prepareOnrampIntent={prepareOnrampIntent}
       />
       <FundWalletSheet
         visible={receiveVisible}
         onClose={() => setReceiveVisible(false)}
         cAddress={smartAccountAddress ?? ''}
-        proxyAddress={createDepositIntent.data?.pool_address}
-        memo={createDepositIntent.data?.memo_id}
+        proxyAddress={depositIntent?.pool_address}
+        memo={depositIntent?.memo_id}
+        memoExpiresAt={depositIntent?.expires_at}
       />
     </Box>
   );

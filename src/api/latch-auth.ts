@@ -503,20 +503,67 @@ export interface DepositStatus {
   forwards: DepositForward[];
 }
 
+export interface DepositIntentOptions {
+  /** Fiat-equivalent or asset amount the deposit is expected to be, for reconciliation. */
+  expectedAmt?: string;
+  /** On-ramp provider's order/transaction ID, so a deposit can be traced end to end. */
+  externalId?: string;
+  /** Seconds until the intent expires. The backend clamps; omit for its default (1h). */
+  expiresIn?: number;
+}
+
+/**
+ * TTL for an intent the user is about to fund through an on-ramp.
+ *
+ * The relayer's 1h default is sized for someone pasting an address into a wallet
+ * they already hold funds in. A card purchase usually settles inside that, but an
+ * ACH/SEPA bank transfer can take days — and an expired memo_id is swept to the
+ * recovery address exactly like an unknown one, so a slow settlement would lose
+ * the deposit outright.
+ */
+export const ONRAMP_INTENT_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 /**
  * Mints a fresh, TTL-bound funding intent for smartAccountAddress. Call this
  * when the user opens the Fund flow — not cached across sessions, since
  * latch-relayer intents are one-per-funding-session (default 1hr expiry),
  * not permanent per-account registrations.
+ *
+ * `expectedAmt`/`externalId`/`expiresIn` are optional pass-throughs to the
+ * relayer's POST /intents. The relayer stores them on the intent row; a backend
+ * that doesn't forward them yet simply ignores them — so always read the TTL you
+ * actually got back off `expires_at`, never assume the one you asked for.
  */
-export async function createDepositIntent(smartAccountAddress: string): Promise<DepositIntent> {
+export async function createDepositIntent(
+  smartAccountAddress: string,
+  options: DepositIntentOptions = {},
+): Promise<DepositIntent> {
   const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
   if (!accessToken) throw new Error('Not authenticated');
+  const body: Record<string, string | number> = { smart_account_address: smartAccountAddress };
+  if (options.expectedAmt) body.expected_amt = options.expectedAmt;
+  if (options.externalId) body.external_id = options.externalId;
+  if (options.expiresIn) body.expires_in = options.expiresIn;
   return latchFetch(
     '/accounts/deposit-intent',
-    { method: 'POST', body: JSON.stringify({ smart_account_address: smartAccountAddress }) },
+    { method: 'POST', body: JSON.stringify(body) },
     accessToken,
   );
+}
+
+/**
+ * The relayer parses inbound deposits with `memo.ParseID` — it only recognises
+ * MEMO_ID (numeric). A deposit sent with a TEXT memo, no memo, or an expired
+ * memo_id is swept to the relayer's recovery address and is NOT credited to the
+ * user. Surface this wherever the memo is shown or handed to a provider.
+ */
+export const DEPOSIT_MEMO_TYPE = 'id' as const;
+
+/** True once a minted intent's TTL has elapsed and it can no longer be deposited against. */
+export function isDepositIntentExpired(expiresAt: string | undefined): boolean {
+  if (!expiresAt) return true;
+  const ts = Date.parse(expiresAt);
+  return Number.isNaN(ts) || ts <= Date.now();
 }
 
 /**

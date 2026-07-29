@@ -40,6 +40,9 @@ const runtimeEnv = z
     EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: z.string().optional(),
     EXPO_PUBLIC_SENTRY_DSN: z.string().optional(),
     EXPO_PUBLIC_MOONPAY_API_KEY: z.string().optional(),
+    // Which Stellar network the deposit relayer (latch-relayer) is deployed
+    // against. Its pool address only exists on that one network.
+    EXPO_PUBLIC_RELAYER_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
     SENTRY_AUTH_TOKEN: z.string(),
   })
   .partial();
@@ -100,6 +103,7 @@ const envObject = {
   EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: process.env.EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID,
   EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
   EXPO_PUBLIC_MOONPAY_API_KEY: process.env.EXPO_PUBLIC_MOONPAY_API_KEY,
+  EXPO_PUBLIC_RELAYER_NETWORK: process.env.EXPO_PUBLIC_RELAYER_NETWORK,
   SENTRY_AUTH_TOKEN: process.env.SENTRY_AUTH_TOKEN,
 };
 
