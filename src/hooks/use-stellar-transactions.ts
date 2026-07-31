@@ -658,7 +658,11 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
 
   const mapEvent = (event: any): StellarPayment | null => {
     try {
-      const topics: string[] = event.topics ?? [];
+      // stellar-rpc names this `topic` (singular). `topicXdr`/`topics` are
+      // accepted too so a provider using either spelling still decodes —
+      // reading the wrong key silently drops every event (see the mapped-count
+      // warning below, which exists to make that failure loud).
+      const topics: string[] = event.topic ?? event.topicXdr ?? event.topics ?? [];
       if (topics.length < 3) return null;
 
       const fnNameScVal = xdr.ScVal.fromXDR(topics[0], 'base64');
@@ -670,8 +674,9 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
       const from = Address.fromScVal(fromScVal).toString();
       const to = Address.fromScVal(toScVal).toString();
 
-      if (!event.value) return null;
-      const amountRaw = scValToNative(xdr.ScVal.fromXDR(event.value, 'base64'));
+      const rawAmountXdr: string | undefined = event.value ?? event.valueXdr;
+      if (!rawAmountXdr) return null;
+      const amountRaw = scValToNative(xdr.ScVal.fromXDR(rawAmountXdr, 'base64'));
       const rawValue = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw ?? 0);
 
       const assetInfo = getSacContractInfo().get(event.contractId) ?? {
@@ -697,16 +702,26 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
     }
   };
 
+  const raw = [...incoming, ...outgoing];
+  const mapped = raw.map(mapEvent);
+
+  if (__DEV__ && raw.length > 0 && mapped.every((tx) => tx === null)) {
+    console.warn(
+      '[SAC events] fetched',
+      raw.length,
+      'events but mapped 0 — event shape may have changed. Keys:',
+      Object.keys(raw[0] ?? {}).join(','),
+    );
+  }
+
   const seen = new Set<string>();
-  return [...incoming, ...outgoing]
-    .map(mapEvent)
-    .filter((tx): tx is StellarPayment => {
-      if (!tx) return false;
-      const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  return mapped.filter((tx): tx is StellarPayment => {
+    if (!tx) return false;
+    const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ─── Transaction type classification ─────────────────────────────────────────
