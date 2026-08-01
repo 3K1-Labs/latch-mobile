@@ -54,9 +54,10 @@ function RaysBackgroundInner() {
 const RaysBackground = memo(RaysBackgroundInner);
 
 const banners = [
-  { id: 1, image: require('@/src/assets/icon/Container.png') },
-  { id: 2, image: require('@/src/assets/icon/Container.png') },
-  { id: 3, image: require('@/src/assets/icon/Container.png') },
+  { id: 1, image: require('@/src/assets/banners/smart-accounts.png') },
+  { id: 2, image: require('@/src/assets/banners/multisig.png') },
+  { id: 3, image: require('@/src/assets/banners/swap.png') },
+  { id: 4, image: require('@/src/assets/banners/session-keys.png') },
 ];
 
 function TokenRow({
@@ -579,9 +580,9 @@ const Home = () => {
             )}
           />
           <Box flexDirection="row" justifyContent="center" mt="m" gap="xs">
-            {[0, 1, 2].map((i) => (
+            {banners.map((banner, i) => (
               <Box
-                key={i}
+                key={banner.id}
                 width={bannerIndex === i ? 20 : 6}
                 height={6}
                 borderRadius={3}

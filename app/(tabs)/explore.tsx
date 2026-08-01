@@ -20,9 +20,10 @@ import { Dimensions, FlatList, Linking, ScrollView, TouchableOpacity } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const banners = [
-  { id: 1, image: require('@/src/assets/icon/Container.png') },
-  { id: 2, image: require('@/src/assets/icon/Container.png') },
-  { id: 3, image: require('@/src/assets/icon/Container.png') },
+  { id: 1, image: require('@/src/assets/banners/smart-accounts.png') },
+  { id: 2, image: require('@/src/assets/banners/multisig.png') },
+  { id: 3, image: require('@/src/assets/banners/swap.png') },
+  { id: 4, image: require('@/src/assets/banners/session-keys.png') },
 ];
 
 const RECOMMENDED_DAPPS = [
