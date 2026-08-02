@@ -111,6 +111,21 @@ const Swap = () => {
   // swappable universe so a quote can be fetched without holding the token.
   const tokens = useMemo(() => portfolio ?? [], [portfolio]);
 
+  // fromToken/toToken hold a *snapshot* of the token object, so any balance read
+  // off them is frozen at the moment of selection — and the initial selection
+  // happens before usePortfolio resolves, when every candidate still carries the
+  // `amount: '0'` placeholder from swappableTokens. Balances are therefore looked
+  // up live by SAC id instead of read from the selection.
+  const heldBySac = useMemo(
+    () => new Map(tokens.map((t) => [t.sacContractId, t])),
+    [tokens],
+  );
+  const balanceOf = useCallback(
+    (token: SwapToken | null) =>
+      token ? (heldBySac.get(token.sacContractId)?.amount ?? '0') : '0',
+    [heldBySac],
+  );
+
   // Full swappable universe for the "To" leg: well-known + tracked tokens (which
   // you may not hold yet), with held balances overlaid. usePortfolio drops
   // zero-balance tokens, so it alone can't populate the destination picker.
@@ -149,6 +164,10 @@ const Swap = () => {
 
   const [fromToken, setFromToken] = useState<SwapToken | null>(null);
   const [toToken, setToToken] = useState<SwapToken | null>(null);
+  // True while From holds a pre-portfolio placeholder that may still be replaced
+  // by a held token. Any deliberate act by the user clears it — a late re-seed
+  // must never overwrite a choice they made themselves.
+  const fromSeedProvisional = useRef(false);
   const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null);
   const [showRoutePicker, setShowRoutePicker] = useState(false);
   const [slippageBps, setSlippageBps] = useState(DEFAULT_SLIPPAGE_BPS);
@@ -173,8 +192,33 @@ const Swap = () => {
   // hide the whole details block (route/rate/slippage) behind `quote &&`.
   // Approve stays correctly blocked by `insufficient` below.
   useEffect(() => {
-    const fromCandidates = tokens.length > 0 ? tokens : swappableTokens;
-    if (!fromToken && fromCandidates.length > 0) setFromToken(fromCandidates[0]);
+    const holdingsLoaded = tokens.length > 0;
+    const fromCandidates = holdingsLoaded ? tokens : swappableTokens;
+
+    if (!fromToken && fromCandidates.length > 0) {
+      // A seed taken before the portfolio resolves is a placeholder rather than
+      // a choice — it comes from swappableTokens, where every entry reads
+      // `amount: '0'`.
+      fromSeedProvisional.current = !holdingsLoaded;
+      setFromToken(fromCandidates[0]);
+      return;
+    }
+
+    // Holdings landed after a provisional seed. Re-apply the intent above (From
+    // defaults to a token the account holds), which the cold-start ordering
+    // otherwise defeats: on first visit the effect always runs against an empty
+    // portfolio, so From would keep whichever token happened to sort first in
+    // the swappable universe.
+    if (fromSeedProvisional.current && holdingsLoaded) {
+      fromSeedProvisional.current = false;
+      const held = tokens[0];
+      setFromToken(held);
+      if (toToken?.sacContractId === held.sacContractId) {
+        setToToken(swappableTokens.find((t) => t.sacContractId !== held.sacContractId) ?? null);
+      }
+      return;
+    }
+
     if (!toToken && swappableTokens.length > 0) {
       const fromSac = fromToken?.sacContractId ?? fromCandidates[0]?.sacContractId;
       setToToken(swappableTokens.find((t) => t.sacContractId !== fromSac) ?? null);
@@ -191,6 +235,7 @@ const Swap = () => {
   }));
 
   const handleSwap = () => {
+    fromSeedProvisional.current = false;
     rotation.value = withTiming(rotation.value + 180, { duration: 300 });
     setFromToken(toToken);
     setToToken(fromToken);
@@ -259,7 +304,7 @@ const Swap = () => {
   const badPrice = quoteError instanceof ImplausibleQuoteError && !quotePending;
   const noRoute = !!quoteError && !quotePending && !badPrice;
 
-  const fromBalance = parseFloat(fromToken?.amount ?? '0');
+  const fromBalance = parseFloat(balanceOf(fromToken));
   const amountNum = parseFloat(formik.values.amount || '0');
   const insufficient = amountNum > fromBalance;
   const canApprove =
@@ -285,6 +330,7 @@ const Swap = () => {
   };
 
   const handleSelectToken = (token: SwapToken) => {
+    fromSeedProvisional.current = false;
     if (pickerSide === 'from') {
       if (token.sacContractId === toToken?.sacContractId) setToToken(fromToken);
       setFromToken(token);
@@ -374,8 +420,8 @@ const Swap = () => {
             onAmountChange={handleAmountChange}
             value={fromValue}
             walletName="My Wallet"
-            walletBalance={`${fromToken?.amount ?? '0'} ${fromToken?.code ?? ''}`}
-            walletValue={`${fromToken?.amount ?? '0'} ${fromToken?.code ?? ''}`}
+            walletBalance={`${balanceOf(fromToken)} ${fromToken?.code ?? ''}`}
+            walletValue={`${balanceOf(fromToken)} ${fromToken?.code ?? ''}`}
             showAddFunds={insufficient}
             showWalletDropdown
             onTokenSelect={() => setPickerSide('from')}
@@ -419,8 +465,8 @@ const Swap = () => {
             amount={toAmount}
             value={toValue}
             walletName="My Wallet"
-            walletBalance={`${toToken?.amount ?? '0'} ${toToken?.code ?? ''}`}
-            walletValue={`${toToken?.amount ?? '0'} ${toToken?.code ?? ''}`}
+            walletBalance={`${balanceOf(toToken)} ${toToken?.code ?? ''}`}
+            walletValue={`${balanceOf(toToken)} ${toToken?.code ?? ''}`}
             showAddFunds={false}
             showWalletDropdown
             onTokenSelect={() => setPickerSide('to')}
