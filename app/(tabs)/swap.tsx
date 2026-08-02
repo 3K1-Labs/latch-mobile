@@ -10,7 +10,7 @@ import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { ImplausibleQuoteError, useSwapQuote } from '@/src/hooks/use-swap-quote';
-import { useTokenIcon } from '@/src/hooks/use-token-list';
+import { useTokenIcon, useTokenList } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { getActiveSwapProvider, listSwapProviders } from '@/src/services/swap/registry';
@@ -28,11 +28,13 @@ import { useFormik } from 'formik';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
 } from 'react-native';
+import Toast from 'react-native-toast-message';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Yup from 'yup';
@@ -55,12 +57,45 @@ const Swap = () => {
   const { smartAccountAddress, accounts, activeAccountIndex } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
   const { tokens: trackedTokens } = useTrackedTokens();
-  const { data: prices } = usePrices();
-  const { data: portfolio } = usePortfolio(
+  const { data: prices, refetch: refetchPrices } = usePrices();
+  const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
     smartAccountAddress,
     activeAccount?.gAddress,
     trackedTokens,
   );
+  // Mounted for its refetch only — useTokenIcon already reads this same
+  // ['token-list'] query, so the extra observer shares the cached result.
+  const { refetch: refetchTokenList } = useTokenList();
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    // RefreshControl can fire again mid-flight (release, pull again); a second
+    // pass would reset `refreshing` when the FIRST one finishes and leave the
+    // spinner detached from the requests still running.
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // The swap quote is deliberately not refetched here. Re-pricing the leg
+      // the user is reading, under their finger, is a different action from
+      // refreshing what they hold — useFocusEffect already handles staleness on
+      // re-entry.
+      const results = await Promise.all([
+        refetchPrices(),
+        refetchPortfolio(),
+        refetchTokenList(),
+      ]);
+      // refetch() resolves with the failure rather than rejecting, so a failed
+      // pull is silent unless the results are inspected. React Query keeps the
+      // last successful data on the query, so the screen still shows it.
+      if (results.some((r) => r.isError)) {
+        Toast.show({ type: 'error', text1: "Couldn't refresh balances" });
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       queryClient.invalidateQueries({ queryKey: ['prices'] });
@@ -296,7 +331,17 @@ const Swap = () => {
         {...tabBarScroll}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        bounces={false}
+        // `bounces={false}` was removed rather than tightened: iOS drives
+        // RefreshControl off the overscroll bounce, and any narrowing of it
+        // (alwaysBounceVertical) makes the pull unreachable whenever the form is
+        // shorter than the viewport.
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={theme.colors.primary700}
+          />
+        }
         style={{ flex: 1 }}
       >
         <Box paddingHorizontal="m" paddingTop="m">
