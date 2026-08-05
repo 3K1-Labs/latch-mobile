@@ -3,7 +3,7 @@ import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
 import FundWalletSheet from '@/src/components/home/FundWalletSheet';
 import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
-import { isDepositRelayerAvailable } from '@/src/constants/config';
+import { getNetworkId } from '@/src/constants/config';
 import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import PendingApprovalBanner from '@/src/components/home/PendingApprovalBanner';
 import Box from '@/src/components/shared/Box';
@@ -169,11 +169,19 @@ const Home = () => {
 
   const createDepositIntent = useCreateDepositIntent();
 
-  // A minted intent is only usable while it belongs to the account on screen
-  // and its TTL hasn't elapsed. Once either fails, the memo must not be shown:
-  // the relayer sweeps deposits carrying an expired or unknown memo_id to its
-  // recovery address instead of crediting the user.
+  // A minted intent is only usable on the network it was minted against, and
+  // only while it belongs to the account on screen and its TTL hasn't elapsed.
+  // Once any of those fails the memo must not be shown: the relayer sweeps
+  // deposits carrying an expired or unknown memo_id to its recovery address
+  // instead of crediting the user.
+  //
+  // A mutation result outlives a network switch — useMutation's observer holds
+  // the mutation directly, so neither queryClient.clear() nor resetQueries()
+  // drops it — so without the mintedOn check an intent stays "live" after
+  // switching away, and the sheets would hand a provider a pool address nobody
+  // is watching on the network the user is now on.
   const depositIntent =
+    createDepositIntent.data?.mintedOn === getNetworkId() &&
     createDepositIntent.data &&
     createDepositIntent.variables?.smartAccountAddress === smartAccountAddress &&
     !isDepositIntentExpired(createDepositIntent.data.expires_at)
@@ -185,13 +193,40 @@ const Home = () => {
   // wallet — the old intent stays valid until its TTL, but the status sheet
   // would then be polling the wrong memo_id.
   //
-  // Gated on the relayer's network: its pool address exists on one network
-  // only, so on a mismatch we mint nothing and the sheets fall back to the
-  // direct C-address path (their proxy/memo blocks are already `!!`-gated).
+  // Whether the active network has a relayer is the backend's call, not a
+  // build-time constant here: it answers 400 "funding is only available on
+  // testnet" when RELAYER_URL_MAINNET is unset, and starts minting the moment
+  // it is — with no new app build. A rejected mint leaves depositIntent
+  // undefined, so the sheets fall back to the direct C-address path exactly as
+  // they did when this was gated client-side.
+  //
+  // Names whichever guard stopped a mint, or null when one should go ahead.
+  // Every early exit below is invisible from the outside — the sheet just opens
+  // with no memo, and one of them (reusing a still-live intent) is correct
+  // behaviour that looks identical to a bug in a network inspector. Without this,
+  // "the deposit endpoint wasn't called" can't be told apart from an unhydrated
+  // store or an in-flight mint.
+  // Carries the address rather than just a boolean so the null check narrows for
+  // the caller — mutate() takes a plain string.
+  const depositMintPlan = (): { address: string } | { skip: string } => {
+    if (!smartAccountAddress) return { skip: 'no smart account address yet' };
+    if (depositIntent) {
+      return {
+        skip: `reusing live intent memo=${depositIntent.memo_id} expires=${depositIntent.expires_at}`,
+      };
+    }
+    if (createDepositIntent.isPending) return { skip: 'a mint is already in flight' };
+    return { address: smartAccountAddress };
+  };
+
   const ensureDepositIntent = () => {
-    if (!smartAccountAddress || !isDepositRelayerAvailable()) return;
-    if (depositIntent || createDepositIntent.isPending) return;
-    createDepositIntent.mutate({ smartAccountAddress });
+    const plan = depositMintPlan();
+    if ('skip' in plan) {
+      if (__DEV__) console.log('[deposit] no mint —', plan.skip);
+      return;
+    }
+    if (__DEV__) console.log('[deposit] minting intent for', plan.address);
+    createDepositIntent.mutate({ smartAccountAddress: plan.address });
   };
 
   // The Fund-sheet intent above is minted at the backend's default 1h TTL, which
@@ -209,16 +244,27 @@ const Home = () => {
   // is denominated in the deposited asset, so it's converted here rather than
   // passed straight through — see estimateXlmForFiat.
   const prepareOnrampIntent = async (fiatAmount?: string) => {
-    if (!smartAccountAddress || !isDepositRelayerAvailable()) return undefined;
+    if (!smartAccountAddress) {
+      if (__DEV__) console.log('[deposit] no on-ramp mint — no smart account address yet');
+      return undefined;
+    }
+    const expectedAmt = pricesArePlaceholder
+      ? undefined
+      : estimateXlmForFiat(fiatAmount, prices?.XLM?.price);
+    if (__DEV__) {
+      console.log('[deposit] minting on-ramp intent', { fiatAmount, expectedAmt });
+    }
     try {
       return await createDepositIntent.mutateAsync({
         smartAccountAddress,
         expiresIn: ONRAMP_INTENT_TTL_SECONDS,
-        expectedAmt: pricesArePlaceholder
-          ? undefined
-          : estimateXlmForFiat(fiatAmount, prices?.XLM?.price),
+        expectedAmt,
       });
-    } catch {
+    } catch (err) {
+      // Swallowed so the caller can fall back to the intent it already holds,
+      // but the reason has to surface somewhere — a failed mint here is why a
+      // provider would open with no tag at all.
+      if (__DEV__) console.log('[deposit] on-ramp mint failed —', err);
       return undefined;
     }
   };
