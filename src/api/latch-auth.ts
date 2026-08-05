@@ -9,6 +9,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
+import { getNetworkId } from '../constants/config';
 import {
   ensureWalletSession,
   getWalletSessionWithoutSignIn,
@@ -586,7 +587,12 @@ export async function createDepositIntent(
   options: DepositIntentOptions = {},
 ): Promise<DepositIntent> {
   const accessToken = await depositAccessToken(true);
-  const body: Record<string, string | number> = { smart_account_address: smartAccountAddress };
+  // Which relayer mints the intent. Omitting it defaults the backend to
+  // testnet, which on mainnet would hand back a pool address nothing watches.
+  const body: Record<string, string | number> = {
+    smart_account_address: smartAccountAddress,
+    network: getNetworkId(),
+  };
   if (options.expectedAmt) body.expected_amt = options.expectedAmt;
   if (options.externalId) body.external_id = options.externalId;
   if (options.expiresIn) body.expires_in = options.expiresIn;
@@ -627,5 +633,11 @@ export function isDepositIntentExpired(expiresAt: string | undefined): boolean {
  */
 export async function fetchDepositIntentStatus(memoId: string): Promise<DepositStatus> {
   const accessToken = await depositAccessToken(false);
-  return latchFetch(`/accounts/deposit/status/${encodeURIComponent(memoId)}`, {}, accessToken);
+  // Memo IDs are allocated per relayer deployment, so the same memo_id can
+  // exist on both networks — the lookup has to say which one it means.
+  return latchFetch(
+    `/accounts/deposit/status/${encodeURIComponent(memoId)}?network=${getNetworkId()}`,
+    {},
+    accessToken,
+  );
 }

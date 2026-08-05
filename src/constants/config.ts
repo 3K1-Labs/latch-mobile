@@ -159,25 +159,34 @@ let AQUARIUS_ROUTER_ADDRESS =
   ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
 
 // ─── Deposit relayer (latch-relayer) ──────────────────────────────────────────
-// The relayer is a single deployment bound to ONE Stellar network by its own
-// NETWORK env var; it watches exactly one pool G-address on that network.
-// ACTIVE_NETWORK, by contrast, is user-switchable at runtime. Handing out a
-// pool address + memo while the app sits on the other network would tell the
-// user to send funds nowhere the relayer is watching, so every deposit-intent
-// caller must gate on isDepositRelayerAvailable() first.
-const DEPOSIT_RELAYER_NETWORK = (
-  process.env.EXPO_PUBLIC_RELAYER_NETWORK ?? 'testnet'
-).toLowerCase() as 'testnet' | 'mainnet';
+// A relayer deployment is bound to ONE Stellar network by its own NETWORK env
+// var and watches exactly one pool G-address on it, so serving both networks
+// takes two deployments. ACTIVE_NETWORK, by contrast, is user-switchable at
+// runtime. Handing out a pool address + memo while the app sits on a network no
+// relayer is watching would tell the user to send funds nowhere, so every
+// deposit-intent caller must gate on isDepositRelayerAvailable() first.
+//
+// EXPO_PUBLIC_RELAYER_NETWORKS lists the networks that have a relayer, e.g.
+// "testnet,mainnet". The older singular EXPO_PUBLIC_RELAYER_NETWORK still works
+// and means the same thing with one entry.
+const DEPOSIT_RELAYER_NETWORKS = (
+  process.env.EXPO_PUBLIC_RELAYER_NETWORKS ??
+  process.env.EXPO_PUBLIC_RELAYER_NETWORK ??
+  'testnet'
+)
+  .split(',')
+  .map((n) => n.trim().toLowerCase())
+  .filter(Boolean) as ('testnet' | 'mainnet')[];
 
-/** True when ACTIVE_NETWORK matches the network the deposit relayer is deployed against. */
+/** True when a deposit relayer is deployed for the network the app is on. */
 export function isDepositRelayerAvailable(): boolean {
-  return getNetworkId() === DEPOSIT_RELAYER_NETWORK;
+  return DEPOSIT_RELAYER_NETWORKS.includes(getNetworkId());
 }
 
 export {
   AQUARIUS_AMM_API_URL,
   AQUARIUS_ROUTER_ADDRESS,
-  DEPOSIT_RELAYER_NETWORK,
+  DEPOSIT_RELAYER_NETWORKS,
   HORIZON_URL,
   PASSKEY_RP_ID,
   SOROSWAP_API_KEY,
