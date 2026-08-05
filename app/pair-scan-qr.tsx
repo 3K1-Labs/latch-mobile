@@ -15,7 +15,7 @@ import {
   signChallengePasskey,
 } from '@/src/lib/pairing-payload';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
-import { useWalletStore, SECURE_KEYS } from '@/src/store/wallet';
+import { SECURE_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +35,7 @@ type Stage =
   | { kind: 'showReply'; payload: string }
   | { kind: 'error'; message: string };
 
-const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'latch.finance';
+const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://latch.finance';
 
 export default function PairScanQR() {
   const theme = useTheme<Theme>();
@@ -83,12 +83,25 @@ export default function PairScanQR() {
   }
   if (!permission.granted && stage.kind === 'scan') {
     return (
-      <Box flex={1} backgroundColor="mainBackground" justifyContent="center" alignItems="center" paddingHorizontal="l">
+      <Box
+        flex={1}
+        backgroundColor="mainBackground"
+        justifyContent="center"
+        alignItems="center"
+        paddingHorizontal="l"
+      >
         <Text variant="p7" color="textPrimary" textAlign="center" mb="l">
           Camera access is required to scan a pairing QR.
         </Text>
-        <TouchableOpacity onPress={() => requestPermission()} style={[styles.cta, { backgroundColor: theme.colors.textPrimary }]}>
-          <Text variant="p6" fontFamily="SFproSemibold" style={{ color: theme.colors.mainBackground }}>
+        <TouchableOpacity
+          onPress={() => requestPermission()}
+          style={[styles.cta, { backgroundColor: theme.colors.textPrimary }]}
+        >
+          <Text
+            variant="p6"
+            fontFamily="SFproSemibold"
+            style={{ color: theme.colors.mainBackground }}
+          >
             Allow camera
           </Text>
         </TouchableOpacity>
@@ -103,7 +116,14 @@ export default function PairScanQR() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
         </TouchableOpacity>
-        <Text variant="h10" color="textPrimary" fontFamily="SFproSemibold" flex={1} textAlign="center" mr="xl">
+        <Text
+          variant="h10"
+          color="textPrimary"
+          fontFamily="SFproSemibold"
+          flex={1}
+          textAlign="center"
+          mr="xl"
+        >
           Scan pairing QR
         </Text>
       </Box>
@@ -131,12 +151,21 @@ export default function PairScanQR() {
       {stage.kind === 'showReply' && (
         <Box flex={1} justifyContent="center" alignItems="center" paddingHorizontal="l">
           <Box backgroundColor="mainBackground" padding="m" borderRadius={16} mb="l">
-            <QRCode value={stage.payload} size={240} color={theme.colors.textPrimary} backgroundColor={theme.colors.mainBackground} />
+            <QRCode
+              value={stage.payload}
+              size={240}
+              color={theme.colors.textPrimary}
+              backgroundColor={theme.colors.mainBackground}
+            />
           </Box>
           <Text variant="p7" color="textSecondary" textAlign="center" lineHeight={22}>
-            Show this QR to the other device to finish pairing. You can close this screen once it confirms.
+            Show this QR to the other device to finish pairing. You can close this screen once it
+            confirms.
           </Text>
-          <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={[styles.cta, { marginTop: 24 }]}>
+          <TouchableOpacity
+            onPress={() => router.replace('/(tabs)')}
+            style={[styles.cta, { marginTop: 24 }]}
+          >
             <Text variant="p6" color="textPrimary" fontFamily="SFproSemibold">
               Done
             </Text>
@@ -150,7 +179,10 @@ export default function PairScanQR() {
           <Text variant="p7" color="textPrimary" mt="m" textAlign="center">
             {stage.message}
           </Text>
-          <TouchableOpacity onPress={() => setStage({ kind: 'scan' })} style={[styles.cta, { marginTop: 24 }]}>
+          <TouchableOpacity
+            onPress={() => setStage({ kind: 'scan' })}
+            style={[styles.cta, { marginTop: 24 }]}
+          >
             <Text variant="p6" color="textPrimary">
               Try again
             </Text>

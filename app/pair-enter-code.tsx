@@ -40,7 +40,7 @@ type Stage =
   | { kind: 'success' }
   | { kind: 'error'; message: string };
 
-const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'latch.finance';
+const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://latch.finance';
 
 export default function PairEnterCode() {
   const theme = useTheme<Theme>();
