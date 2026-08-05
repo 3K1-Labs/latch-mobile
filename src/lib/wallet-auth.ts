@@ -18,7 +18,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
-import { PASSKEY_RP_ID } from '../constants/config';
+import { getNetworkId, PASSKEY_RP_ID } from '../constants/config';
 import { signWithPasskey } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
 import { getPasskeyStorageKeys, SECURE_KEYS, type WalletAccount } from '../store/wallet';
@@ -112,7 +112,14 @@ export async function signInWithWallet(account: WalletAccount): Promise<TokenPai
   if (__DEV__) console.log('[wallet-auth] signInWithWallet: wallet=', wallet, 'keyType=', keyType, 'index=', account.index);
   if (!wallet) throw new Error('wallet address not available — smart account may not be deployed yet');
 
-  const ch = await xhrPost('/auth/challenge', { wallet, key_type: keyType });
+  // The backend resolves a passkey wallet's on-chain signers over the RPC for
+  // the network it's told, and defaults to testnet when told nothing — so a
+  // mainnet account signing in without this finds no signer and is rejected as
+  // "signature verification failed". The nonce is bound to the network at issue
+  // and re-checked on consume, so both calls must carry the same value.
+  const network = getNetworkId();
+
+  const ch = await xhrPost('/auth/challenge', { wallet, key_type: keyType, network });
   if (__DEV__) console.log('[wallet-auth] challenge status=', ch.status, 'body=', JSON.stringify(ch.body));
   if (ch.status !== 200 || !ch.body?.data?.nonce) {
     throw new Error(ch.body?.error?.message ?? `challenge failed (${ch.status})`);
@@ -131,7 +138,7 @@ export async function signInWithWallet(account: WalletAccount): Promise<TokenPai
     throw e;
   }
 
-  const si = await xhrPost('/auth/sign-in', payload);
+  const si = await xhrPost('/auth/sign-in', { ...payload, network });
   if (__DEV__) console.log('[wallet-auth] sign-in status=', si.status, 'body=', JSON.stringify(si.body));
   if (si.status !== 200 || !si.body?.data?.access_token) {
     throw new Error(si.body?.error?.message ?? `sign-in failed (${si.status})`);
