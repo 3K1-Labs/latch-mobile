@@ -6,13 +6,29 @@ import { Alert } from 'react-native';
 import { getRelayAppId, pairWithUri, walletKit } from '@/src/lib/walletconnect';
 import { useWalletConnectStore } from '@/src/store/walletconnect';
 
-const PAIRING_TIMEOUT_MS = 15_000;
+// 15s was too tight on mainnet/cellular: a cold relay socket plus the subscribe
+// round trip plus the dApp's proposal regularly ran past it and reported a
+// working pairing as a failure. Pairing URIs are valid for five minutes, so a
+// longer wait costs nothing but a slower "it really didn't work".
+const PAIRING_TIMEOUT_MS = 30_000;
 
 // Shared by the QR scan screen and the WalletConnect deep-link listener so both
 // entry points into pairing show the same validation/timeout/error behavior.
 export function useWalletConnectPairing() {
   const [isPairing, setIsPairing] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Deliberately a ref and not `isPairing`: expo-camera calls onBarcodeScanned
+  // once per frame for as long as the QR is in view, so a dozen pair() calls
+  // land before React has re-rendered with the new state. Every one of them
+  // used to reach walletKit.pair() — which re-subscribes the pairing topic on
+  // the relay each time and overwrote timeoutRef, leaking one un-cancellable
+  // "Connection failed" alert per frame.
+  const inFlightRef = useRef(false);
+  // A wc: URI is single-use. Remembered across resetPairing() (which fires on
+  // every screen blur) so returning to the scanner with the same code still in
+  // frame doesn't pair it again — that path only ever produced a "Pairing
+  // already exists" alert.
+  const handledUriRef = useRef<string | null>(null);
   const pendingProposal = useWalletConnectStore((s) => s.pendingProposal);
 
   const clearPairingTimeout = useCallback(() => {
@@ -24,6 +40,7 @@ export function useWalletConnectPairing() {
 
   const resetPairing = useCallback(() => {
     clearPairingTimeout();
+    inFlightRef.current = false;
     setIsPairing(false);
   }, [clearPairingTimeout]);
 
@@ -33,14 +50,13 @@ export function useWalletConnectPairing() {
   // relay" alert; on the deep-link path (whose hook lives in the root layout and
   // never blurs) nothing else would ever clear it.
   useEffect(() => {
-    if (pendingProposal) {
-      clearPairingTimeout();
-      setIsPairing(false);
-    }
-  }, [pendingProposal, clearPairingTimeout]);
+    if (pendingProposal) resetPairing();
+  }, [pendingProposal, resetPairing]);
 
   const pair = useCallback(
     async (uri: string) => {
+      if (inFlightRef.current || uri === handledUriRef.current) return;
+
       if (!uri.startsWith('wc:')) {
         Alert.alert('Invalid URL', 'Please paste a valid WalletConnect URI starting with wc:');
         return;
@@ -58,8 +74,17 @@ export function useWalletConnectPairing() {
         return;
       }
 
+      // Re-checked because the await above yields to the event loop, and the
+      // camera has queued more frames of the same QR by the time it resumes.
+      if (inFlightRef.current) return;
+
+      inFlightRef.current = true;
+      handledUriRef.current = uri;
       setIsPairing(true);
+      clearPairingTimeout();
       timeoutRef.current = setTimeout(() => {
+        timeoutRef.current = null;
+        inFlightRef.current = false;
         setIsPairing(false);
         // Distinguishes "socket never came up" from "socket is fine, the dApp's
         // proposal just never arrived" — the two have very different causes.
@@ -94,6 +119,7 @@ export function useWalletConnectPairing() {
         // the effect above clears the timeout when it does.
       } catch (e: any) {
         clearPairingTimeout();
+        inFlightRef.current = false;
         setIsPairing(false);
         Alert.alert('WalletConnect', e?.message ?? 'Failed to pair');
       }

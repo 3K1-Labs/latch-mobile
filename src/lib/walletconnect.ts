@@ -115,7 +115,12 @@ export function initWalletKit(): Promise<void> {
 
       // One-time cleanup for duplicate sessions created before approveProposal
       // started disconnecting the old one on reconnect (see approveProposal).
-      await dedupeSessions();
+      // Best-effort: walletKit is already assigned and usable at this point, so
+      // letting a failed disconnect reject the init promise would clear
+      // initPromise while leaving walletKit set — and the next initWalletKit()
+      // would short-circuit on the walletKit check and register a second copy of
+      // every relayer and session listener.
+      await dedupeSessions().catch(() => {});
     })().catch((err) => {
       initPromise = null;
       throw err;
@@ -145,9 +150,40 @@ async function dedupeSessions(): Promise<void> {
   await Promise.all(staleTopics.map((topic) => disconnectSession(topic).catch(() => {})));
 }
 
+// `relayer.connected` reads the raw WebSocket readyState, which stays 1 on a
+// socket the network silently black-holed — the OS suspending the app, or a
+// wifi→cellular switch, leaves one behind routinely. Pairing over a zombie
+// socket subscribes "successfully" and then never receives the dApp's proposal,
+// which is exactly the "connected to the relay but the request never arrived"
+// failure. Only a transport restart can tell the two apart, so callers do it on
+// every foreground transition (use-walletconnect.ts) rather than guessing.
+let relayRestart: Promise<void> | null = null;
+
+export function restoreRelayConnection(): Promise<void> {
+  if (!walletKit) return Promise.resolve();
+  if (relayRestart) return relayRestart;
+  relayRestart = walletKit.core.relayer
+    .restartTransport()
+    .catch((err: unknown) => {
+      console.warn('[WalletConnect] transport restart failed', err);
+      reportRelay('transport restart failed', 'warning', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
+    .finally(() => {
+      relayRestart = null;
+    });
+  return relayRestart;
+}
+
 export async function pairWithUri(uri: string): Promise<void> {
   if (!walletKit) await initWalletKit();
   if (!walletKit) throw new Error('WalletKit not initialised');
+  // Pairing almost always happens seconds after the user switched back from the
+  // dApp or their browser, so the foreground restart is typically still in
+  // flight here. Pairing on the socket it is replacing is the failure this whole
+  // path exists to prevent, so wait it out (a no-op when nothing is pending).
+  await relayRestart;
   console.log('[WalletConnect] pairing, relayer.connected =', walletKit.core.relayer.connected);
   return walletKit.pair({ uri });
 }

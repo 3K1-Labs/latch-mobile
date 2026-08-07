@@ -79,7 +79,9 @@ const QRScanScreen = () => {
       <StatusBar style="light" />
 
       {/* Scanner View */}
-      <ScannerFrame onBarcodeScanned={handleBarcodeScanned} scanned={!!scannedAddress} />
+      {/* `scanned` detaches CameraView's callback — without isPairing here the
+          camera keeps re-delivering the same wc: QR every frame while pairing. */}
+      <ScannerFrame onBarcodeScanned={handleBarcodeScanned} scanned={!!scannedAddress || isPairing} />
 
       {/* Header Overlay */}
       <Box position="absolute" top={insets.top} left={0} right={0}>
