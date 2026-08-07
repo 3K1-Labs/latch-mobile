@@ -5,6 +5,7 @@ import {
   STELLAR_RPC_URL,
   getNetworkId,
 } from '@/src/constants/config';
+import { clearSacTransferCache } from '@/src/lib/sac-transfer-cache';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -833,6 +834,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
       AsyncStorage.removeItem(ASYNC_KEYS.AVATARS),
       AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING),
+      clearSacTransferCache(),
       ...indexedPasskeyDeletions,
     ]);
     set({

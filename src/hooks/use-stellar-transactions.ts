@@ -250,6 +250,7 @@ import {
   STELLAR_RPC_URL,
 } from '../constants/config';
 import { getWellKnownTokens } from '../constants/known-tokens';
+import { rememberSacTransfers, sacPaymentKey } from '../lib/sac-transfer-cache';
 import { useWalletStore } from '../store/wallet';
 
 // Computed per call (not module load) so it follows switchActiveNetwork() —
@@ -749,7 +750,7 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
   const seen = new Set<string>();
   return mapped.filter((tx): tx is StellarPayment => {
     if (!tx) return false;
-    const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
+    const key = sacPaymentKey(tx);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -840,6 +841,12 @@ export async function fetchStellarPayments(
   const bundlerTxs = bundlerResult.status === 'fulfilled' ? bundlerResult.value : [];
   const sacTxs = sacResult.status === 'fulfilled' ? sacResult.value : [];
 
+  // Reached only when every source succeeded (the throw above), so this scan is
+  // real evidence and not an empty list standing in for a failure. Returns every
+  // transfer ever observed for this account, which is what keeps incoming
+  // transfers alive past the ~8h reach of the scan window.
+  const durableSacTxs = await rememberSacTransfers(cAddress, sacTxs);
+
   if (__DEV__) {
     console.log(
       '[merge] G-addr:',
@@ -848,14 +855,17 @@ export async function fetchStellarPayments(
       bundlerTxs.length,
       '| SAC events:',
       sacTxs.length,
+      '| durable SAC:',
+      durableSacTxs.length,
     );
   }
 
   const seen = new Set<string>();
 
-  // G-addr / bundler first (full Horizon history), SAC events fill incoming from non-Latch wallets
-  const merged = [...gAddrTxs, ...bundlerTxs, ...sacTxs].filter((tx) => {
-    const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
+  // G-addr / bundler first (full Horizon history), then SAC transfers — incoming
+  // from non-Latch wallets, live scan plus everything previously observed.
+  const merged = [...gAddrTxs, ...bundlerTxs, ...durableSacTxs].filter((tx) => {
+    const key = sacPaymentKey(tx);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
