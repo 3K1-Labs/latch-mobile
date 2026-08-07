@@ -13,11 +13,11 @@ import { WalletKit, type IWalletKit, type WalletKitTypes } from '@reown/walletki
 import * as Sentry from '@sentry/react-native';
 import { Core } from '@walletconnect/core';
 import { buildApprovedNamespaces, getSdkError } from '@walletconnect/utils';
-import { FeeBumpTransaction, Transaction, TransactionBuilder } from '@stellar/stellar-sdk';
 
 import { txToBase64 } from '@/src/api/smart-account';
-import { ACTIVE_NETWORK, HORIZON_URL, STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
+import { ACTIVE_NETWORK, HORIZON_URL } from '@/src/constants/config';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
+import { reviewSessionRequest } from '@/src/lib/wc-request-review';
 
 // A function, not a frozen const — a live network switch (network-switch.ts)
 // must be reflected on the next call, not just after a fresh app launch.
@@ -202,28 +202,38 @@ export async function approveSignRequest(
     chainId,
   } = params;
 
-  if (chainId !== getWcChain()) {
-    await walletKit.respondSessionRequest({
-      topic,
-      response: { id, jsonrpc: '2.0', error: getSdkError('UNSUPPORTED_CHAINS') },
-    });
-    return;
-  }
-
-  const { xdr } = reqParams as { xdr: string };
   const { keypair } = deriveWalletAtIndex(mnemonic, accountIndex);
 
-  let tx: Transaction | FeeBumpTransaction;
-  try {
-    tx = TransactionBuilder.fromXDR(xdr, STELLAR_NETWORK_PASSPHRASE);
-  } catch {
+  // Re-validated here and not only where the sheet is built: this is the last
+  // point before a signature exists, and it must not be reachable by any path
+  // that skipped the review screen.
+  const result = reviewSessionRequest({
+    method,
+    chainId,
+    activeChain: getWcChain(),
+    requestParams: reqParams,
+    accountAddress: keypair.publicKey(),
+  });
+
+  if (!result.ok) {
+    const { code } = result.rejection;
     await walletKit.respondSessionRequest({
       topic,
-      response: { id, jsonrpc: '2.0', error: getSdkError('INVALID_METHOD') },
+      response: {
+        id,
+        jsonrpc: '2.0',
+        error:
+          code === 'UNSUPPORTED_CHAINS'
+            ? getSdkError('UNSUPPORTED_CHAINS')
+            : code === 'UNSUPPORTED_METHOD'
+              ? getSdkError('UNSUPPORTED_METHODS')
+              : { code: -32602, message: result.rejection.message },
+      },
     });
     return;
   }
 
+  const { tx } = result;
   tx.sign(keypair);
   const signedXdr = txToBase64(tx);
 
