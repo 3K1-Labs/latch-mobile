@@ -279,41 +279,68 @@ export interface StellarPayment {
 
 // ─── Shared XHR helpers ──────────────────────────────────────────────────────
 
+// Resolves for 2xx, and for 404 — a Horizon "Resource Missing" is a real answer
+// (an unfunded account genuinely has no operations). Everything else — transport
+// error, timeout, 429/5xx, unparseable body — REJECTS.
+//
+// Resolving null for all of those was indistinguishable from "no history", and
+// callers turned it into an empty list. See fetchStellarPayments for why a
+// source that *failed* must never be reported as a source that returned nothing.
 function horizonGet(url: string): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.timeout = 12000;
     xhr.onload = () => {
+      let body: any;
       try {
-        resolve(JSON.parse(xhr.responseText));
+        body = JSON.parse(xhr.responseText);
       } catch {
-        resolve(null);
+        reject(new Error(`Horizon ${xhr.status}: unparseable response`));
+        return;
       }
+      if ((xhr.status >= 200 && xhr.status < 300) || xhr.status === 404) {
+        resolve(body);
+        return;
+      }
+      reject(new Error(`Horizon ${xhr.status}: ${body?.title ?? 'request failed'}`));
     };
-    xhr.onerror = () => resolve(null);
-    xhr.ontimeout = () => resolve(null);
+    xhr.onerror = () => reject(new Error('Horizon request failed'));
+    xhr.ontimeout = () => reject(new Error('Horizon request timed out'));
     xhr.send();
   });
 }
 
+// Rejects on any transport-level failure. A JSON-RPC error carried in a 200 body
+// still resolves, so the reach-shrinking loop in fetchTransferEvents keeps
+// working — that loop is for "the query was too expensive", not "the query never
+// landed".
+//
+// Previously every failure resolved `{}`, which has no `.error` key, so callers
+// read `resp?.result?.events ?? []` and treated a dropped request as an empty
+// result set — the reach-shrinking branch could never even fire for the failure
+// mode mobile networks actually produce.
 function sorobanRpc(method: string, params: object): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', STELLAR_RPC_URL, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.timeout = 15000;
     xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(`Soroban RPC ${method}: HTTP ${xhr.status}`));
+        return;
+      }
       try {
         resolve(JSON.parse(xhr.responseText));
       } catch {
-        resolve({});
+        reject(new Error(`Soroban RPC ${method}: unparseable response`));
       }
     };
-    xhr.onerror = () => resolve({});
-    xhr.ontimeout = () => resolve({});
+    xhr.onerror = () => reject(new Error(`Soroban RPC ${method}: request failed`));
+    xhr.ontimeout = () => reject(new Error(`Soroban RPC ${method}: request timed out`));
     xhr.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }));
   });
 }
@@ -612,7 +639,10 @@ async function fetchTransferEvents(
     if (resp?.error) {
       if (reach <= SAC_EVENTS_MIN_REACH_LEDGERS) {
         if (__DEV__) console.warn('[SAC events] giving up at min reach:', resp.error);
-        return [];
+        // Throw, don't return [] — a JSON-RPC error is never a valid empty
+        // result, and swallowing it here drops every incoming transfer from an
+        // external wallet while looking like a clean fetch.
+        throw new Error(`getEvents failed at min reach: ${resp.error?.message ?? 'unknown error'}`);
       }
       reach = Math.max(SAC_EVENTS_MIN_REACH_LEDGERS, Math.floor(reach / 2));
       continue;
@@ -625,7 +655,9 @@ async function fetchTransferEvents(
 async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[]> {
   const latestLedgerResp = await sorobanRpc('getLatestLedger', {});
   const latestLedger: number = latestLedgerResp?.result?.sequence ?? 0;
-  if (latestLedger === 0) return [];
+  // No sequence in a 200 body means the RPC answered but we can't anchor the
+  // scan window — an unusable answer, not an empty history.
+  if (latestLedger === 0) throw new Error('getLatestLedger returned no sequence');
 
   const transferSym = scValB64(xdr.ScVal.scvSymbol('transfer'));
   const cAddressVal = scValB64(new Address(cAddress).toScVal());
@@ -779,6 +811,30 @@ export async function fetchStellarPayments(
     fetchBundlerOps(cAddress),
     fetchSacTransferEvents(cAddress),
   ]);
+
+  // A source that failed is not a source that returned nothing. Substituting []
+  // for a rejection is what made externally-sent transfers vanish: SAC events are
+  // the ONLY source for incoming transfers from non-Latch wallets, so a single
+  // flaky poll dropped that whole category and React Query cached the result as a
+  // complete, successful history until the next refetch happened to succeed.
+  //
+  // allSettled (not all) so every failing source is named in one message rather
+  // than just whichever rejected first. Throwing is what the screens want:
+  // placeholderData: keepPreviousData holds the last good list on screen while
+  // isError drives the existing retry banner.
+  const failures = (
+    [
+      ['G-address', gAddrResult],
+      ['bundler', bundlerResult],
+      ['SAC events', sacResult],
+    ] as const
+  )
+    .filter(([, result]) => result.status === 'rejected')
+    .map(([name, result]) => `${name}: ${(result as PromiseRejectedResult).reason?.message}`);
+
+  if (failures.length > 0) {
+    throw new Error(`Transaction history incomplete — ${failures.join('; ')}`);
+  }
 
   const gAddrTxs = gAddrResult.status === 'fulfilled' ? gAddrResult.value : [];
   const bundlerTxs = bundlerResult.status === 'fulfilled' ? bundlerResult.value : [];
