@@ -91,6 +91,29 @@ export function getNetworkId(): 'testnet' | 'mainnet' {
   return ACTIVE_NETWORK.network === 'TESTNET' ? 'testnet' : 'mainnet';
 }
 
+// ─── Block explorer (stellar.expert) ──────────────────────────────────────────
+// stellar.expert namespaces every route by network, so a link is only valid for
+// the network the transaction was actually submitted on — a mainnet hash under
+// /testnet resolves to "not found". Read through these helpers rather than
+// pinning a base URL at module load, so a live network switch is picked up.
+const STELLAR_EXPERT_BASE_URL = 'https://stellar.expert/explorer';
+const STELLAR_EXPERT_API_BASE_URL = 'https://api.stellar.expert/explorer';
+
+/** The path segment stellar.expert uses for the active network. */
+function getExplorerNetworkPath(): 'public' | 'testnet' {
+  return ACTIVE_NETWORK.network === 'TESTNET' ? 'testnet' : 'public';
+}
+
+/** stellar.expert API base for the active network, e.g. `…/explorer/public`. */
+export function getExplorerApiUrl(): string {
+  return `${STELLAR_EXPERT_API_BASE_URL}/${getExplorerNetworkPath()}`;
+}
+
+/** Explorer link for a transaction hash, on the network it was submitted to. */
+export function getTransactionExplorerUrl(hash: string): string {
+  return `${STELLAR_EXPERT_BASE_URL}/${getExplorerNetworkPath()}/tx/${encodeURIComponent(hash)}`;
+}
+
 /**
  * Live network switch — no app restart. Reassigns every derived config value
  * in place (live ES-module bindings, so every importer sees the update on its

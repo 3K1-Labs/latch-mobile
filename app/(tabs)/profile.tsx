@@ -12,26 +12,26 @@ import NetworkSheet from '@/src/components/profile/NetworkSheet';
 import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
 // import PoliciesSheet from '@/src/components/profile/PoliciesSheet';
+import { logout } from '@/src/api/latch-auth';
 import PrivacyPolicySheet from '@/src/components/profile/PrivacyPolicySheet';
 import RecoveryPhraseSheet from '@/src/components/profile/RecoveryPhraseSheet';
 import SettingItem from '@/src/components/profile/SettingItem';
 import SignersSheet from '@/src/components/profile/SignersSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { logout } from '@/src/api/latch-auth';
+import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { BIOMETRIC_ENABLED_KEY } from '../(auth)/biometric';
 
 const Profile = () => {
@@ -85,7 +85,7 @@ const Profile = () => {
 
   return (
     <Box flex={1} backgroundColor="cardbg" style={{ paddingTop: insets.top }}>
-<StatusBar style="light" />
+      <StatusBar style="light" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -102,6 +102,7 @@ const Profile = () => {
           address={activeAccount?.smartAccountAddress || activeAccount?.gAddress || ''}
           image={activeAccount ? (avatars[activeAccount.publicKeyHex] ?? null) : null}
           onCopyAddress={async () => {
+            console.log('activeAccount', activeAccount);
             if (activeAccount?.smartAccountAddress) {
               await copyToClipboard(activeAccount.smartAccountAddress);
             }

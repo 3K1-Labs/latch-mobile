@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ACTIVE_NETWORK } from '../constants/config';
+import { getExplorerApiUrl } from '../constants/config';
 
 export interface TokenListItem {
   code: string;
@@ -14,20 +14,14 @@ export interface TokenListItem {
 // First-occurrence wins within each key (highest-ranked list takes priority).
 export type TokenMap = Record<string, TokenListItem>;
 
-const MAINNET_LIST_URLS = [
-  'https://api.stellar.expert/explorer/public/asset-list/top50',
-  'https://lobstr.co/api/v1/sep/assets/curated.json',
-  'https://raw.githubusercontent.com/soroswap/token-list/main/tokenList.json',
-];
-
-const TESTNET_LIST_URLS = [
-  'https://api.stellar.expert/explorer/testnet/asset-list/top50',
+// Neither list is network-specific; only the stellar.expert one is.
+const SHARED_LIST_URLS = [
   'https://lobstr.co/api/v1/sep/assets/curated.json',
   'https://raw.githubusercontent.com/soroswap/token-list/main/tokenList.json',
 ];
 
 export async function fetchTokenList(): Promise<TokenMap> {
-  const urls = ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_LIST_URLS : MAINNET_LIST_URLS;
+  const urls = [`${getExplorerApiUrl()}/asset-list/top50`, ...SHARED_LIST_URLS];
 
   const settled = await Promise.allSettled(
     urls.map((url) =>
