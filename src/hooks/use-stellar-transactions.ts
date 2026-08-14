@@ -242,7 +242,8 @@
 // // the new flow but kept per the Phase 3 plan in case classification needs it.
 // export { BUNDLER_G_ADDRESS };
 import { Address, Asset, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import {
   HORIZON_URL,
   STELLAR_BUNDLER_SECRET,
@@ -250,8 +251,10 @@ import {
   STELLAR_RPC_URL,
 } from '../constants/config';
 import { getWellKnownTokens } from '../constants/known-tokens';
+import { writeSnapshot } from '../lib/dashboard-snapshot';
 import { rememberSacTransfers, sacPaymentKey } from '../lib/sac-transfer-cache';
 import { useWalletStore } from '../store/wallet';
+import { useSnapshotSeed } from './use-snapshot-seed';
 
 // Computed per call (not module load) so it follows switchActiveNetwork() —
 // the bundler G-address differs between testnet and mainnet.
@@ -622,6 +625,16 @@ function getSacContractInfo(): Map<string, { code: string; assetType: string }> 
 const SAC_EVENTS_REACH_LEDGERS = 6_000;
 const SAC_EVENTS_MIN_REACH_LEDGERS = 500;
 
+// Wall-clock ceiling for one direction's scan. The halving sequence
+// (6000→3000→1500→750→500) is up to five sequential getEvents calls, each with
+// its own 15s transport timeout, so an RPC that is slow rather than erroring
+// could hold the history query for over a minute before the reach floor was
+// even reached — and React Query's retry then paid it a second time.
+//
+// The budget bounds that. It is checked before starting another attempt, never
+// mid-flight, so a call already in progress is always allowed to finish.
+const SAC_EVENTS_SCAN_BUDGET_MS = 25_000;
+
 /**
  * Fetches one direction of transfer events, shrinking the reach on a
  * processing-limit error. Only ever shrinks from SAC_EVENTS_REACH_LEDGERS —
@@ -632,6 +645,7 @@ async function fetchTransferEvents(
   latestLedger: number,
 ): Promise<any[]> {
   let reach = SAC_EVENTS_REACH_LEDGERS;
+  const deadline = Date.now() + SAC_EVENTS_SCAN_BUDGET_MS;
 
   for (;;) {
     const start = Math.max(1, latestLedger - reach);
@@ -644,6 +658,13 @@ async function fetchTransferEvents(
         // result, and swallowing it here drops every incoming transfer from an
         // external wallet while looking like a clean fetch.
         throw new Error(`getEvents failed at min reach: ${resp.error?.message ?? 'unknown error'}`);
+      }
+      // Out of budget mid-shrink. Same reasoning as above: give up loudly.
+      // The caller keeps the last known history on screen and shows a retry.
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `getEvents exceeded the ${SAC_EVENTS_SCAN_BUDGET_MS}ms scan budget at reach ${reach}`,
+        );
       }
       reach = Math.max(SAC_EVENTS_MIN_REACH_LEDGERS, Math.floor(reach / 2));
       continue;
@@ -880,16 +901,38 @@ export async function fetchStellarPayments(
   return classifyTxTypes(sorted, cAddress);
 }
 
+// Only the recent slice is worth persisting — it exists to fill the screen on
+// the next launch, not to be a second history store (sac-transfer-cache.ts is
+// the durable one).
+const SNAPSHOT_ENTRIES = 50;
+
 export function useStellarTransactions(cAddress: string | null) {
   const { accounts, activeAccountIndex } = useWalletStore();
   const gAddress = accounts[activeAccountIndex]?.gAddress || null;
+  const snapshot = useSnapshotSeed<StellarPayment[]>('history', cAddress);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ['stellar-transactions', cAddress, gAddress],
     queryFn: () => fetchStellarPayments(cAddress!, gAddress),
     enabled: !!cAddress,
-    placeholderData: keepPreviousData,
+    // Previous data first, then the persisted snapshot on a cold start, so the
+    // activity list is populated before the scan finishes instead of showing a
+    // skeleton (or worse, "No transactions found") on every launch.
+    placeholderData: (previous) => previous ?? snapshot?.data,
     staleTime: 30_000,
     retry: 1,
   });
+
+  const { data, isPlaceholderData } = query;
+
+  useEffect(() => {
+    if (!cAddress || isPlaceholderData || !data) return;
+    void writeSnapshot('history', cAddress, data.slice(0, SNAPSHOT_ENTRIES));
+  }, [cAddress, data, isPlaceholderData]);
+
+  return {
+    ...query,
+    /** When showing the persisted snapshot, when it was captured — else null. */
+    snapshotAt: isPlaceholderData ? (snapshot?.updatedAt ?? null) : null,
+  };
 }

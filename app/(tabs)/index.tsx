@@ -1,23 +1,23 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
 import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
 import FundWalletSheet from '@/src/components/home/FundWalletSheet';
-import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
-import { getNetworkId } from '@/src/constants/config';
-import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import PendingApprovalBanner from '@/src/components/home/PendingApprovalBanner';
 import Box from '@/src/components/shared/Box';
+import Skeleton from '@/src/components/shared/Skeleton';
 import Text from '@/src/components/shared/Text';
 import TokenIcon from '@/src/components/shared/TokenIcon';
+import { getNetworkId } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
+import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import { usePortfolio, type TokenBalance } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { discoverMigration } from '@/src/lib/migration';
-import { useLoadingOverlay } from '@/src/store/loading-overlay';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -25,10 +25,11 @@ import { calculatePortfolio24hChangeFormatted, getTotalUSDBalance } from '@/src/
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { useQuery } from '@tanstack/react-query';
+import { format } from 'date-fns';
 import { ImageBackground } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -282,10 +283,17 @@ const Home = () => {
     refetch: refetchPrices,
     isPlaceholderData: pricesArePlaceholder,
   } = usePrices();
+  // No blocking overlay on either of these. Both render their own section
+  // state, so balances are usable while the (far slower) history scan is still
+  // running, and a cold start paints the last known values immediately from the
+  // persisted snapshot instead of a spinner.
   const {
     data: portfolio,
     isLoading: portfolioLoading,
+    isFetching: portfolioFetching,
+    isError: portfolioError,
     refetch: refetchPortfolio,
+    snapshotAt: portfolioSnapshotAt,
   } = usePortfolio(smartAccountAddress, activeAccount?.gAddress, trackedTokens);
 
   const {
@@ -294,24 +302,20 @@ const Home = () => {
     isLoading: txLoading,
   } = useStellarTransactions(smartAccountAddress);
 
-  const showOverlay = useLoadingOverlay((s) => s.show);
-  const hideOverlay = useLoadingOverlay((s) => s.hide);
-
-  useEffect(() => {
-    if (portfolioLoading || txLoading) {
-      showOverlay('Loading...');
-    } else {
-      hideOverlay();
-    }
-    return () => hideOverlay();
-  }, [portfolioLoading, txLoading, showOverlay, hideOverlay]);
-
   const { data: migrationState } = useQuery({
     queryKey: ['migration-state', smartAccountAddress, activeAccount?.gAddress],
     queryFn: () => discoverMigration(activeAccount!),
     enabled: !!activeAccount?.gAddress && !!smartAccountAddress && !!mnemonic,
     staleTime: 60_000,
   });
+
+  const balanceStatus = portfolioError
+    ? 'Could not refresh — showing last known'
+    : portfolioSnapshotAt
+      ? `As of ${format(new Date(portfolioSnapshotAt), 'MMM d, HH:mm')}`
+      : portfolioFetching && !portfolioLoading
+        ? 'Updating…'
+        : null;
 
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
@@ -468,16 +472,24 @@ const Home = () => {
             />
           </TouchableOpacity>
 
-          <Text variant="h5" color="textPrimary" style={{ fontWeight: '700', letterSpacing: -1 }}>
-            {showBalance
-              ? portfolioLoading
-                ? '...'
-                : `$${totalUsd.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
-              : '***'}
-          </Text>
+          {portfolioLoading ? (
+            <Box my="s">
+              <Skeleton width={180} height={38} borderRadius={10} />
+            </Box>
+          ) : (
+            <Text variant="h5" color="textPrimary" style={{ fontWeight: '700', letterSpacing: -1 }}>
+              {!showBalance
+                ? '***'
+                : // No figure at all beats a fabricated one: with nothing fetched
+                  // and nothing cached, "$0.00" would read as an empty wallet.
+                  portfolio
+                  ? `$${totalUsd.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : '—'}
+            </Text>
+          )}
 
           <Box flexDirection="row" alignItems="center" gap="s" mt="xs">
             <Text variant="p7" color="textSecondary" fontWeight="600">
@@ -513,6 +525,15 @@ const Home = () => {
               </Text>
             </Box>
           </Box>
+
+          {/* Freshness, not a spinner. A background refresh has to be visible
+              without blocking, and a persisted snapshot must never pass for a
+              live figure. */}
+          {balanceStatus && (
+            <Text variant="p8" color="textSecondary" mt="xs">
+              {balanceStatus}
+            </Text>
+          )}
         </Box>
 
         {/* Action Buttons */}
@@ -695,7 +716,17 @@ const Home = () => {
             </TouchableOpacity>
           </Box>
 
-          {recentTx.length === 0 ? (
+          {/* The history scan is much slower than the balance fetch, so it gets
+              its own state here rather than holding the screen. "No transactions
+              found" is only the truth once a fetch has actually completed —
+              while one is still running it would be a guess. */}
+          {txLoading ? (
+            <Box>
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} width="100%" height={64} borderRadius={16} mb="s" />
+              ))}
+            </Box>
+          ) : recentTx.length === 0 ? (
             <Box
               py="xl"
               alignItems="center"

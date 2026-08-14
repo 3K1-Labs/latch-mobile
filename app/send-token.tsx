@@ -48,11 +48,19 @@ const SendToken = () => {
   const { data: prices } = usePrices();
   const { entries: addressBookEntries } = useAddressBook();
 
-  const { data: portfolio } = usePortfolio(
+  const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
     smartAccountAddress,
     activeAccount?.gAddress,
     trackedTokens,
   );
+
+  // usePortfolio can serve a persisted snapshot for instant paint (see
+  // dashboard-snapshot.ts). That is fine for glancing at a balance; it is not
+  // authority to spend. Force a live read when this screen opens so Max and the
+  // insufficient-funds check are based on the chain, not on last launch.
+  useEffect(() => {
+    void refetchPortfolio();
+  }, [refetchPortfolio]);
 
   const [selectedToken, setSelectedToken] = useState<SendTokenType | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<Recipient | null>(null);
