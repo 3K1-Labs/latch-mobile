@@ -27,10 +27,10 @@
  * sub-threshold tx for broadcast.
  */
 
+import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
 import {
   getNetworkId,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from '@/src/constants/config';
@@ -48,7 +48,6 @@ import * as SecureStore from 'expo-secure-store';
 import {
   Address,
   Contract,
-  Keypair,
   nativeToScVal,
   Operation,
   rpc,
@@ -163,9 +162,9 @@ export async function buildAssembledTransfer(p: BuildTransferParams): Promise<As
     network: getNetworkId(),
   });
 
-  const bundler = Keypair.fromSecret(bundlerSecret());
-  const account = await loadAccount(bundler.publicKey());
-  log('bundler source', bundler.publicKey(), 'seq', account.sequenceNumber());
+  const bundlerG = await bundlerAddress();
+  const account = await loadAccount(bundlerG);
+  log('bundler source', bundlerG, 'seq', account.sequenceNumber());
 
   const contract = new Contract(sacContractId);
   const tx = new TransactionBuilder(account, {
@@ -236,8 +235,7 @@ export async function buildAssembledOperation(p: BuildOperationParams): Promise<
   const { multisigAddress, operation } = p;
   log('buildOp ▶', { multisigAddress, network: getNetworkId() });
 
-  const bundler = Keypair.fromSecret(bundlerSecret());
-  const account = await loadAccount(bundler.publicKey());
+  const account = await loadAccount(await bundlerAddress());
 
   const tx = new TransactionBuilder(account, {
     fee: '1000000',
@@ -344,8 +342,7 @@ export async function aggregateAndSubmit(
   // (nonce / invocation / signatureExpirationLedger) — never the envelope — so
   // wrapping the same operation + merged auth in a new tx is legal (the same
   // property setMaxTime already exploits for time bounds).
-  const bundler = Keypair.fromSecret(bundlerSecret());
-  const source = await loadAccount(bundler.publicKey());
+  const source = await loadAccount(await bundlerAddress());
   log('fresh bundler seq', source.sequenceNumber());
   const original = new Transaction(unsignedTxXdr, STELLAR_NETWORK_PASSPHRASE);
   const op = original.operations[0] as Operation.InvokeHostFunction | undefined;
@@ -394,22 +391,27 @@ export async function aggregateAndSubmit(
     setMaxTime(withAuth, SUBMIT_TIMEBOUND_SECONDS),
     STELLAR_NETWORK_PASSPHRASE,
   );
-  finalTx.sign(bundler);
-  log('enforcing-sim ok, bundler-signed, submitting…');
+  log('enforcing-sim ok, submitting via bundler relay…');
 
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(finalTx),
-  });
-  log('sendTransaction result', { status: sent.status, hash: sent.hash, error: sent.errorResultXdr });
-
-  let wasFirstBroadcaster = true;
-  if (sent.status === 'ERROR') {
-    if (/DUPLICATE|already/i.test(sent.errorResultXdr ?? '')) wasFirstBroadcaster = false;
-    else throw new Error(`multisig submit failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
+  // latch-api signs the outer envelope with the bundler key and submits. It
+  // re-sources and re-sequences, exactly as this function used to do itself,
+  // and polls to confirmation — so there is no separate wait here.
+  //
+  // A shared wallet has several members racing to broadcast the same approved
+  // transfer. Whoever loses the race has their submission rejected because the
+  // auth entry's nonce is already spent; that is a completed transfer, not a
+  // failure, so it is reported the same way it was before this moved
+  // server-side.
+  try {
+    const { hash } = await submitViaBundler(finalTx);
+    log('✓ aggregateSubmit complete', { hash, wasFirstBroadcaster: true });
+    return { hash, wasFirstBroadcaster: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/DUPLICATE|already/i.test(message)) throw err;
+    log('another member broadcast first', { message });
+    return { hash: '', wasFirstBroadcaster: false };
   }
-  if (wasFirstBroadcaster) await waitForConfirmation(sent.hash);
-  log('✓ aggregateSubmit complete', { hash: sent.hash, wasFirstBroadcaster });
-  return { hash: sent.hash, wasFirstBroadcaster };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -462,24 +464,4 @@ function setMaxTime(txXdr: string, secondsFromNow: number): string {
     ),
   );
   return toBase64(new Uint8Array(env.toXDR()));
-}
-
-async function waitForConfirmation(hash: string): Promise<void> {
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash });
-    log(`poll ${i + 1}/30`, hash, poll.status);
-    if (poll.status === 'SUCCESS') return;
-    if (poll.status === 'FAILED') {
-      log('tx FAILED, resultXdr', poll.resultXdr ?? poll.resultMetaXdr);
-      throw new Error(`multisig broadcast: tx ${hash} status ${poll.status}`);
-    }
-  }
-  throw new Error(`multisig broadcast: tx ${hash} did not confirm within 30s`);
-}
-
-function bundlerSecret(): string {
-  const secret = STELLAR_BUNDLER_SECRET;
-  if (!secret) throw new Error('Bundler secret is not configured for the active network');
-  return secret;
 }

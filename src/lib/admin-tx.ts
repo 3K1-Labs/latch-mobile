@@ -22,6 +22,7 @@
  *      assembles cleanly through `e.current_contract_address().require_auth()`.
  */
 
+import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
   Account,
   Keypair,
@@ -91,8 +92,6 @@ export interface RpcConfig {
   rpcUrl: string;
   networkPassphrase: string;
   factoryAddress: string;
-  /** Bundler keypair that pays fees + submits. Mirrors smart-account.ts. */
-  bundlerSecret: string;
   /** Horizon URL used to fetch the bundler's current sequence number. */
   horizonUrl?: string;
 }
@@ -149,16 +148,18 @@ export async function completePairing(
     );
   }
 
-  // ─── Assemble + simulate + submit (mirrors smart-account.ts pattern) ───
-  const bundler = Keypair.fromSecret(cfg.bundlerSecret);
+  // ─── Assemble + simulate + submit ───
+  // The bundler sources and pays for this; latch-api holds its key. Only the
+  // address is needed here, to simulate against a real sequence number.
+  const bundlerG = await bundlerAddress();
   const horizonUrl = cfg.horizonUrl ?? HORIZON_URL;
 
-  const horizonResp = await fetch(`${horizonUrl}/accounts/${bundler.publicKey()}`);
+  const horizonResp = await fetch(`${horizonUrl}/accounts/${bundlerG}`);
   if (!horizonResp.ok) {
     throw new Error(`Bundler account not found on Horizon: ${horizonResp.status}`);
   }
   const horizonJson = await horizonResp.json();
-  const bundlerAccount = new Account(bundler.publicKey(), horizonJson.sequence);
+  const bundlerAccount = new Account(bundlerG, horizonJson.sequence);
 
   const builder = new TransactionBuilder(bundlerAccount, {
     fee: '2000000',
@@ -173,33 +174,15 @@ export async function completePairing(
   if (rawSim.error) throw new Error(`admin-tx simulation failed: ${rawSim.error}`);
 
   const assembled = rpc.assembleTransaction(tx, parseSimResult(rawSim)).build();
-  // The initiator signs the auth payload entries embedded in the simulated
-  // tx. Local single-device case: the initiator IS the only signer the
-  // smart account requires, so a single keypair.sign is sufficient.
+  // The initiator signs the auth payload entries embedded in the simulated tx.
+  // Local single-device case: the initiator IS the only signer the smart
+  // account requires, so a single keypair.sign is sufficient.
   assembled.sign(initiatorKeypair);
-  assembled.sign(bundler);
 
-  const sendRaw = await sorobanCall(cfg.rpcUrl, 'sendTransaction', {
-    transaction: txToBase64(assembled),
-  });
-  if (sendRaw.status === 'ERROR') {
-    throw new Error(
-      `admin-tx send failed: ${sendRaw.errorResultXdr ?? JSON.stringify(sendRaw)}`,
-    );
-  }
-
-  const txHash: string = sendRaw.hash;
-  let finalStatus: string | undefined;
-  let resultMetaXdr: string | undefined;
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const poll = await sorobanCall(cfg.rpcUrl, 'getTransaction', { hash: txHash });
-    finalStatus = poll.status;
-    if (poll.status !== 'NOT_FOUND') {
-      resultMetaXdr = poll.resultMetaXdr;
-      break;
-    }
-  }
+  // Both operations target this one smart account, which is what lets the
+  // server accept them as an atomic batch — splitting them would leave the
+  // account with a new signer but no admin rule governing it.
+  const { hash: txHash, status: finalStatus, resultMetaXdr } = await submitViaBundler(assembled);
   if (finalStatus !== 'SUCCESS') {
     throw new Error(`admin-tx transaction status: ${finalStatus}`);
   }

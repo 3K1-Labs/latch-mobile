@@ -1,9 +1,9 @@
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
+import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
   HORIZON_URL,
   PASSKEY_RP_ID,
   STELLAR_AUTH_PREFIX,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -168,7 +168,7 @@ export interface SendTokenResult {
 /**
  * Sends tokens from a Latch smart account (C-address) to any Stellar address.
  *
- * Fee model: the bundler (EXPO_PUBLIC_BUNDLER_SECRET) is the outer transaction
+ * Fee model: the bundler is the outer transaction
  * source and pays all Soroban resource fees. The user's keypair only signs the
  * Soroban auth entry to authorise the smart account transfer — it never touches
  * fee payment. Move bundler signing server-side before production.
@@ -185,14 +185,11 @@ export interface SendTokenResult {
 export async function sendTokenFromSmartAccount(params: SendTokenParams): Promise<SendTokenResult> {
   const { smartAccountAddress, keypair, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
   const amountInBaseUnits = toBaseUnits(amount);
 
-  // 1. Load bundler account as fee payer / tx source
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  // 1. Load the bundler account as the simulation source. Only its address is
+  //    needed here; latch-api re-sources and re-sequences the final envelope.
+  const account = await loadAccount(await bundlerAddress());
 
   // 2. Build the SAC transfer transaction
   const contract = new Contract(sacContractId);
@@ -245,30 +242,11 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
   //    keeps the signed auth already in txWithSignedAuth (existingAuth.length > 0).
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
 
-  // 8. Bundler signs outer transaction (fee payer)
-  prepared.sign(bundlerKeypair);
-
-  // 9. Submit
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    console.log(sent.errorResultXdr, JSON.stringify(sent));
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  // 10. Poll for confirmation (up to 60 s)
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    console.log(poll.errorResultXdr, poll);
-
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // 8. latch-api signs the outer transaction with the bundler key and submits.
+  //    It rebuilds the envelope around this one's host function and auth
+  //    entries rather than signing what we send, then polls to confirmation.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }
 
 // ─── Passkey send ─────────────────────────────────────────────────────────────
@@ -447,13 +425,9 @@ export async function sendTokenFromPasskeyAccount(
 ): Promise<SendTokenResult> {
   const { smartAccountAddress, listIndex, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
   const amountInBaseUnits = toBaseUnits(amount);
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  const account = await loadAccount(await bundlerAddress());
 
   const contract = new Contract(sacContractId);
   const tx = new TransactionBuilder(account, {
@@ -498,22 +472,8 @@ export async function sendTokenFromPasskeyAccount(
   const simResult2 = parseSimResult(simRaw2);
 
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-  prepared.sign(bundlerKeypair);
 
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // Outer signing and submission happen server-side — see the note above.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }

@@ -1,8 +1,8 @@
+import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import { Address, Keypair, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 
 import { parseSimResult, sorobanCall, txToBase64 } from '@/src/api/smart-account';
 import {
-  STELLAR_BUNDLER_SECRET,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from '@/src/constants/config';
@@ -44,11 +44,7 @@ export async function executeSwapFromSmartAccount(
 ): Promise<ExecuteSwapResult> {
   const { smartAccountAddress, keypair, operation } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  const account = await loadAccount(await bundlerAddress());
 
   const tx = new TransactionBuilder(account, {
     fee: FEE,
@@ -84,24 +80,11 @@ export async function executeSwapFromSmartAccount(
   const simResult2 = parseSimResult(simRaw2);
 
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-  prepared.sign(bundlerKeypair);
 
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // latch-api holds the bundler key: it rebuilds this envelope with the bundler
+  // as fee-paying source, re-simulates in enforcing mode, signs and submits.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }
 
 // Passkey-backed smart account. Identical to executeSwapFromSmartAccount except
@@ -111,12 +94,8 @@ export async function executeSwapFromPasskeyAccount(
 ): Promise<ExecuteSwapResult> {
   const { smartAccountAddress, listIndex, operation } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  const account = await loadAccount(await bundlerAddress());
 
   const tx = new TransactionBuilder(account, {
     fee: FEE,
@@ -152,22 +131,9 @@ export async function executeSwapFromPasskeyAccount(
   const simResult2 = parseSimResult(simRaw2);
 
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-  prepared.sign(bundlerKeypair);
 
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // latch-api holds the bundler key: it rebuilds this envelope with the bundler
+  // as fee-paying source, re-simulates in enforcing mode, signs and submits.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }

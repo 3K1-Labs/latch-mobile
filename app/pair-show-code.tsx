@@ -28,7 +28,6 @@ import {
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { AccountSigner } from '@/src/lib/account-signers';
 import {
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -257,9 +256,8 @@ async function runAdminTx(
   const rpcUrl = STELLAR_RPC_URL;
   const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
   const factoryAddress = STELLAR_FACTORY_ADDRESS;
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!factoryAddress || !bundlerSecret) {
-    throw new Error('Factory/bundler secret is not configured for the active network');
+  if (!factoryAddress) {
+    throw new Error('Factory address is not configured for the active network');
   }
 
   // Need a Keypair for the initiator (mnemonic users only). Passkey
@@ -290,7 +288,6 @@ async function runAdminTx(
       rpcUrl,
       networkPassphrase,
       factoryAddress,
-      bundlerSecret,
     },
     wallet.keypair,
     {
