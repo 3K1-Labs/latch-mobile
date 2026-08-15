@@ -1,104 +1,141 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Guidance for AI coding agents working in this repository. This is the single
+source of truth; `CLAUDE.md` points here.
+
+Latch is a **non-custodial Stellar wallet**. The code here derives keys, signs
+transactions, and moves real money. A mistake in the wrong file does not throw —
+it produces a valid wallet at a different address, or a signature that should
+not have been possible. Read the Security-sensitive areas section before
+changing anything in it.
 
 ## Commands
 
 ```bash
-# Install dependencies
-bun install
-
-# Start Expo dev server
-bun start
-
-# Run on specific platform
-bun run ios
-bun run android
-bun run web
-
-# Lint
-bun run lint
+bun install          # Bun, not npm or yarn
+bun run ios          # or: bun run android
+bun run lint         # eslint
+bun run typecheck    # tsc --noEmit — must stay at zero errors
+bun run test         # jest
 ```
 
-This project uses **Bun** as the package manager (not npm/yarn).
-
-## App Overview
-
-Latch is a **Stellar blockchain mobile wallet** built with React Native and Expo. It lets users create new wallets (12-word BIP-39 mnemonic, SEP-0005 compliant), import existing wallets via recovery phrase, or connect an external Stellar wallet. Core features: biometric auth (Face ID/Touch ID), 4-digit PIN, and OTA updates via hot-updater.
+`ios/` and `android/` are generated and not checked in; `bunx expo prebuild`
+creates them.
 
 ## Architecture
 
-### Routing
+Expo 55 + React Native 0.83, TypeScript, Expo Router file-based routing.
 
-File-based routing via **Expo Router** (similar to Next.js):
-
-```
-app/
-├── index.tsx              # Animated splash screen; checks AsyncStorage for onboarding state
-├── _layout.tsx            # Root layout — wraps all screens with ThemeProvider, QueryClientProvider, Icons
-├── onboarding.tsx         # 3-slide intro carousel
-├── (auth)/                # Biometric setup, success screen
-├── (onboarding)/          # Wallet creation/import flows (get-started → set-pin → recovery-phrase → verify)
-└── (tabs)/                # Authenticated shell with custom bottom tab bar
-```
-
-Navigation entry logic: splash screen reads `@latch_onboarding_complete` from AsyncStorage; if absent, routes to onboarding; if present, routes to `/(tabs)/`.
-
-### State Management
-
-- **Local state** (`useState`) for ephemeral UI state
-- **AsyncStorage** for persisted non-sensitive state (onboarding flag, theme preference)
-- **expo-secure-store** for sensitive data (`ACCESS_TOKEN_KEY`, `REFRESH_TOKEN_KEY`)
-- **React Query** (@tanstack/react-query) for server state/caching
-- **Zustand** is installed but not yet used — available for global state when needed
-
-### API Layer
-
-`src/api/client.ts` — Axios instance with:
-- Automatic Bearer token injection from Secure Store
-- 401 → token refresh → retry queue pattern
-- Base URL from `EXPO_PUBLIC_API_BASE_URL` env var
-
-### Stellar Integration
-
-- `@stellar/stellar-sdk` — core blockchain SDK
-- `@stellar/freighter-api` — connect existing Freighter wallet
-- `stellar-hd-wallet` — BIP-39/SEP-0005 mnemonic wallet generation
-- `src/lib/seed-wallet.ts` — helpers for generating and restoring Stellar keypairs from mnemonics
-
-### Theme & UI
-
-- **@shopify/restyle** — type-safe styling primitives; `Box` and `Text` are the base layout/typography components
-- **@ui-kitten/components** + **@eva-design/eva** — pre-built component library
-- `src/theme/theme.ts` — color palette, spacing scale, typography definitions
-- `src/theme/ThemeContext.tsx` — light/dark/system theme provider; preference persisted in AsyncStorage
-- Shared components live in `src/components/shared/` (Button, Input, Checkbox, Card, etc.)
-
-### Environment Configuration
-
-`env.js` uses **Zod** to validate all environment variables at build time. Variables prefixed `EXPO_PUBLIC_*` are baked into the bundle. Key vars:
-- `EXPO_PUBLIC_APP_ENV` — controls app name and bundle IDs (staging vs production)
-- `EXPO_PUBLIC_API_BASE_URL` — backend API
-- `EXPO_PUBLIC_HOT_UPDATER_*` — Supabase config for OTA updates
-
-`app.config.js` reads from `env.js` and conditionally applies staging vs production icons, bundle IDs, and app names.
-
-### Path Aliases
-
-`@/*` maps to the repo root. Import from `@/src/...`, `@/app/...`, etc.
-
-### Key Libraries
-
-| Purpose | Library |
-|---|---|
-| Animations | react-native-reanimated 4 |
+| Concern | Where |
+| --- | --- |
+| Wallet state | `useWalletStore` (Zustand) in `src/store/wallet.ts` |
+| Server state | React Query |
+| Ephemeral UI state | `useState` |
+| Non-sensitive persistence | AsyncStorage (theme, network choice) |
+| Secrets | `expo-secure-store`, keyed by `SECURE_KEYS` |
+| Styling | `@shopify/restyle` — `Box` and `Text` |
 | Forms | Formik + Yup |
-| Debugging (dev only) | Reactotron |
-| OTA updates | @hot-updater (Supabase + Cloudflare) |
-| Icons | @expo/vector-icons (Ionicons) + @expo/symbols (SF Symbols) |
-| Phone input | react-native-phone-number-input |
-| Toasts | react-native-toast-message |
 
-## Code Style
+**Entry flow:** `app/index.tsx` reads `SECURE_KEYS.SMART_ACCOUNT` from
+SecureStore. Present → `/(auth)/biometric` in unlock mode. Absent →
+`/onboarding`.
 
-`.prettierrc`: single quotes, trailing commas, 100-char print width, 2-space tabs.
+**Account model** (`WalletAccount` in `src/store/wallet.ts`): mnemonic accounts
+use BIP-44 index ≥ 0 and carry `gAddress` and `publicKeyHex`; passkey accounts
+use a negative index, have an empty `gAddress`, and are identified by
+`credentialId`.
+
+**The backend does the paying.** `latch-api` owns the bundler keypair that
+sponsors fees. Account deployment goes through `src/api/smart-account-deploy.ts`
+and transaction submission through `src/api/transaction-relay.ts`. The client
+still builds, simulates, and signs its own Soroban auth entries — only the outer
+envelope is server-side. Do not reintroduce a client-held bundler secret.
+
+## Mandatory patterns
+
+Each of these exists for a reason. Do not "clean them up".
+
+- **Soroban RPC calls use raw `XMLHttpRequest`, never Axios.** The Stellar SDK's
+  Axios transport bypasses the Android platform TLS stack and fails there.
+  Follow the pattern in `src/api/smart-account.ts`.
+- **Secrets go in `expo-secure-store` via `SECURE_KEYS`.** Never AsyncStorage.
+- **Nothing secret gets an `EXPO_PUBLIC_` prefix.** Expo inlines those into the
+  shipped bundle, readable by anyone who unzips the app.
+- **Forms use Formik + Yup.** Not `useState` for field state.
+- **Layout uses `Box`/`Text` from restyle**, not `View`/`Text` from react-native.
+- **Key and signing code logs through `src/lib/logger.ts`**, never `console`.
+  A `no-console` lint rule enforces this in `src/lib/passkey-webauthn.ts` and
+  `src/services/send-token.ts`.
+
+## Security-sensitive areas
+
+Changes here need human sign-off, not just passing CI. Prefer proposing a diff
+and explaining the reasoning over applying one.
+
+| Path | Why it matters |
+| --- | --- |
+| `src/lib/seed-wallet.ts` | BIP-39 / SEP-0005 derivation. A subtle change silently generates a different wallet and the user's funds are elsewhere. Covered by spec vectors in `src/lib/__tests__`. |
+| `src/lib/passkey-webauthn.ts` | Hand-rolled WebAuthn over P-256. Highest-risk file in the repo. |
+| `src/lib/multisig-address.ts` | Salt and canonical signer ordering fix a shared wallet's address. Every member derives it independently and must agree. |
+| `src/store/wallet.ts` | `SECURE_KEYS` inventory, rehydration, logout wipe. |
+| `src/api/smart-account.ts`, `src/api/passkey.ts` | Deployment and address prediction. |
+| `src/api/transaction-relay.ts` | What the bundler is asked to pay for. |
+| `src/constants/config.ts` | `ACTIVE_NETWORK` moves the entire app between testnet and mainnet. |
+| `env.js` | Anything added here with an `EXPO_PUBLIC_` prefix ships to every user. |
+| Deep link and WalletConnect handlers | Untrusted input from outside the app. |
+
+## Rules for agents
+
+- **Never weaken a security control to make something work.** Do not disable a
+  biometric prompt, skip a PIN check, loosen a validation, or bypass signature
+  verification to get a build or a test passing. If a control is in the way,
+  say so and stop.
+- **Never invent cryptography.** No new key derivation, encryption scheme, or
+  source of randomness. Use the SDK. If the SDK does not do it, ask.
+- **Mainnet is off-limits** unless the human explicitly asks for it. Work on
+  testnet.
+- **No real recovery phrases in tests or fixtures.** Use published test vectors
+  and label them as such.
+- **Do not add dependencies unprompted.** Every package is code running inside a
+  wallet.
+- **Never commit without explicit permission**, and never add AI attribution to
+  a commit message.
+- **Do not log key material** — not a key, a mnemonic, a digest, a signature, or
+  a truncated prefix or a length. A prefix narrows a search space; a length
+  identifies a key format. Log the verdict, not the material.
+- **Say when you are unsure.** A confidently wrong answer about signing or
+  derivation is worse than no answer.
+
+## Known gotchas
+
+- **`ACTIVE_NETWORK` defaults to mainnet** in `src/constants/config.ts`.
+  `hydrateActiveNetwork()` corrects it from the persisted choice during startup,
+  and the app root gates rendering on that, but a first run before hydration is
+  pointed at mainnet. Check which network you are on before testing anything
+  that spends.
+- **The network switch reassigns `let` bindings live.** Every reader must be
+  inside a function body, never a module-level computation, or it captures a
+  stale value. See `applyNetworkDetails`.
+- **Jest runs as two projects** (`jest.config.js`). Pure-logic suites use the
+  `node` environment: under the Expo environment the Stellar SDK's axios adapter
+  probes `ReadableStream` at import and the stream polyfill throws, killing the
+  run before any test executes.
+- **Metro drops all `console.*` from release bundles** (`drop_console` in
+  `metro.config.js`), including `warn` and `error`. Production error reporting
+  is Sentry's job; do not rely on console surviving.
+- **Package subpath imports need their `.js` suffix** where the export map
+  demands it (e.g. `@scure/bip39/wordlists/english.js`). Metro resolves loosely;
+  Node, tsc and Jest do not, so a missing suffix works in the app and breaks in
+  tests.
+- **`reference/` is not checked in.** It holds local read-only checkouts of
+  other projects. Do not write instructions that depend on those paths existing.
+
+## Before you say you are done
+
+```bash
+bun run lint && bun run typecheck && bun run test
+```
+
+All three must pass. For anything touching the security-sensitive paths above,
+also say plainly what you did *not* verify — running against a live network is
+usually the gap, and claiming otherwise is worse than leaving it open.

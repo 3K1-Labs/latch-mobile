@@ -90,9 +90,15 @@ Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md). Do n
 open a public issue for a security problem, and never include a recovery phrase,
 private key, or access token in an issue, pull request, or screenshot.
 
+[TELEMETRY.md](TELEMETRY.md) documents what the app sends off the device, and
+what it never does.
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). [GOVERNANCE.md](GOVERNANCE.md) says
+who decides what. If you point an AI agent at this repository,
+[AGENTS.md](AGENTS.md) is written for it.
 
 Because this is a wallet, changes to key derivation, signing, secure storage, or
 the network switch get closer review than the rest of the codebase, and
