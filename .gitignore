@@ -44,11 +44,11 @@ app-example
 /android
 
 
-# vscode
-.vscode
+# vscode — extensions.json/settings.json are intentionally tracked
 .claude
 .agent
 /reference
+local.properties
 latch-496219-607c6c78345f.json
 google-services.json
 GoogleService-Info.plist

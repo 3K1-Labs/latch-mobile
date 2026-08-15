@@ -1,50 +1,105 @@
-# Welcome to your Expo app 👋
+# Latch
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A non-custodial Stellar wallet for iOS and Android, built on Soroban smart
+accounts.
 
-## Get started
+Latch keeps your keys on your device. A wallet is a Soroban smart account whose
+signers are keys you hold — a BIP-39 recovery phrase, a device passkey, or
+both — so you can add a second device, share a wallet with other people behind
+a signing threshold, and recover access without anyone custodying your funds.
 
-1. Install dependencies
+- **Smart accounts.** Every wallet is a contract account deployed from an
+  on-chain factory, at an address derived deterministically from its signer set.
+- **Passkeys or a recovery phrase.** Sign with Face ID / Touch ID via a P-256
+  passkey held in the secure enclave, or with a standard SEP-0005 seed wallet.
+- **Shared wallets.** Multiple people, an on-chain threshold, and an approval
+  flow that passes unsigned transactions between devices.
+- **Sends, swaps, and dApps.** Native and custom assets, swaps via aggregators,
+  and WalletConnect v2 for connecting to dApps.
 
-   ```bash
-   npm install
-   ```
+> **Status:** pre-1.0 and under active development. Mainnet support exists but
+> testnet is where day-to-day work happens. Treat this as software you should
+> read before trusting.
 
-2. Start the app
+## Getting started
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+You need [Bun](https://bun.sh) (not npm or yarn), Xcode for iOS, and Android
+Studio for Android.
 
 ```bash
-npm run reset-project
+bun install
+cp .env.example .env      # then fill in the "Required" section
+bun run ios               # or: bun run android
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+`ios/` and `android/` are generated and not checked in, so the first run will
+prompt Expo to create them. To do that explicitly:
 
-## Learn more
+```bash
+bunx expo prebuild
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+`env.js` validates your `.env` at build time and fails with the name of anything
+required that is missing. The required set is scoped to running against Stellar
+testnet — mainnet addresses, third-party API keys, and OTA configuration are all
+optional and only fail if you use the feature that needs them.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Latch talks to `latch-api` for account deployment, transaction submission, and
+encrypted backup. Point `EXPO_PUBLIC_API_BASE_URL` at a local instance or a
+shared deployment.
 
-## Join the community
+## Architecture
 
-Join our community of developers creating universal apps.
+| Area | Choice |
+| --- | --- |
+| Framework | Expo 55, React Native 0.83, Expo Router |
+| Language | TypeScript |
+| State | Zustand for wallet state, React Query for server state |
+| Styling | `@shopify/restyle` — `Box` and `Text` are the layout primitives |
+| Stellar | `@stellar/stellar-sdk` 15, Soroban RPC + Horizon |
+| Forms | Formik + Yup |
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```
+app/                 file-based routes (Expo Router)
+  (onboarding)/      wallet creation, import, recovery
+  (auth)/            biometric unlock
+  (tabs)/            the authenticated app
+src/
+  api/               latch-api and Soroban RPC clients
+  lib/               key derivation, WebAuthn, signing, multisig
+  services/          sends and swaps
+  store/wallet.ts    Zustand store; SECURE_KEYS is the secret inventory
+  constants/config.ts  ACTIVE_NETWORK — the single network switch
+```
+
+A few conventions worth knowing before you change anything:
+
+- **Soroban RPC calls use raw `XMLHttpRequest`, never Axios.** The SDK's Axios
+  transport bypasses the Android platform TLS stack and fails there.
+- **Secrets live in `expo-secure-store`**, keyed by `SECURE_KEYS` in
+  `src/store/wallet.ts`. Never AsyncStorage.
+- **`EXPO_PUBLIC_*` values are inlined into the shipped bundle.** Anything
+  secret must not carry that prefix — it would ship to every user.
+
+## Security
+
+Latch handles private keys and real funds. Signing and key derivation happen on
+device; the backend holds no user keys.
+
+Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md). Do not
+open a public issue for a security problem, and never include a recovery phrase,
+private key, or access token in an issue, pull request, or screenshot.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Because this is a wallet, changes to key derivation, signing, secure storage, or
+the network switch get closer review than the rest of the codebase, and
+generally need a testnet demonstration rather than only a passing build.
+
+## Licence
+
+[Apache 2.0](LICENSE). The Latch name and logo are trademarks and are not
+covered by that licence — see [NOTICE](NOTICE). You may fork and ship this code;
+please don't ship it as Latch.
