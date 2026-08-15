@@ -29,6 +29,10 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 
+import { createLogger } from '@/src/lib/logger';
+
+const log = createLogger('send-token');
+
 // Compute the Soroban auth payload hash for a given auth entry.
 // signatureExpirationLedger MUST be set on the entry before calling this.
 //
@@ -235,7 +239,6 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
   const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(txWithSignedAuth),
   });
-  console.log(simRaw2);
   if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
   const simResult2 = parseSimResult(simRaw2);
 
@@ -291,9 +294,7 @@ export async function fetchWebAuthnVerifier(): Promise<string> {
     if (!verifier) throw new Error('webauthn_verifier missing in FactoryConfig');
 
     if (__DEV__) {
-      console.log('[PASSKEY DIAG] factory webAuthn verifier:', verifier);
-      console.log('[PASSKEY DIAG] STELLAR_VERIFIER_ADDRESS (Ed25519):', STELLAR_VERIFIER_ADDRESS);
-      console.log('[PASSKEY DIAG] addresses match:', verifier === STELLAR_VERIFIER_ADDRESS);
+      log.debug('factory webauthn verifier:', verifier);
     }
     return verifier;
   }
@@ -332,15 +333,12 @@ export async function resolveRegisteredWebAuthnVerifier(
     );
     if (match?.verifierAddress) {
       if (__DEV__ && match.foreignVerifier) {
-        console.log(
-          '[PASSKEY DIAG] device signer is registered under a non-current verifier:',
-          match.verifierAddress,
-        );
+        log.debug('device signer is on a non-current verifier:', match.verifierAddress);
       }
       return match.verifierAddress;
     }
   } catch (e) {
-    if (__DEV__) console.log('[PASSKEY DIAG] could not read on-chain signer verifier:', e);
+    if (__DEV__) log.debug('could not read on-chain signer verifier:', e);
   }
 
   return fetchWebAuthnVerifier();
@@ -370,9 +368,8 @@ export async function signPasskeyAuthEntry(
   const authDigest = new Uint8Array(sha256(combined));
 
   if (__DEV__) {
-    console.log('[PASSKEY DIAG] payloadHash:', Buffer.from(payloadHash).toString('hex'));
-    console.log('[PASSKEY DIAG] authDigest:', Buffer.from(authDigest).toString('hex'));
-    console.log('[PASSKEY DIAG] webAuthnVerifier:', webAuthnVerifier);
+    // payloadHash and authDigest are the exact bytes the user's key signs.
+    log.debug('signing auth entry against verifier', webAuthnVerifier);
   }
 
   const { sig, keyDataHex } = await signWithStoredPasskeyAtIndex(
@@ -467,7 +464,6 @@ export async function sendTokenFromPasskeyAccount(
   const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(txWithSignedAuth),
   });
-  console.log(simRaw2);
   if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
   const simResult2 = parseSimResult(simRaw2);
 

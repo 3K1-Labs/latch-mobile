@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSecureScreen } from '@/src/hooks/use-secure-screen';
 
 function hashPin(pin: string): string {
   return QuickCrypto.createHash('sha256').update(pin).digest('hex') as unknown as string;
@@ -39,6 +40,9 @@ const KEYPAD_ROWS = [
 ];
 
 const SetPin = () => {
+  // A PIN on screen must not end up in the photo library.
+  useSecureScreen();
+
   const theme = useTheme<Theme>();
   const statusBarStyle = useStatusBarStyle();
   const { from } = useLocalSearchParams();

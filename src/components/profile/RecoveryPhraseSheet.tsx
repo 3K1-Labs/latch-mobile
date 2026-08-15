@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { BlurView } from 'expo-blur';
-import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -13,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Toast from 'react-native-toast-message';
 
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
 import Box from '@/src/components/shared/Box';
@@ -22,6 +20,7 @@ import { useWalletStore } from '@/src/store/wallet';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
+import { copySecretToClipboard } from '@/src/utils/copy-to-clipboard';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -60,12 +59,7 @@ const RecoveryPhraseSheet = ({ visible, onClose }: Props) => {
 
   const handleCopy = async () => {
     if (!mnemonic) return;
-    await Clipboard.setStringAsync(mnemonic);
-    Toast.show({
-      type: 'success',
-      text1: 'Copied',
-      text2: 'Recovery phrase copied to clipboard',
-    });
+    await copySecretToClipboard(mnemonic);
   };
 
   const words = mnemonic ? mnemonic.split(' ') : [];

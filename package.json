@@ -58,6 +58,7 @@
     "buffer": "^6.0.3",
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.2",
+    "events": "^3.3.0",
     "expo": "~55.0.18",
     "expo-blur": "^55.0.14",
     "expo-build-properties": "^55.0.13",
@@ -77,6 +78,7 @@
     "expo-location": "~55.1.4",
     "expo-notifications": "~55.0.23",
     "expo-router": "~55.0.13",
+    "expo-screen-capture": "~55.0.16",
     "expo-secure-store": "~55.0.9",
     "expo-splash-screen": "~55.0.19",
     "expo-status-bar": "~55.0.4",
@@ -123,7 +125,6 @@
     "util": "^0.12.5",
     "wrangler": "^4.84.0",
     "yup": "^1.7.1",
-    "events": "^3.3.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
