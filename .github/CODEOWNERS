@@ -1,0 +1,33 @@
+# Review is automatically requested from the owners listed here.
+#
+# This is a wallet: most of the codebase is ordinary app code, but a handful of
+# paths decide where a user's funds live and who can move them. A mistake in
+# them does not usually throw — it produces a valid wallet at the wrong address,
+# or a signature that should not have been possible. Those get a second pair of
+# eyes by default rather than by remembering to ask.
+
+*                               @kcmikee
+
+# Key derivation, signing, WebAuthn, and the multisig salt/ordering that fixes a
+# shared wallet's address.
+/src/lib/                       @kcmikee
+
+# Smart account deployment and everything that talks to latch-api.
+/src/api/                       @kcmikee
+
+# The SECURE_KEYS inventory and wallet state rehydration.
+/src/store/wallet.ts            @kcmikee
+
+# ACTIVE_NETWORK — one constant moves the whole app between testnet and mainnet.
+/src/constants/config.ts        @kcmikee
+
+# Anything EXPO_PUBLIC_* here is inlined into the shipped bundle.
+/env.js                         @kcmikee
+/.env.example                   @kcmikee
+
+# Supply chain: a new dependency is new code running inside the wallet.
+/package.json                   @kcmikee
+/bun.lock                       @kcmikee
+
+# CI is the gate the rest of this file relies on.
+/.github/                       @kcmikee
