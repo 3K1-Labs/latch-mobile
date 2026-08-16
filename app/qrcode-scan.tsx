@@ -91,7 +91,7 @@ const QRScanScreen = () => {
       {/* Logic for showing result or input */}
       {scannedAddress ? (
         <Box
-          style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.7)' }]}
+          style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.7)' }]}
           justifyContent="center"
           alignItems="center"
         >

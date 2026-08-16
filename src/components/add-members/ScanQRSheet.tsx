@@ -64,7 +64,7 @@ const ScanQRSheet: React.FC<Props> = ({ visible, onClose, onMemberAdded }) => {
         {/* Camera */}
         {permission?.granted ? (
           <CameraView
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             onBarcodeScanned={scannedAddress ? undefined : ({ data }) => handleBarcodeScanned(data)}
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           />
