@@ -19,9 +19,7 @@ import {
   Address,
   Contract,
   Keypair,
-  rpc,
   scValToNative,
-  SorobanDataBuilder,
   StrKey,
   TransactionBuilder,
   xdr,
@@ -42,85 +40,18 @@ import {
   generateMultisigNonce,
   sortSignersCanonical,
 } from '@/src/lib/multisig-address';
+import {
+  ledgerKeyToBase64,
+  parseSimResult,
+  sorobanCall,
+  toBase64,
+  txToBase64,
+} from '@/src/api/soroban-rpc';
 
-// ─── XHR-based JSON-RPC ───────────────────────────────────────────────────────
-// The stellar SDK uses Axios internally, which fails with "Network Error" on
-// Android because the bundled Axios doesn't go through the platform TLS stack.
-// Using XMLHttpRequest directly routes through OkHttp and respects the
-// network_security_config.xml trust anchors.
-
-export function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-export function txToBase64(tx: { toEnvelope(): { toXDR(): Uint8Array } }): string {
-  return toBase64(new Uint8Array(tx.toEnvelope().toXDR()));
-}
-
-export function ledgerKeyToBase64(key: xdr.LedgerKey): string {
-  return toBase64(new Uint8Array(key.toXDR()));
-}
-
-export function sorobanCall(rpcUrl: string, method: string, params: object): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', rpcUrl, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.setRequestHeader('Accept', 'application/json');
-    xhr.timeout = 60000;
-    xhr.onload = function () {
-      try {
-        const json = JSON.parse(xhr.responseText);
-        if (json.error) {
-          reject(new Error(`${method}: ${json.error.message ?? JSON.stringify(json.error)}`));
-        } else {
-          resolve(json.result);
-        }
-      } catch {
-        reject(new Error(`${method}: parse error (status=${xhr.status})`));
-      }
-    };
-    xhr.onerror = function () {
-      reject(new Error(`${method}: network error (status=${xhr.status})`));
-    };
-    xhr.ontimeout = function () {
-      reject(new Error(`${method}: timed out`));
-    };
-    xhr.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }));
-  });
-}
-
-
-export function parseSimResult(raw: any): rpc.Api.SimulateTransactionSuccessResponse {
-  return {
-    // _parsed: true tells rpc.assembleTransaction's internal parseRawSimulation to skip
-    // re-parsing. Without it, the SDK calls fromXDR(xdrObject, 'base64') on already-decoded
-    // auth entries, which passes a plain object to Buffer.from and throws "Received type object".
-    _parsed: true,
-    id: String(raw.id ?? '1'),
-    latestLedger: raw.latestLedger,
-    minResourceFee: raw.minResourceFee,
-    // assembleTransaction calls success.transactionData.build(), so this must be a
-    // SorobanDataBuilder, not a raw xdr.SorobanTransactionData.
-    transactionData: new SorobanDataBuilder(raw.transactionData),
-    cost: raw.cost ?? { cpuInsns: '0', memBytes: '0' },
-    events: [],
-    result: {
-      auth: (raw.results?.[0]?.auth ?? []).map((a: string) =>
-        xdr.SorobanAuthorizationEntry.fromXDR(a, 'base64'),
-      ),
-      retval: (() => {
-        try {
-          return xdr.ScVal.fromXDR(raw.results?.[0]?.retval || 'AAAAAA==', 'base64');
-        } catch {
-          return xdr.ScVal.scvVoid();
-        }
-      })(),
-    },
-  } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
-}
+// The Soroban RPC transport and XDR/base64 helpers live in ./soroban-rpc.
+// Re-exported here because this module's callers have always imported them
+// from it, and because they belong to the same conceptual surface.
+export { ledgerKeyToBase64, parseSimResult, sorobanCall, toBase64, txToBase64 };
 
 // Reads live off ACTIVE_NETWORK (src/constants/config.ts) on every call, not
 // module-top-level, so it follows switchActiveNetwork() without a restart.

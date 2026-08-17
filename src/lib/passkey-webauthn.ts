@@ -28,28 +28,17 @@ import QuickCrypto from 'react-native-quick-crypto';
 import { hashSorobanAuthPayload } from './soroban-auth-payload';
 
 import { createLogger } from './logger';
+import { b64uDecode, b64uEncode } from './base64url';
+
+// Moved to ./base64url so pure consumers need not import this module (it
+// reaches SecureStore and the wallet store); re-exported so existing callers
+// are unaffected. See the note there.
+export { b64uDecode, b64uEncode };
 
 const log = createLogger('passkey');
 
 // ─── base64url helpers (btoa-based — no Buffer polyfill) ─────────────────────
 
-export function b64uEncode(data: Uint8Array | string): string {
-  const bytes =
-    typeof data === 'string'
-      ? new TextEncoder().encode(data)
-      : new Uint8Array(data instanceof Uint8Array ? data : new Uint8Array(data));
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-export function b64uDecode(str: string): Uint8Array {
-  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
 
 // ─── Key generation ───────────────────────────────────────────────────────────
 

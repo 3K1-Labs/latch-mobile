@@ -15,7 +15,11 @@ module.exports = {
     {
       displayName: 'node',
       testEnvironment: 'node',
-      testMatch: ['<rootDir>/src/lib/**/*.test.ts', '<rootDir>/src/utils/**/*.test.ts'],
+      testMatch: [
+        '<rootDir>/src/lib/**/*.test.ts',
+        '<rootDir>/src/utils/**/*.test.ts',
+        '<rootDir>/src/api/**/*.test.ts',
+      ],
       transform: {
         '^.+\\.[jt]sx?$': ['babel-jest', { presets: ['babel-preset-expo'] }],
       },
