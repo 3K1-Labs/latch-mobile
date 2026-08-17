@@ -39,6 +39,7 @@ import { aggregateAuthEntries } from '@/src/lib/soroban-auth-payload';
 import {
   fetchWebAuthnVerifier,
   loadAccount,
+  resolveRegisteredEd25519Verifier,
   signPasskeyAuthEntry,
   signSmartAccountAuthEntry,
   toBaseUnits,
@@ -296,7 +297,14 @@ export async function signSharedEntry(
   if (signer.gAddress && signer.publicKeyHex) {
     if (!mnemonic) throw new Error('multisig: mnemonic required to sign with an Ed25519 device');
     const { keypair } = deriveWalletAtIndex(mnemonic, signer.index);
-    signSmartAccountAuthEntry(entry, keypair, validUntil);
+    // The shared multisig account, not signer.smartAccountAddress (which is the
+    // member's own account). The entry's credentials address is the account
+    // whose rule this signature will be matched against.
+    const verifier = await resolveRegisteredEd25519Verifier(
+      Address.fromScAddress(entry.credentials().address().address()).toString(),
+      signer.publicKeyHex,
+    );
+    signSmartAccountAuthEntry(entry, keypair, validUntil, verifier);
     signerKey = signer.publicKeyHex;
   } else {
     log('passkey branch ▶ fetching webauthn verifier…');

@@ -16,12 +16,18 @@ export interface NetworkDetails {
   networkPassphrase: string;
   sorobanRpcUrl: string;
   friendbotUrl?: string;
-  // Deploy-time-pinned contract config — differs per network, see
-  // reference/LATCH_REFERENCE.md. The ed25519 verifier is the only one passed
-  // client-side; secp256k1/webauthn verifiers are read on-chain from the
-  // active factory (see fetchFactoryVerifiers in src/api/account-admin.ts).
+  // Verifiers are NOT configured here. They are read from the chain — from the
+  // account's own context rule where possible, else from the factory's
+  // FactoryConfig (see resolveRegisteredEd25519Verifier in
+  // src/services/send-token.ts and fetchFactoryVerifiers in
+  // src/api/account-admin.ts).
+  //
+  // There used to be a `verifierAddress` here, mirroring the factory's ed25519
+  // verifier. It went stale on a contract redeploy and every Ed25519 signature
+  // failed __check_auth with #3002, because the account matches on the exact
+  // `External(verifier, key_data)` tuple. Configuration must not hold a second
+  // copy of something the chain already publishes.
   factoryAddress: string;
-  verifierAddress: string;
 }
 
 export const TESTNET_NETWORK: NetworkDetails = {
@@ -32,8 +38,6 @@ export const TESTNET_NETWORK: NetworkDetails = {
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
   friendbotUrl: 'https://friendbot.stellar.org',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
-  verifierAddress:
-    process.env.EXPO_PUBLIC_VERIFIER_ADDRESS ?? 'CCRB63MFFBYXBZCRLRGLJVTHC7O4SUGAYTO5ZZEUNVY5W5DVGKHETI67',
 };
 
 export const MAINNET_NETWORK: NetworkDetails = {
@@ -43,7 +47,6 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkPassphrase: Networks.PUBLIC,
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
-  verifierAddress: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET ?? '',
 };
 
 // `let`, not `const` — switchActiveNetwork() (src/lib/network-switch.ts) reassigns
@@ -67,7 +70,6 @@ let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
 let STELLAR_NETWORK_PASSPHRASE = ACTIVE_NETWORK.networkPassphrase;
 let STELLAR_RPC_URL = ACTIVE_NETWORK.sorobanRpcUrl;
 let STELLAR_FACTORY_ADDRESS = ACTIVE_NETWORK.factoryAddress;
-let STELLAR_VERIFIER_ADDRESS = ACTIVE_NETWORK.verifierAddress;
 
 // Minimum XLM reserve per Stellar protocol:
 //   (BASE_RESERVE_MIN_COUNT + subentry_count + num_sponsoring - num_sponsored) × BASE_RESERVE
@@ -135,7 +137,6 @@ function applyNetworkDetails(details: NetworkDetails): void {
   STELLAR_NETWORK_PASSPHRASE = details.networkPassphrase;
   STELLAR_RPC_URL = details.sorobanRpcUrl;
   STELLAR_FACTORY_ADDRESS = details.factoryAddress;
-  STELLAR_VERIFIER_ADDRESS = details.verifierAddress;
   SOROSWAP_NETWORK = getNetworkId();
 
   const isTestnet = details.network === 'TESTNET';
@@ -220,5 +221,4 @@ export {
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
-  STELLAR_VERIFIER_ADDRESS,
 };

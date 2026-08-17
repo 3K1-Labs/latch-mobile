@@ -1,5 +1,5 @@
 import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
-import { Address, Keypair, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Address, Keypair, rpc, StrKey, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 
 import { parseSimResult, sorobanCall, txToBase64 } from '@/src/api/smart-account';
 import {
@@ -8,6 +8,7 @@ import {
 } from '@/src/constants/config';
 import {
   loadAccount,
+  resolveRegisteredEd25519Verifier,
   resolveRegisteredWebAuthnVerifier,
   signPasskeyAuthEntry,
   signSmartAccountAuthEntry,
@@ -62,12 +63,17 @@ export async function executeSwapFromSmartAccount(
   const simResult = parseSimResult(simRaw);
   const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
 
+  const verifier = await resolveRegisteredEd25519Verifier(
+    smartAccountAddress,
+    Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
+  );
+
   for (const entry of simResult.result?.auth ?? []) {
     const creds = entry.credentials();
     if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
     const credAddr = Address.fromScAddress(creds.address().address()).toString();
     if (credAddr === smartAccountAddress) {
-      signSmartAccountAuthEntry(entry, keypair, validUntilLedger);
+      signSmartAccountAuthEntry(entry, keypair, validUntilLedger, verifier);
     }
   }
 

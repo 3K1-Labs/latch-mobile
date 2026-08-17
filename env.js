@@ -42,7 +42,6 @@ const requiredEnv = {
   EXPO_PUBLIC_HORIZON_TESTNET_URL: httpUrl(),
   EXPO_PUBLIC_SOROBAN_RPC_URL: httpUrl(),
   EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
-  EXPO_PUBLIC_VERIFIER_ADDRESS: z.string(),
 
   // Relying party ID for passkey signing. Must match the backend's
   // WEBAUTHN_ALLOWED_ORIGINS entry exactly, scheme included, or passkey
@@ -59,7 +58,6 @@ const optionalEnv = {
   // right failure for a contributor working on testnet only.
   EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: httpUrl().optional(),
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: z.string().optional(),
-  EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: z.string().optional(),
 
   // ─── Policy contracts ───────────────────────────────────────────────────────
   // Policies enforce rules on an account (admin quorum, recovery); the
@@ -130,12 +128,10 @@ const envObject = {
   EXPO_PUBLIC_HORIZON_TESTNET_URL: process.env.EXPO_PUBLIC_HORIZON_TESTNET_URL,
   EXPO_PUBLIC_SOROBAN_RPC_URL: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL,
   EXPO_PUBLIC_FACTORY_ADDRESS: process.env.EXPO_PUBLIC_FACTORY_ADDRESS,
-  EXPO_PUBLIC_VERIFIER_ADDRESS: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS,
   EXPO_PUBLIC_PASSKEY_RP_ID: process.env.EXPO_PUBLIC_PASSKEY_RP_ID,
 
   EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET,
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET,
-  EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET,
 
   EXPO_PUBLIC_ADMIN_GUARD_POLICY: process.env.EXPO_PUBLIC_ADMIN_GUARD_POLICY,
   EXPO_PUBLIC_RECOVERY_POLICY: process.env.EXPO_PUBLIC_RECOVERY_POLICY,

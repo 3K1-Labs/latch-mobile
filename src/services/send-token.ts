@@ -7,7 +7,6 @@ import {
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
-  STELLAR_VERIFIER_ADDRESS,
 } from '@/src/constants/config';
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import {
@@ -79,17 +78,48 @@ function countAuthContexts(inv: xdr.SorobanAuthorizedInvocation): number {
   return n;
 }
 
-// One context_rule_id (0 = default rule) per auth context. Used for BOTH the
-// signed auth digest and the AuthPayload's context_rule_ids — they must match.
-function buildContextRuleIds(entry: xdr.SorobanAuthorizationEntry): xdr.ScVal {
+// One context_rule_id per auth context. Used for BOTH the signed auth digest
+// and the AuthPayload's context_rule_ids — they must match.
+//
+// The rule is chosen by the signer, not matched by the account: __check_auth
+// validates each context against the rule id named here, and a Default rule
+// matches any context. Rule 0 is therefore right for ordinary spending and for
+// the owner's own admin calls. It is WRONG for anything authorised by a
+// narrower rule — a guardian signing under the recovery rule must name that
+// rule's id, since the guardians are not signers on rule 0.
+function buildContextRuleIds(
+  entry: xdr.SorobanAuthorizationEntry,
+  ruleId: number,
+): xdr.ScVal {
   const count = countAuthContexts(entry.rootInvocation());
-  return xdr.ScVal.scvVec(Array.from({ length: count }, () => xdr.ScVal.scvU32(0)));
+  return xdr.ScVal.scvVec(Array.from({ length: count }, () => xdr.ScVal.scvU32(ruleId)));
 }
 
+/**
+ * sha256(payloadHash || context_rule_ids) — what signers actually sign, and
+ * what a Delegated signer's require_auth_for_args receives as its argument.
+ */
+export function authDigestFor(
+  entry: xdr.SorobanAuthorizationEntry,
+  contextRuleId: number,
+): Buffer {
+  const payloadHash = hashAuthPayload(entry);
+  const ruleIdsXdr = new Uint8Array(buildContextRuleIds(entry, contextRuleId).toXDR());
+  const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
+  combined.set(payloadHash);
+  combined.set(ruleIdsXdr, payloadHash.length);
+  return Buffer.from(sha256(combined));
+}
+
+// `verifierAddress` is passed in rather than read from config: it must be the
+// verifier the ACCOUNT registered this key under, which
+// resolveRegisteredEd25519Verifier reads from the chain. See the note there.
 export function signSmartAccountAuthEntry(
   entry: xdr.SorobanAuthorizationEntry,
   keypair: Keypair,
   validUntilLedger: number,
+  verifierAddress: string,
+  contextRuleId = 0,
 ): void {
   const creds = entry.credentials();
   if (creds.switch().name !== 'sorobanCredentialsAddress') return;
@@ -101,7 +131,7 @@ export function signSmartAccountAuthEntry(
 
   // authDigest = sha256(payloadHash || toXDR(context_rule_ids)). One id per
   // auth context (see buildContextRuleIds) — a length mismatch fails #3014.
-  const ruleIdsScVal = buildContextRuleIds(entry);
+  const ruleIdsScVal = buildContextRuleIds(entry, contextRuleId);
   const ruleIdsXdr = new Uint8Array(ruleIdsScVal.toXDR());
   const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
   combined.set(payloadHash);
@@ -114,7 +144,7 @@ export function signSmartAccountAuthEntry(
 
   const signerKey = xdr.ScVal.scvVec([
     xdr.ScVal.scvSymbol('External'),
-    new Address(STELLAR_VERIFIER_ADDRESS).toScVal(),
+    new Address(verifierAddress).toScVal(),
     xdr.ScVal.scvBytes(Buffer.from(Uint8Array.from(pkBytes))),
   ]);
 
@@ -222,12 +252,17 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
   const simResult = parseSimResult(simRaw);
   const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
 
+  const verifier = await resolveRegisteredEd25519Verifier(
+    smartAccountAddress,
+    Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
+  );
+
   for (const entry of simResult.result?.auth ?? []) {
     const creds = entry.credentials();
     if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
     const credAddr = Address.fromScAddress(creds.address().address()).toString();
     if (credAddr === smartAccountAddress) {
-      signSmartAccountAuthEntry(entry, keypair, validUntilLedger);
+      signSmartAccountAuthEntry(entry, keypair, validUntilLedger, verifier);
     }
   }
 
@@ -255,11 +290,17 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
 // ─── Passkey send ─────────────────────────────────────────────────────────────
 
 // Read the WebAuthn verifier address from the factory's on-chain instance storage.
-// Uses getLedgerEntries (no simulation, no source account needed) to read
-// FactoryConfig.webauthn_verifier directly from the factory's persistent storage.
+// Uses getLedgerEntries (no simulation, no source account needed) to read a
+// verifier address directly out of the factory's persistent FactoryConfig.
 // The factory stores separate verifier addresses per signer type; using the wrong
-// one (e.g. the Ed25519 verifier) produces a signer-mismatch error (#3002).
-export async function fetchWebAuthnVerifier(): Promise<string> {
+// one (e.g. the Ed25519 verifier for a passkey) produces a signer-mismatch error
+// (#3002).
+//
+// Read from the chain rather than from EXPO_PUBLIC_VERIFIER_ADDRESS. That
+// variable is a second, unenforced copy of a value the factory already
+// publishes, so it silently goes stale whenever the contracts are redeployed —
+// and a stale verifier fails every signature with #3002.
+async function fetchFactoryVerifier(field: 'ed25519_verifier' | 'webauthn_verifier'): Promise<string> {
   const factoryAddress = STELLAR_FACTORY_ADDRESS;
   if (!factoryAddress) throw new Error('Factory address is not configured for the active network');
 
@@ -290,16 +331,24 @@ export async function fetchWebAuthnVerifier(): Promise<string> {
     if (!isConfig) continue;
 
     const config = scValToNative(pair.val()) as Record<string, string>;
-    const verifier = config.webauthn_verifier;
-    if (!verifier) throw new Error('webauthn_verifier missing in FactoryConfig');
+    const verifier = config[field];
+    if (!verifier) throw new Error(`${field} missing in FactoryConfig`);
 
     if (__DEV__) {
-      log.debug('factory webauthn verifier:', verifier);
+      log.debug(`factory ${field}:`, verifier);
     }
     return verifier;
   }
 
   throw new Error('Config not found in factory instance storage');
+}
+
+export function fetchWebAuthnVerifier(): Promise<string> {
+  return fetchFactoryVerifier('webauthn_verifier');
+}
+
+export function fetchEd25519Verifier(): Promise<string> {
+  return fetchFactoryVerifier('ed25519_verifier');
 }
 
 // Resolve the verifier address this device's passkey is registered under ON-CHAIN.
@@ -344,11 +393,50 @@ export async function resolveRegisteredWebAuthnVerifier(
   return fetchWebAuthnVerifier();
 }
 
+// The Ed25519 counterpart of resolveRegisteredWebAuthnVerifier, and it exists
+// for the same reason: __check_auth matches on the exact
+// `External(verifier, key_data)` tuple, so an account registered under an older
+// verifier must be presented with that older verifier, not the current one.
+//
+// Falls back to the factory's current ed25519_verifier when the key isn't found
+// on the account — a newly deployed account is the common case.
+export async function resolveRegisteredEd25519Verifier(
+  smartAccountAddress: string,
+  publicKeyHex: string,
+): Promise<string> {
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
+  if (!factoryAddress) return fetchEd25519Verifier();
+
+  try {
+    const rule = await fetchDefaultContextRule(
+      { rpcUrl: STELLAR_RPC_URL, networkPassphrase: STELLAR_NETWORK_PASSPHRASE, factoryAddress },
+      smartAccountAddress,
+    );
+    const match = rule.signers.find(
+      (s) =>
+        s.kind === 'ed25519' &&
+        s.keyDataHex.toLowerCase() === publicKeyHex.toLowerCase() &&
+        s.verifierAddress,
+    );
+    if (match?.verifierAddress) {
+      if (__DEV__ && match.foreignVerifier) {
+        log.debug('device signer is on a non-current verifier:', match.verifierAddress);
+      }
+      return match.verifierAddress;
+    }
+  } catch (e) {
+    if (__DEV__) log.debug('could not read on-chain signer verifier:', e);
+  }
+
+  return fetchEd25519Verifier();
+}
+
 export async function signPasskeyAuthEntry(
   entry: xdr.SorobanAuthorizationEntry,
   listIndex: number,
   validUntilLedger: number,
   webAuthnVerifier: string,
+  contextRuleId = 0,
 ): Promise<void> {
   const creds = entry.credentials();
   if (creds.switch().name !== 'sorobanCredentialsAddress') return;
@@ -360,7 +448,7 @@ export async function signPasskeyAuthEntry(
   // auth_digest = sha256(payloadHash || toXDR(Vec[u32(0)])) — this is what do_check_auth
   // passes to verifier.verify(). The WebAuthn verifier checks that
   // clientDataJSON.challenge == base64url(auth_digest), so we must sign authDigest, not payloadHash.
-  const ruleIdsScVal = buildContextRuleIds(entry);
+  const ruleIdsScVal = buildContextRuleIds(entry, contextRuleId);
   const ruleIdsXdr = new Uint8Array(ruleIdsScVal.toXDR());
   const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
   combined.set(payloadHash);
