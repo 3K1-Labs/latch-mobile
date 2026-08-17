@@ -5,8 +5,9 @@
  * a second signer's device auto-discover wallets it was added to. The creator
  * announces, for each on-chain member, a row keyed by the member's BLIND id
  * (`membershipBlindId` — a one-way hash of the member's public signer key). A
- * joining device computes its own blind id, lists its wallets, and adds them by
- * the public C-address. Discovery is advisory: `addSharedWalletByAddress`
+ * joining device computes the blind id for EVERY signable local account (not
+ * just whichever is active), lists wallets for each, and adds them by the
+ * public C-address. Discovery is advisory: `addSharedWalletByAddress`
  * re-verifies on-chain that this device is actually a signer before trusting it,
  * so a forged announcement can't inject a wallet.
  */
@@ -22,7 +23,7 @@ import {
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from '@/src/constants/config';
-import { getMySignerKey, pickSigner } from '@/src/lib/cosign-packet-flow';
+import { getAllSignerKeys, pickSigner } from '@/src/lib/cosign-packet-flow';
 import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
 import { useSharedWalletNaming } from '@/src/store/shared-wallet-naming';
 import { useWalletStore } from '@/src/store/wallet';
@@ -185,6 +186,11 @@ export async function retryPendingAnnouncements(opts?: MembershipSweepOptions): 
  * queued. The user names each via SharedWalletNamingModal, and the add it
  * triggers re-verifies on-chain membership, so forged announcements are
  * rejected at store time.
+ *
+ * Sweeps EVERY signable local account's key, not just the currently active
+ * one: a creator announces to whichever key it read on-chain, which need not
+ * match whatever this device happens to have active right now, so checking
+ * only the active account silently misses invitations.
  */
 export async function discoverSharedWallets(opts?: MembershipSweepOptions): Promise<number> {
   const me = pickSigner();
@@ -192,23 +198,20 @@ export async function discoverSharedWallets(opts?: MembershipSweepOptions): Prom
     if (__DEV__) console.log('[membership] discover: no signable personal account');
     return 0;
   }
-  const myKey = await getMySignerKey();
-  if (!myKey) {
+  const myKeys = await getAllSignerKeys();
+  if (myKeys.length === 0) {
     if (__DEV__) console.log('[membership] discover: no signer key on this device');
     return 0;
   }
 
-  const blindId = membershipBlindId(myKey);
   const token = await resolveSessionToken(me.account, opts);
   if (!token) {
     if (__DEV__) console.log('[membership] discover: no session, deferring (sign-in not allowed)');
     return 0;
   }
-  const wallets = await listMemberships(token, blindId);
-  if (__DEV__) {
-    console.log('[membership] discover: blindId', blindId.slice(0, 10), '→ found', wallets.length, 'wallet(s):',
-      wallets.map((w) => w.wallet_ref));
-  }
+
+  // Load any queue persisted from a prior sweep before deduping against it.
+  await useSharedWalletNaming.getState().rehydrate();
 
   const known = new Set(
     useWalletStore
@@ -218,17 +221,36 @@ export async function discoverSharedWallets(opts?: MembershipSweepOptions): Prom
   );
 
   const enqueue = useSharedWalletNaming.getState().enqueue;
+  const seen = new Set<string>();
   let queued = 0;
-  for (const w of wallets) {
-    if (known.has(w.wallet_ref)) {
-      if (__DEV__) console.log('[membership] discover: already have', w.wallet_ref);
+  for (const key of myKeys) {
+    const blindId = membershipBlindId(key);
+    let wallets;
+    try {
+      wallets = await listMemberships(token, blindId);
+    } catch (e: any) {
+      // One key's lookup failing (transient network, rate limit) shouldn't
+      // stop the rest of this device's accounts from being checked.
+      if (__DEV__) console.log('[membership] discover: lookup failed for', blindId.slice(0, 10), e?.message);
       continue;
     }
-    // enqueue dedups against wallets already awaiting a name, so repeated
-    // foreground sweeps don't re-prompt while the modal is open.
-    if (enqueue(w.wallet_ref)) {
-      queued += 1;
-      if (__DEV__) console.log('[membership] discover: queued for naming', w.wallet_ref);
+    if (__DEV__) {
+      console.log('[membership] discover: blindId', blindId.slice(0, 10), '→ found', wallets.length, 'wallet(s):',
+        wallets.map((w) => w.wallet_ref));
+    }
+    for (const w of wallets) {
+      if (seen.has(w.wallet_ref)) continue;
+      seen.add(w.wallet_ref);
+      if (known.has(w.wallet_ref)) {
+        if (__DEV__) console.log('[membership] discover: already have', w.wallet_ref);
+        continue;
+      }
+      // enqueue dedups against wallets already awaiting a name, so repeated
+      // foreground sweeps don't re-prompt while the modal is open.
+      if (enqueue(w.wallet_ref)) {
+        queued += 1;
+        if (__DEV__) console.log('[membership] discover: queued for naming', w.wallet_ref);
+      }
     }
   }
   return queued;

@@ -51,7 +51,15 @@ const SharedWalletNamingModal = () => {
   const queue = useSharedWalletNaming((s) => s.queue);
   const dequeue = useSharedWalletNaming((s) => s.dequeue);
   const dismiss = useSharedWalletNaming((s) => s.dismiss);
+  const rehydrate = useSharedWalletNaming((s) => s.rehydrate);
   const address = queue[0];
+
+  // Restore a queue persisted from before a JS reload / app kill so a
+  // discovered-but-unnamed wallet reappears immediately, without waiting on
+  // the next foreground discovery sweep to re-find it.
+  useEffect(() => {
+    rehydrate();
+  }, [rehydrate]);
   const remaining = queue.length;
   const [submitting, setSubmitting] = useState(false);
   const [info, setInfo] = useState<WalletInfo | null>(null);
