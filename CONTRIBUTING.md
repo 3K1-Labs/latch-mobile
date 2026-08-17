@@ -26,6 +26,12 @@ bun run lint && bun run typecheck && bun run test
 CI runs the same three, plus a secret scan. Typecheck is at zero errors — please
 keep it there rather than adding a suppression.
 
+`bun install` wires up a Husky pre-commit hook that runs typecheck + test on
+every commit, so a broken build or a failing crypto-surface test is caught
+locally instead of in CI. It does not run lint — that stays a pre-PR check,
+not a pre-commit one, since the pre-existing React Compiler warnings would
+otherwise slow down every commit.
+
 ## Workflow
 
 1. Open or link an issue before starting non-trivial work, so nobody duplicates

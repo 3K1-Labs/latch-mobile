@@ -61,3 +61,23 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 102 runtime dependencies; Dependabot alone only flags what's already
+  # known and already installed. This checks what a PR is ABOUT to add —
+  # a newly introduced dependency with a known advisory, or one under a
+  # license this project can't ship, fails the PR instead of merging quietly.
+  # GitHub-native (no external account/API key), so this is on from day one
+  # rather than blocked on a vendor signup.
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

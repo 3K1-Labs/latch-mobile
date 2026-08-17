@@ -129,6 +129,11 @@ and explaining the reasoning over applying one.
   tests.
 - **`reference/` is not checked in.** It holds local read-only checkouts of
   other projects. Do not write instructions that depend on those paths existing.
+- **`jail-monkey` (device-integrity warning) needs a fresh native prebuild.**
+  It's a plain autolinked native module, not an Expo package, so it silently
+  does nothing under Expo Go or a dev client built before it was added — run
+  `bunx expo prebuild` and reinstall the dev client before expecting
+  `useDeviceIntegrity` to fire on a jailbroken/rooted test device.
 
 ## Before you say you are done
 
