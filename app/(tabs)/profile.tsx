@@ -17,9 +17,11 @@ import PrivacyPolicySheet from '@/src/components/profile/PrivacyPolicySheet';
 import RecoveryPhraseSheet from '@/src/components/profile/RecoveryPhraseSheet';
 import SettingItem from '@/src/components/profile/SettingItem';
 import SignersSheet from '@/src/components/profile/SignersSheet';
+import GuardianRecoverySheet from '@/src/components/profile/GuardianRecoverySheet';
+import SocialRecoverySheet from '@/src/components/profile/SocialRecoverySheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { ACTIVE_NETWORK } from '@/src/constants/config';
+import { ACTIVE_NETWORK, isSocialRecoveryAvailable } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -27,7 +29,7 @@ import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
@@ -35,6 +37,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BIOMETRIC_ENABLED_KEY } from '../(auth)/biometric';
 
 const Profile = () => {
+  // A guardian arriving from latch://guardian?c=… — open the sheet with the
+  // payload already loaded, so tapping the link is the whole interaction.
+  const { guardian: guardianPayload } = useLocalSearchParams<{ guardian?: string }>();
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -58,6 +63,12 @@ const Profile = () => {
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [backupVisible, setBackupVisible] = useState(false);
   const [sharedWalletVisible, setSharedWalletVisible] = useState(false);
+  const [socialRecoveryVisible, setSocialRecoveryVisible] = useState(false);
+  const [guardianRecoveryVisible, setGuardianRecoveryVisible] = useState(false);
+
+  useEffect(() => {
+    if (guardianPayload) setGuardianRecoveryVisible(true);
+  }, [guardianPayload]);
 
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
@@ -126,6 +137,15 @@ const Profile = () => {
           />
         )}
         <SignersSheet visible={signersVisible} onClose={() => setSignersVisible(false)} />
+        <SocialRecoverySheet
+          visible={socialRecoveryVisible}
+          onClose={() => setSocialRecoveryVisible(false)}
+        />
+        <GuardianRecoverySheet
+          visible={guardianRecoveryVisible}
+          onClose={() => setGuardianRecoveryVisible(false)}
+          initialPayload={guardianPayload}
+        />
         {/* <PoliciesSheet visible={policiesVisible} onClose={() => setPoliciesVisible(false)} /> */}
         <PermissionsSheet
           visible={permissionsVisible}
@@ -243,6 +263,20 @@ const Profile = () => {
               onPress={() => setPermissionsVisible(true)}
               image={require('@/src/assets/icon/mobile-shield-protection.png')}
             />
+            {isSocialRecoveryAvailable() && (
+              <>
+                <SettingItem
+                  icon="shield-checkmark-outline"
+                  label="Social Recovery"
+                  onPress={() => setSocialRecoveryVisible(true)}
+                />
+                <SettingItem
+                  icon="people-outline"
+                  label="Guardian Requests"
+                  onPress={() => setGuardianRecoveryVisible(true)}
+                />
+              </>
+            )}
             {/* <SettingItem
               icon="options-outline"
               label="Policies"

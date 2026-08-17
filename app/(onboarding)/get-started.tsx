@@ -13,7 +13,7 @@ import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 
-type OptionType = 'new-account' | 'seed-phrase' | 'existing-wallet' | 'recover';
+type OptionType = 'new-account' | 'seed-phrase' | 'existing-wallet' | 'recover' | 'guardians';
 
 const GetStarted = () => {
   const theme = useTheme<Theme>();
@@ -43,6 +43,11 @@ const GetStarted = () => {
       title: 'Recover Account',
       description: 'Restore your wallet using your recovery email',
     },
+    {
+      id: 'guardians' as OptionType,
+      title: 'Recover With Guardians',
+      description: 'Ask the people you trust to restore your wallet on this device',
+    },
     // {
     //   id: 'recover' as OptionType,
     //   title: 'Recover Account',
@@ -64,6 +69,9 @@ const GetStarted = () => {
         break;
       case 'recover':
         router.push({ pathname: '/(onboarding)/collect-email', params: { mode: 'recovery' } });
+        break;
+      case 'guardians':
+        router.push('/(onboarding)/recover-guardians');
         break;
       default:
         router.push('/onboarding');
