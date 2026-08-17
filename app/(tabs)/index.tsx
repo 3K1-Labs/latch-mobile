@@ -1,4 +1,3 @@
-import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
 import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
@@ -29,7 +28,7 @@ import { format } from 'date-fns';
 import { ImageBackground } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -158,7 +157,7 @@ function estimateXlmForFiat(fiatAmount?: string, xlmUsdPrice?: string): string |
 const Home = () => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
-  const statusBarStyle = useStatusBarStyle();
+  // const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
   const tabBarScroll = useTabBarScroll();
 
@@ -378,7 +377,7 @@ const Home = () => {
 
   return (
     <Box flex={1} backgroundColor="onboardingbg">
-      <StatusBar style={statusBarStyle} />
+      <StatusBar style={'light'} />
       {/* Header */}
       <Box
         flexDirection="row"
