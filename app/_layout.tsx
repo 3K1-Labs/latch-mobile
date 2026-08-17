@@ -19,6 +19,7 @@ import '../shim';
 import { queryClient } from '../src/api/client';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
+import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
@@ -61,6 +62,7 @@ function RootLayoutContent() {
   useWalletConnect();
   useWalletConnectDeepLink();
   useNetworkStatus();
+  useDeviceIntegrity();
 
   return (
     <>

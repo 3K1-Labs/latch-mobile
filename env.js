@@ -93,12 +93,6 @@ const optionalEnv = {
   EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: z.string().optional(),
   EXPO_PUBLIC_MOONPAY_API_KEY: z.string().optional(),
   EXPO_PUBLIC_SENTRY_DSN: z.string().optional(),
-
-  // ─── OTA updates (hot-updater) ──────────────────────────────────────────────
-  // Only needed to publish or receive OTA updates, not to run the app.
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: httpUrl().optional(),
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY: z.string().optional(),
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME: z.string().optional(),
 };
 
 const runtimeEnv = z.object({ ...requiredEnv, ...optionalEnv });
@@ -158,11 +152,6 @@ const envObject = {
   EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: process.env.EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID,
   EXPO_PUBLIC_MOONPAY_API_KEY: process.env.EXPO_PUBLIC_MOONPAY_API_KEY,
   EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
-
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL,
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY,
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME:
-    process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME,
 };
 
 // Trim every value before validating. `KEY= value` in a .env file yields a

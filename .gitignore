@@ -48,6 +48,11 @@ app-example
 .claude
 .agent
 /reference
+
+# Internal planning docs — sprint plans, decision logs, vendor evals,
+# cross-repo migration design. Kept locally for reference; not for the public
+# tree. See docs/internal/README.md for what landed here and why.
+/docs/internal
 local.properties
 latch-496219-607c6c78345f.json
 google-services.json

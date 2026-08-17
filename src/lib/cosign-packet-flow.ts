@@ -132,6 +132,33 @@ export async function getMySignerKey(): Promise<string | null> {
   return (await SecureStore.getItemAsync(getPasskeyStorageKeys(me.listIndex).keyDataHex)) ?? null;
 }
 
+/**
+ * Every local personal account's on-chain signer key (hex), deduped.
+ *
+ * Unlike pickSigner()/getMySignerKey(), which resolve to a single "active"
+ * signer for transaction-signing flows, membership discovery needs the union
+ * across every signable account on this device: a creator announces to
+ * whichever key it read as a member's device signer on-chain, and that need
+ * not be the account that happens to be active locally right now.
+ */
+export async function getAllSignerKeys(): Promise<string[]> {
+  const { accounts } = useWalletStore.getState();
+  const keys = new Set<string>();
+  for (let listIndex = 0; listIndex < accounts.length; listIndex++) {
+    const account = accounts[listIndex];
+    if (!isSignable(account)) continue;
+    if (account.gAddress && account.publicKeyHex) {
+      keys.add(account.publicKeyHex);
+      continue;
+    }
+    const keyDataHex = await SecureStore.getItemAsync(
+      getPasskeyStorageKeys(listIndex).keyDataHex,
+    );
+    if (keyDataHex) keys.add(keyDataHex);
+  }
+  return [...keys];
+}
+
 export interface CreateTransferPacketParams {
   /** The active multisig (shared wallet) account funds move FROM. */
   multisigAccount: WalletAccount;

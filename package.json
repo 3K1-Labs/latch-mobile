@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "license": "Apache-2.0",
   "scripts": {
+    "prepare": "husky",
     "postinstall": "rn-nodeify --install \"url,events,https,http,util,stream,crypto,buffer,assert,os,path,querystring\" --hack && patch-package && npx install-skia",
     "start": "expo start",
     "android": "expo run:android",
@@ -88,6 +89,7 @@
     "expo-web-browser": "~57.0.2",
     "formik": "^2.4.9",
     "https-browserify": "^0.0.1",
+    "jail-monkey": "^3.0.0",
     "lodash.debounce": "^4.0.8",
     "npm": "^11.12.1",
     "path-browserify": "^1.0.1",
@@ -133,6 +135,7 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.1",
     "hot-updater": "^0.30.2",
+    "husky": "^9.1.7",
     "jest": "^30.0.0",
     "jest-environment-node": "^30.0.0",
     "jest-expo": "~57.0.0",
