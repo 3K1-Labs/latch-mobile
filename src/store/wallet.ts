@@ -36,6 +36,10 @@ export const SECURE_KEYS = {
   // Temporary session key — holds recovery password during onboarding only.
   // Deleted immediately after the first successful backup upload.
   RECOVERY_PASSWORD_SESSION: 'latch_recovery_password_session',
+  // Guardian recovery in progress on a new device: the key whose address was
+  // given to the guardians, plus the account being recovered. Survives app
+  // restarts because the wait is hours or days.
+  GUARDIAN_RECOVERY_SESSION: 'latch_guardian_recovery_session',
 } as const;
 
 export const ASYNC_KEYS = {

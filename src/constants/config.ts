@@ -28,6 +28,14 @@ export interface NetworkDetails {
   // `External(verifier, key_data)` tuple. Configuration must not hold a second
   // copy of something the chain already publishes.
   factoryAddress: string;
+  // The recovery policy, unlike the verifiers and the threshold policy, is not
+  // published by the factory, so it has to be configured. Empty means social
+  // recovery is unavailable on this network — callers check and say so rather
+  // than failing at submit time.
+  //
+  // Per-network, and switched with the network: pointing a mainnet account at a
+  // testnet policy address would install a policy the account cannot honour.
+  recoveryPolicyAddress: string;
 }
 
 export const TESTNET_NETWORK: NetworkDetails = {
@@ -38,6 +46,7 @@ export const TESTNET_NETWORK: NetworkDetails = {
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
   friendbotUrl: 'https://friendbot.stellar.org',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+  recoveryPolicyAddress: process.env.EXPO_PUBLIC_RECOVERY_POLICY ?? '',
 };
 
 export const MAINNET_NETWORK: NetworkDetails = {
@@ -47,6 +56,7 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkPassphrase: Networks.PUBLIC,
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
+  recoveryPolicyAddress: process.env.EXPO_PUBLIC_RECOVERY_POLICY_MAINNET ?? '',
 };
 
 // `let`, not `const` — switchActiveNetwork() (src/lib/network-switch.ts) reassigns
@@ -70,6 +80,7 @@ let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
 let STELLAR_NETWORK_PASSPHRASE = ACTIVE_NETWORK.networkPassphrase;
 let STELLAR_RPC_URL = ACTIVE_NETWORK.sorobanRpcUrl;
 let STELLAR_FACTORY_ADDRESS = ACTIVE_NETWORK.factoryAddress;
+let RECOVERY_POLICY_ADDRESS = ACTIVE_NETWORK.recoveryPolicyAddress;
 
 // Minimum XLM reserve per Stellar protocol:
 //   (BASE_RESERVE_MIN_COUNT + subentry_count + num_sponsoring - num_sponsored) × BASE_RESERVE
@@ -137,6 +148,7 @@ function applyNetworkDetails(details: NetworkDetails): void {
   STELLAR_NETWORK_PASSPHRASE = details.networkPassphrase;
   STELLAR_RPC_URL = details.sorobanRpcUrl;
   STELLAR_FACTORY_ADDRESS = details.factoryAddress;
+  RECOVERY_POLICY_ADDRESS = details.recoveryPolicyAddress;
   SOROSWAP_NETWORK = getNetworkId();
 
   const isTestnet = details.network === 'TESTNET';
@@ -203,6 +215,11 @@ const DEPOSIT_RELAYER_NETWORKS = (
   .map((n) => n.trim().toLowerCase())
   .filter(Boolean) as ('testnet' | 'mainnet')[];
 
+/** True when a recovery policy is deployed for the network the app is on. */
+export function isSocialRecoveryAvailable(): boolean {
+  return RECOVERY_POLICY_ADDRESS.length > 0;
+}
+
 /** True when a deposit relayer is deployed for the network the app is on. */
 export function isDepositRelayerAvailable(): boolean {
   return DEPOSIT_RELAYER_NETWORKS.includes(getNetworkId());
@@ -214,6 +231,7 @@ export {
   DEPOSIT_RELAYER_NETWORKS,
   HORIZON_URL,
   PASSKEY_RP_ID,
+  RECOVERY_POLICY_ADDRESS,
   SOROSWAP_API_KEY,
   SOROSWAP_API_URL,
   SOROSWAP_NETWORK,

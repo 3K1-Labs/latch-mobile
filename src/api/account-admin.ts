@@ -36,7 +36,7 @@ import {
 } from '@stellar/stellar-sdk';
 
 import { AccountSigner } from '@/src/lib/account-signers';
-import { ledgerKeyToBase64, sorobanCall, txToBase64 } from './smart-account';
+import { ledgerKeyToBase64, sorobanCall, txToBase64 } from './soroban-rpc';
 
 /**
  * Runtime form of the on-chain `Signer` enum (post-init).
@@ -109,7 +109,7 @@ function encodeContextRuleType(t: ContextRuleType): xdr.ScVal {
 }
 
 /** SimpleThresholdAccountParams ScVal — the install payload for ThresholdPolicy. */
-function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
+export function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
   return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
       key: xdr.ScVal.scvSymbol('threshold'),
@@ -118,20 +118,36 @@ function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
   ]);
 }
 
+/** A policy to install on a rule, with the payload its `install` expects. */
+export interface PolicyInstall {
+  address: string;
+  installParam: xdr.ScVal;
+}
+
 /**
  * `add_context_rule(type, name, valid_until, signers, policies)`
  *
- * Creates a named rule on the account. Common usage for split-policy
- * multisig: type=CallContract(<self>), name="admin", validUntil=null,
- * signers=current device set, policies={thresholdPolicyAddress: {threshold: N}}
+ * Creates a named rule on the account, installing every policy in `policies` as
+ * part of the same call.
+ *
+ * INSTALLING SEVERAL POLICIES AT ONCE IS THE ONLY WAY TO DO IT ATOMICALLY. A
+ * Soroban transaction may carry exactly one InvokeHostFunction operation, so
+ * `add_context_rule` followed by `add_policy` is necessarily two transactions,
+ * with a live window in between where the rule exists under only some of its
+ * policies. For a guardian rule that window is exploitable: the quorum would
+ * briefly hold self-call rights with no recovery time-lock in front of them.
+ *
+ * The contract supports this: it builds `context_rule.policies` from all the
+ * map's keys BEFORE calling any policy's `install`, so a policy that requires
+ * another to be present (the recovery policy requires its quorum policy) sees it
+ * regardless of iteration order.
  *
  * @param accountAddress       C-address of the LatchSmartAccount
  * @param ruleType             Default | CallContract(<address>)
  * @param name                 Human label (≤ ~30 chars by convention)
  * @param validUntilLedger     null = never expires
  * @param signers              Runtime signer set
- * @param thresholdPolicy      { address, threshold } to install the threshold
- *                             policy, or null for no policies
+ * @param policies             Policies to install, in any order
  */
 export function addContextRuleOp(
   accountAddress: string,
@@ -139,7 +155,7 @@ export function addContextRuleOp(
   name: string,
   validUntilLedger: number | null,
   signers: RuntimeSigner[],
-  thresholdPolicy: { address: string; threshold: number } | null,
+  policies: PolicyInstall[],
 ): xdr.Operation {
   const account = new Contract(accountAddress);
   const validUntil =
@@ -147,14 +163,19 @@ export function addContextRuleOp(
       ? xdr.ScVal.scvVoid()
       : xdr.ScVal.scvU32(validUntilLedger);
   const signerVec = xdr.ScVal.scvVec(signers.map(encodeRuntimeSigner));
-  const policiesMap = thresholdPolicy
-    ? xdr.ScVal.scvMap([
+
+  // Soroban maps are canonically ordered; an unsorted map is rejected outright
+  // as Object/InvalidInput, before any contract code runs. Harmless with one
+  // policy, essential with two.
+  const policyEntries = policies
+    .map(
+      (p) =>
         new xdr.ScMapEntry({
-          key: new Address(thresholdPolicy.address).toScVal(),
-          val: encodeThresholdPolicyParams(thresholdPolicy.threshold),
+          key: new Address(p.address).toScVal(),
+          val: p.installParam,
         }),
-      ])
-    : xdr.ScVal.scvMap([]);
+    )
+    .sort((a, b) => Buffer.compare(a.key().toXDR(), b.key().toXDR()));
 
   return account.call(
     'add_context_rule',
@@ -162,7 +183,91 @@ export function addContextRuleOp(
     xdr.ScVal.scvString(name),
     validUntil,
     signerVec,
-    policiesMap,
+    xdr.ScVal.scvMap(policyEntries),
+  );
+}
+
+/**
+ * Parameters a Recovery Policy is installed with. Read from the deployed
+ * contract's own spec (`RecoveryAccountParams`), not guessed:
+ *
+ *   delay_ledgers   how long after `propose` before the recovery may be
+ *                   enforced — the owner's veto window
+ *   window_ledgers  how long it stays enforceable once ready, before it lapses
+ *   target_rule_id  the rule the recovered call acts on (usually the Default
+ *                   rule, since recovery exists to restore spending access)
+ *   quorum_policy   optional nested policy governing guardian quorum
+ *
+ * Ledgers close roughly every 5 seconds, so 17280 ledgers ≈ 24 hours.
+ */
+export interface RecoveryPolicyParams {
+  delayLedgers: number;
+  windowLedgers: number;
+  targetRuleId: number;
+  quorumPolicy?: string | null;
+}
+
+/** `RecoveryAccountParams` ScVal — fields in alphabetical key order, as Soroban requires. */
+export function encodeRecoveryPolicyParams(p: RecoveryPolicyParams): xdr.ScVal {
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('delay_ledgers'),
+      val: xdr.ScVal.scvU32(p.delayLedgers),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('quorum_policy'),
+      val: p.quorumPolicy
+        ? new Address(p.quorumPolicy).toScVal()
+        : xdr.ScVal.scvVoid(),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('target_rule_id'),
+      val: xdr.ScVal.scvU32(p.targetRuleId),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('window_ledgers'),
+      val: xdr.ScVal.scvU32(p.windowLedgers),
+    }),
+  ]);
+}
+
+/**
+ * `add_policy(context_rule_id, policy, install_param)` — attach a policy
+ * contract to an existing context rule.
+ *
+ * ORDER MATTERS, IRREVERSIBLY, for the admin guard. Installing it on an
+ * account whose "admin" context rule does not yet exist permanently destroys
+ * that account's ability to be administered — the host rejects the re-entry
+ * that would be needed to undo it. Create the rule first, verify it, then
+ * install the policy. See BUILD.md in the contracts repo.
+ */
+export function addPolicyOp(
+  accountAddress: string,
+  ruleId: number,
+  policyAddress: string,
+  installParam: xdr.ScVal,
+): xdr.Operation {
+  return new Contract(accountAddress).call(
+    'add_policy',
+    xdr.ScVal.scvU32(ruleId),
+    new Address(policyAddress).toScVal(),
+    installParam,
+  );
+}
+
+/**
+ * `remove_policy(context_rule_id, policy_id)` — note this takes the policy's
+ * *id* within the rule, not its address. Read it with `get_policy_id(address)`.
+ */
+export function removePolicyOp(
+  accountAddress: string,
+  ruleId: number,
+  policyId: number,
+): xdr.Operation {
+  return new Contract(accountAddress).call(
+    'remove_policy',
+    xdr.ScVal.scvU32(ruleId),
+    xdr.ScVal.scvU32(policyId),
   );
 }
 
@@ -182,6 +287,51 @@ export function addSignerOp(
     xdr.ScVal.scvU32(ruleId),
     encodeRuntimeSigner(signer),
   );
+}
+
+/**
+ * `execute(<recovery policy>, "propose", [account, rule_id, fn_name, args])`
+ *
+ * A guardian quorum opening a recovery. Routed through the account's own
+ * `execute` rather than called on the policy directly, because the policy's
+ * `enforce` admits exactly one shape — an `execute` aimed at its own `propose` —
+ * and the guardian rule is scoped to `CallContract(<account>)`, so a direct call
+ * on the policy would not match the rule at all.
+ *
+ * `args` must be byte-identical to what is later presented to the account, or
+ * the policy rejects the finalize as ProposalMismatch. Build both with
+ * `recoveryAddSignerArgs`.
+ */
+export function recoveryProposeOp(
+  accountAddress: string,
+  policyAddress: string,
+  guardianRuleId: number,
+  fnName: string,
+  args: xdr.ScVal[],
+): xdr.Operation {
+  return new Contract(accountAddress).call(
+    'execute',
+    new Address(policyAddress).toScVal(),
+    xdr.ScVal.scvSymbol('propose'),
+    xdr.ScVal.scvVec([
+      new Address(accountAddress).toScVal(),
+      xdr.ScVal.scvU32(guardianRuleId),
+      xdr.ScVal.scvSymbol(fnName),
+      xdr.ScVal.scvVec(args),
+    ]),
+  );
+}
+
+/**
+ * The two arguments `add_signer(context_rule_id, signer)` takes, as a recovery
+ * pins them. Shared by propose and finalize so the encodings cannot drift — the
+ * policy compares them for exact equality.
+ */
+export function recoveryAddSignerArgs(
+  targetRuleId: number,
+  signer: RuntimeSigner,
+): xdr.ScVal[] {
+  return [xdr.ScVal.scvU32(targetRuleId), encodeRuntimeSigner(signer)];
 }
 
 /** `batch_add_signer(rule_id, signers)` — adds multiple signers in one tx. */

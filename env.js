@@ -65,6 +65,7 @@ const optionalEnv = {
   // works without them installed — they are opt-in per account.
   EXPO_PUBLIC_ADMIN_GUARD_POLICY: z.string().optional(),
   EXPO_PUBLIC_RECOVERY_POLICY: z.string().optional(),
+  EXPO_PUBLIC_RECOVERY_POLICY_MAINNET: z.string().optional(),
 
   // ─── Contracts used by demo / admin paths ───────────────────────────────────
   EXPO_PUBLIC_COUNTER_ADDRESS: z.string().optional(),
@@ -135,6 +136,7 @@ const envObject = {
 
   EXPO_PUBLIC_ADMIN_GUARD_POLICY: process.env.EXPO_PUBLIC_ADMIN_GUARD_POLICY,
   EXPO_PUBLIC_RECOVERY_POLICY: process.env.EXPO_PUBLIC_RECOVERY_POLICY,
+  EXPO_PUBLIC_RECOVERY_POLICY_MAINNET: process.env.EXPO_PUBLIC_RECOVERY_POLICY_MAINNET,
 
   EXPO_PUBLIC_COUNTER_ADDRESS: process.env.EXPO_PUBLIC_COUNTER_ADDRESS,
   EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: process.env.EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH,

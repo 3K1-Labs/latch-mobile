@@ -35,6 +35,7 @@ import {
 import {
   addContextRuleOp,
   batchAddSignerOp,
+  encodeThresholdPolicyParams,
   fetchFactoryVerifiers,
   liftToRuntimeSigner,
   RuntimeSigner,
@@ -143,7 +144,12 @@ export async function completePairing(
         'admin',
         null,
         allSignersAfter,
-        { address: verifiers.thresholdPolicy, threshold: adminThreshold },
+        [
+          {
+            address: verifiers.thresholdPolicy,
+            installParam: encodeThresholdPolicyParams(adminThreshold),
+          },
+        ],
       ),
     );
   }

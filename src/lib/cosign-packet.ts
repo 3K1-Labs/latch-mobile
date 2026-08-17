@@ -49,16 +49,35 @@ export interface CosignPacket {
   /** Ledger the pinned signatures expire at (mirrors signatureExpirationLedger). */
   expiresLedger: number;
   createdAt: string;
-  /** Operation kind — 'transfer' (default) or 'swap'. */
-  kind?: 'transfer' | 'swap';
+  /** Operation kind — 'transfer' (default), 'swap', or 'recovery'. */
+  kind?: 'transfer' | 'swap' | 'recovery';
   /** Present when kind === 'swap'; display-only (security gate is the XDR auth entry). */
   swapMeta?: SwapMeta;
+  /** Present when kind === 'recovery'; display-only, as with swapMeta. */
+  recoveryMeta?: RecoveryMeta;
   /**
    * On-chain tx hash once the request has been broadcast (backend transport
    * only). Lets a member still viewing the request detect that someone else met
    * the threshold and executed it, so they can be shown the success screen.
    */
   submittedTxHash?: string | null;
+}
+
+/**
+ * What a recovery packet is asking guardians to agree to.
+ *
+ * Display only. The binding commitment is the auth entry inside
+ * `unsignedTxXdr`, which is what every guardian signs — a packet whose metadata
+ * disagreed with its XDR would show the wrong thing but could not authorise
+ * anything other than what the XDR says.
+ */
+export interface RecoveryMeta {
+  /** 'propose' opens the veto window; 'finalize' spends a matured proposal. */
+  action: 'propose' | 'finalize';
+  /** Guardian context rule the signatures are made under. */
+  guardianRuleId: number;
+  /** The replacement device being added, as a G-address. */
+  newDeviceAddress: string;
 }
 
 export interface TransferSummary {
@@ -81,7 +100,11 @@ export function createPacket(
   assembled: AssembledTransfer,
   smartAccountAddress: string,
   threshold: number,
-  options?: { kind?: CosignPacket['kind']; swapMeta?: SwapMeta },
+  options?: {
+    kind?: CosignPacket['kind'];
+    swapMeta?: SwapMeta;
+    recoveryMeta?: RecoveryMeta;
+  },
 ): CosignPacket {
   return {
     v: PACKET_VERSION,
@@ -95,6 +118,7 @@ export function createPacket(
     createdAt: new Date().toISOString(),
     kind: options?.kind ?? 'transfer',
     swapMeta: options?.swapMeta,
+    recoveryMeta: options?.recoveryMeta,
   };
 }
 
