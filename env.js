@@ -14,16 +14,33 @@ const { z } = require('zod');
  * every field optional and turned this file into a no-op: a missing variable
  * became `undefined` and surfaced much later as a confusing runtime error.
  */
+/**
+ * A URL that React Native can actually issue a request against.
+ *
+ * `z.string().url()` is not enough: `new URL('localhost:8080')` parses happily,
+ * treating `localhost:` as the scheme, so a schemeless value passes validation
+ * and then fails at runtime with RN's opaque "No suitable URL request handler
+ * found". Requiring http/https up front turns that into a build error naming
+ * the variable.
+ */
+const httpUrl = () =>
+  z
+    .string()
+    .url()
+    .refine((v) => /^https?:\/\//i.test(v), {
+      message: 'must start with http:// or https://',
+    });
+
 const requiredEnv = {
   // ─── Core ───────────────────────────────────────────────────────────────────
   EXPO_PUBLIC_APP_ENV: z.string(),
-  EXPO_PUBLIC_API_BASE_URL: z.string().url(),
+  EXPO_PUBLIC_API_BASE_URL: httpUrl(),
 
   // ─── Stellar / Soroban (testnet — the default network for a fresh clone) ────
   EXPO_PUBLIC_NETWORK: z.string(),
   EXPO_PUBLIC_NETWORK_PASSPHRASE: z.string(),
-  EXPO_PUBLIC_HORIZON_TESTNET_URL: z.string().url(),
-  EXPO_PUBLIC_SOROBAN_RPC_URL: z.string().url(),
+  EXPO_PUBLIC_HORIZON_TESTNET_URL: httpUrl(),
+  EXPO_PUBLIC_SOROBAN_RPC_URL: httpUrl(),
   EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
   EXPO_PUBLIC_VERIFIER_ADDRESS: z.string(),
 
@@ -40,9 +57,16 @@ const optionalEnv = {
   // Selected at runtime by ACTIVE_NETWORK (src/constants/config.ts). Absent
   // values surface as a named error when switching to mainnet, which is the
   // right failure for a contributor working on testnet only.
-  EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: z.string().optional(),
+  EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: httpUrl().optional(),
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: z.string().optional(),
   EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: z.string().optional(),
+
+  // ─── Policy contracts ───────────────────────────────────────────────────────
+  // Policies enforce rules on an account (admin quorum, recovery); the
+  // VERIFIER_* addresses validate signatures. Optional because an account
+  // works without them installed — they are opt-in per account.
+  EXPO_PUBLIC_ADMIN_GUARD_POLICY: z.string().optional(),
+  EXPO_PUBLIC_RECOVERY_POLICY: z.string().optional(),
 
   // ─── Contracts used by demo / admin paths ───────────────────────────────────
   EXPO_PUBLIC_COUNTER_ADDRESS: z.string().optional(),
@@ -73,7 +97,7 @@ const optionalEnv = {
 
   // ─── OTA updates (hot-updater) ──────────────────────────────────────────────
   // Only needed to publish or receive OTA updates, not to run the app.
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: z.string().url().optional(),
+  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: httpUrl().optional(),
   EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY: z.string().optional(),
   EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME: z.string().optional(),
 };
@@ -113,6 +137,9 @@ const envObject = {
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET,
   EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET,
 
+  EXPO_PUBLIC_ADMIN_GUARD_POLICY: process.env.EXPO_PUBLIC_ADMIN_GUARD_POLICY,
+  EXPO_PUBLIC_RECOVERY_POLICY: process.env.EXPO_PUBLIC_RECOVERY_POLICY,
+
   EXPO_PUBLIC_COUNTER_ADDRESS: process.env.EXPO_PUBLIC_COUNTER_ADDRESS,
   EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: process.env.EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH,
 
@@ -140,7 +167,17 @@ const envObject = {
     process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME,
 };
 
-const parsed = envSchema.safeParse({ ...process.env, ...envObject });
+// Trim every value before validating. `KEY= value` in a .env file yields a
+// leading space, which survives into the bundle and breaks URL parsing and
+// address comparison in ways that are painful to trace back to whitespace.
+const trimmed = Object.fromEntries(
+  Object.entries({ ...process.env, ...envObject }).map(([k, v]) => [
+    k,
+    typeof v === 'string' ? v.trim() : v,
+  ]),
+);
+
+const parsed = envSchema.safeParse(trimmed);
 
 if (!parsed.success) {
   const missing = parsed.error.issues

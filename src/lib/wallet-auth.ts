@@ -23,8 +23,9 @@ import { findDeployedNetwork } from './account-network';
 import { signWithPasskey } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
 import { getPasskeyStorageKeys, SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
+import { API_BASE_URL } from '@/src/constants/api-host';
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1`;
 
 // ─── Transport ────────────────────────────────────────────────────────────────

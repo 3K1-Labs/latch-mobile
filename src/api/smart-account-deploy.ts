@@ -25,8 +25,9 @@ import { signWithPasskey } from '@/src/lib/passkey-webauthn';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
 import { bytesToB64, compactSigToDER } from '@/src/lib/wallet-auth';
 import { getPasskeyStorageKeys, SECURE_KEYS } from '@/src/store/wallet';
+import { API_BASE_URL } from '@/src/constants/api-host';
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1/smart-account`;
 
 /** How many BIP-44 indices to probe when matching a public key to its seed. */

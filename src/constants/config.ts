@@ -51,10 +51,16 @@ export const MAINNET_NETWORK: NetworkDetails = {
 // (hook, event handler, render), never a module-top-level computation, so the
 // live binding is picked up on the next call/render — see network-switch.ts.
 //
-// Starts on mainnet and is corrected by hydrateActiveNetwork() during startup.
-// The app root gates rendering on that hydration, so nothing reads a network
-// value before the persisted choice has been applied.
-export let ACTIVE_NETWORK: NetworkDetails = MAINNET_NETWORK;
+// Starts on testnet and is corrected by hydrateActiveNetwork() during startup
+// from the user's persisted choice. The app root gates rendering on that
+// hydration, so nothing reads a network value before it is applied.
+//
+// Testnet is the default deliberately. A fresh install has no persisted choice,
+// so whatever sits here is what a first run uses — and a first run that lands
+// on mainnet deploys a real account and spends real bundler XLM before the user
+// has chosen anything. The safe default is the one that costs nothing when it
+// is wrong.
+export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
 
 // Convenience shortcuts derived from the active network
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;

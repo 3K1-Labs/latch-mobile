@@ -11,7 +11,9 @@
  * (Android TLS via OkHttp), matching wck-bundle.ts.
  */
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+import { API_BASE_URL } from '@/src/constants/api-host';
+
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1/memberships`;
 
 export class MembershipApiError extends Error {

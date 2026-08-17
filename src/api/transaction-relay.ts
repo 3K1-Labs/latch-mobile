@@ -18,11 +18,13 @@
 import type { Transaction } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 
+import { toBase64, txToBase64 } from '@/src/api/smart-account';
 import { getNetworkId } from '@/src/constants/config';
 import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
 import { SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
+import { API_BASE_URL } from '@/src/constants/api-host';
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1/transaction`;
 
 export interface RelayResult {
@@ -115,10 +117,16 @@ function xhrPost(path: string, body: object, token: string): Promise<{ status: n
  *
  * The server rebuilds the operation around these, so they must be the entries
  * the user's key actually signed — not re-derived server-side.
+ *
+ * Encoded with toBase64's explicit byte loop rather than `toXDR('base64')`.
+ * The latter goes through Buffer.toString('base64'), which under React Native's
+ * Buffer polyfill can emit the decimal byte list "0,0,0,2,..." instead of
+ * base64 — the bug called out at the top of src/lib/passkey-webauthn.ts. The
+ * server then rejects the payload as "auth_entries must be base64".
  */
 function authEntriesFrom(tx: Transaction): string[] {
-  const op = tx.operations[0] as { auth?: { toXDR(format: 'base64'): string }[] } | undefined;
-  return (op?.auth ?? []).map((entry) => entry.toXDR('base64'));
+  const op = tx.operations[0] as { auth?: { toXDR(): Uint8Array }[] } | undefined;
+  return (op?.auth ?? []).map((entry) => toBase64(new Uint8Array(entry.toXDR())));
 }
 
 /**
@@ -137,7 +145,7 @@ export async function submitViaBundler(tx: Transaction): Promise<RelayResult> {
   const res = await xhrPost(
     '/submit',
     {
-      tx_xdr: tx.toEnvelope().toXDR('base64'),
+      tx_xdr: txToBase64(tx),
       auth_entries: authEntries,
       network: getNetworkId(),
     },

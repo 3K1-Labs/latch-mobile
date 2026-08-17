@@ -12,7 +12,9 @@
  * refresh on 401. Transport: raw XHR (Android TLS via OkHttp).
  */
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+import { API_BASE_URL } from '@/src/constants/api-host';
+
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1/cosign/requests`;
 
 export type CosignStatus = 'pending' | 'submitted' | 'cancelled' | 'expired';
