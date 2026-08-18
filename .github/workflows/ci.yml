@@ -9,8 +9,8 @@ on:
       - master
 
 jobs:
-  lint:
-    name: lint
+  quality:
+    name: lint · typecheck · test
     runs-on: ubuntu-latest
 
     steps:
@@ -27,3 +27,50 @@ jobs:
 
       - name: Run lint
         run: bun run lint
+
+      - name: Run typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun run test
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Run secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          head: HEAD
+          extra_args: --only-verified
+
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+
+  typo-check:
+    name: typo check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run typo check
+        uses: crate-ci/typos@v1

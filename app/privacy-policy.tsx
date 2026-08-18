@@ -22,7 +22,7 @@ const Section = ({ title, children }: SectionProps) => (
   </Box>
 );
 
-const Body = ({ children }: { children: string }) => (
+const Body = ({ children }: { children: React.ReactNode }) => (
   <Text variant="p7" color="textSecondary" lineHeight={22}>
     {children}
   </Text>

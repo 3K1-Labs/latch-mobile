@@ -1,0 +1,12 @@
+[default.extend-words]
+ALLO = "ALLO"
+mis = "mis"
+OT = "OT"
+PN = "PN"
+Stabl = "Stabl"
+THQ = "THQ"
+TRU = "TRU"
+Unparseable = "Unparseable"
+unparseable = "unparseable"
+Virtua = "Virtua"
+WRON = "WRON"
