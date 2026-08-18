@@ -27,7 +27,7 @@ import {
   markCosignSubmitted,
   type CosignRequestRaw,
 } from '@/src/api/cosign';
-import { ACTIVE_NETWORK } from '@/src/constants/config';
+import { getNetworkId } from '@/src/constants/config';
 import {
   blindSignerId,
   decryptForWallet,
@@ -54,8 +54,6 @@ import {
   getWalletCosignKey,
 } from '@/src/lib/wallet-cosign-key';
 import { useWalletStore } from '@/src/store/wallet';
-
-const NETWORK: 'testnet' | 'mainnet' = ACTIVE_NETWORK.network === 'TESTNET' ? 'testnet' : 'mainnet';
 
 function isAuthError(e: unknown): boolean {
   if (!(e instanceof CosignApiError)) return false;
@@ -199,7 +197,7 @@ export async function createTransferRequest(p: CreateTransferPacketParams): Prom
     const created = await createCosignRequest(t, {
       queueIndex,
       unsignedTxXdr: encryptForWallet(wck, assembled.unsignedTxXdr, account),
-      network: NETWORK,
+      network: getNetworkId(),
       threshold,
     });
     // Attach our blind-id'd, encrypted entry. Uses the SAME token the create just

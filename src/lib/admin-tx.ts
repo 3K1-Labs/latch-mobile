@@ -43,6 +43,7 @@ import {
   sorobanCall,
   txToBase64,
 } from '@/src/api/smart-account';
+import { HORIZON_URL } from '@/src/constants/config';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 
 export interface CompletePairingInput {
@@ -150,7 +151,7 @@ export async function completePairing(
 
   // ─── Assemble + simulate + submit (mirrors smart-account.ts pattern) ───
   const bundler = Keypair.fromSecret(cfg.bundlerSecret);
-  const horizonUrl = cfg.horizonUrl ?? 'https://horizon-testnet.stellar.org';
+  const horizonUrl = cfg.horizonUrl ?? HORIZON_URL;
 
   const horizonResp = await fetch(`${horizonUrl}/accounts/${bundler.publicKey()}`);
   if (!horizonResp.ok) {

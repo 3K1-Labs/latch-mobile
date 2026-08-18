@@ -10,8 +10,16 @@ import { toBaseUnits } from '@/src/services/send-token';
 import type { SwapBuildResult, SwapProvider, SwapQuote, SwapQuoteParams } from '../types';
 
 // Protocols the aggregator routes across. SDEX is the classic Stellar order
-// book; the rest are Soroban AMMs. Including all lets the API pick best price.
-const PROTOCOLS = ['soroswap', 'aqua', 'phoenix', 'sdex'];
+// book; the rest are Soroban AMMs.
+//
+// 'aqua' is deliberately excluded: verified live against mainnet that for
+// XLM/USDC it routes through a specific thin pool
+// (CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2) that returns
+// amountOut multiple times the real market value (e.g. 5 XLM ≈ $0.86 priced
+// out at $3-7+ of USDC). soroswap, phoenix, and sdex all independently agree
+// on the correct price for the same trade — only aqua's pool is broken, and
+// the aggregator keeps picking it because it looks like the best price.
+const PROTOCOLS = ['soroswap', 'phoenix', 'sdex'];
 
 // A multi-hop `platform: 'aggregator'` route can return poolHashes that the
 // /quote/build endpoint rejects with 400 "Invalid poolHashes string". When that

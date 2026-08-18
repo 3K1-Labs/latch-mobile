@@ -3,6 +3,7 @@ import PendingCosignList from '@/src/components/history/PendingCosignList';
 import SearchHeader from '@/src/components/history/SearchHeader';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { usePendingPackets } from '@/src/hooks/use-pending-packets';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useWalletStore } from '@/src/store/wallet';
@@ -52,6 +53,7 @@ const History = () => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const tabBarScroll = useTabBarScroll();
   const [activeFilter, setActiveFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [manualRefreshing, setManualRefreshing] = useState(false);
@@ -92,8 +94,6 @@ const History = () => {
       );
     } else if (activeFilter === 'Swap') {
       result = result.filter((tx) => tx.txType === 'swap');
-    } else if (activeFilter === 'Contract') {
-      result = result.filter((tx) => tx.type === 'invoke_host_function');
     }
 
     if (search.trim()) {
@@ -223,6 +223,7 @@ const History = () => {
       ) : (
         <Box paddingHorizontal="m">
           <SectionList
+            {...tabBarScroll}
             sections={sections}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}

@@ -5,26 +5,24 @@ import { onlineManager, QueryClientProvider } from '@tanstack/react-query';
 import { IconRegistry } from '@ui-kitten/components';
 import { EvaIconsPack } from '@ui-kitten/eva-icons';
 import '@walletconnect/react-native-compat';
+import { Buffer } from 'buffer';
 import { useFonts } from 'expo-font';
+import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import 'react-native-get-random-values';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import 'react-native-reanimated';
-import Toast from 'react-native-toast-message';
 import '../shim';
-// Now you can import libraries that need crypto
-import { Buffer } from 'buffer';
-import { Stack } from 'expo-router';
-import { install } from 'react-native-quick-crypto';
 import { queryClient } from '../src/api/client';
-import { toastConfig } from '../src/components/toast/toastConfig';
+import AppToast from '../src/components/toast/AppToast';
+import { hydrateActiveNetwork } from '../src/constants/config';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
+import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
 // Wire React Query's online/offline state to the device's actual connectivity.
@@ -35,14 +33,17 @@ onlineManager.setEventListener((setOnline) =>
   ),
 );
 
-install();
 global.Buffer = Buffer;
 
 if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     environment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
-    enabled: process.env.EXPO_PUBLIC_APP_ENV === 'production',
+    // Any non-dev build, not just production: a TestFlight/preview build is
+    // precisely the case that can't be debugged locally, and console.* is
+    // stripped there (metro.config.js drop_console), so Sentry is the only
+    // channel left. `environment` still separates staging from production.
+    enabled: !__DEV__,
   });
 }
 
@@ -58,6 +59,7 @@ function RootLayoutContent() {
   const { isDark } = useAppTheme();
   useOtaUpdate();
   useWalletConnect();
+  useWalletConnectDeepLink();
   useNetworkStatus();
 
   return (
@@ -83,12 +85,20 @@ function RootLayoutContent() {
         <Stack.Screen name="wc-session-request" options={{ presentation: 'modal' }} />
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Toast config={toastConfig} />
+      <AppToast />
     </>
   );
 }
 
 export default function RootLayout() {
+  // Gates rendering until the persisted network choice is applied, so no query
+  // or screen reads a network-derived value while it's still the default.
+  const [networkReady, setNetworkReady] = useState(false);
+
+  useEffect(() => {
+    hydrateActiveNetwork().finally(() => setNetworkReady(true));
+  }, []);
+
   const [fontsLoaded] = useFonts({
     SFproThin: require('../assets/fonts/SFPRO-Thin.ttf'),
     SFproRegular: require('../assets/fonts/SFPRO-Regular.ttf'),
@@ -103,14 +113,14 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded) {
+    if (fontsLoaded && networkReady) {
       setTimeout(() => {
         SplashScreen.hideAsync().catch(() => {});
       }, 500);
     }
-  }, [fontsLoaded]);
+  }, [fontsLoaded, networkReady]);
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded || !networkReady) {
     return null;
   }
 

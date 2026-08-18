@@ -1,20 +1,23 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
 import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
 import FundWalletSheet from '@/src/components/home/FundWalletSheet';
-import { useDepositInfo } from '@/src/hooks/use-deposit';
 import PendingApprovalBanner from '@/src/components/home/PendingApprovalBanner';
 import Box from '@/src/components/shared/Box';
+import Skeleton from '@/src/components/shared/Skeleton';
 import Text from '@/src/components/shared/Text';
 import TokenIcon from '@/src/components/shared/TokenIcon';
+import { getNetworkId } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
+import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
+import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import { usePortfolio, type TokenBalance } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { discoverMigration } from '@/src/lib/migration';
-import { useLoadingOverlay } from '@/src/store/loading-overlay';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -22,10 +25,11 @@ import { calculatePortfolio24hChangeFormatted, getTotalUSDBalance } from '@/src/
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { useQuery } from '@tanstack/react-query';
+import { format } from 'date-fns';
 import { ImageBackground } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -51,9 +55,10 @@ function RaysBackgroundInner() {
 const RaysBackground = memo(RaysBackgroundInner);
 
 const banners = [
-  { id: 1, image: require('@/src/assets/icon/Container.png') },
-  { id: 2, image: require('@/src/assets/icon/Container.png') },
-  { id: 3, image: require('@/src/assets/icon/Container.png') },
+  { id: 1, image: require('@/src/assets/banners/smart-accounts.png') },
+  { id: 2, image: require('@/src/assets/banners/multisig.png') },
+  { id: 3, image: require('@/src/assets/banners/swap.png') },
+  { id: 4, image: require('@/src/assets/banners/session-keys.png') },
 ];
 
 function TokenRow({
@@ -123,11 +128,39 @@ function TokenRow({
   );
 }
 
+/**
+ * Convert the fiat amount the user entered into the XLM figure the relayer
+ * expects on an intent's `expected_amt`.
+ *
+ * The on-ramp screen collects USD (MoonPay's baseCurrencyAmount) but the
+ * relayer compares expected_amt against what actually lands in the pool, which
+ * is XLM — handing it a dollar figure would flag a mismatch on every single
+ * deposit, which is worse than sending nothing.
+ *
+ * Necessarily an estimate: it's the GROSS fiat figure, so the provider's card
+ * and network fees mean the XLM that actually arrives is meaningfully lower,
+ * and the price moves between checkout and settlement. That's tolerable because
+ * expected_amt is advisory — the relayer logs a mismatch but still credits the
+ * deposit — and an order-of-magnitude sanity check is the point.
+ *
+ * Returns undefined rather than a wrong number when either input is unusable,
+ * since the field is optional and an omitted estimate beats a bogus one.
+ */
+function estimateXlmForFiat(fiatAmount?: string, xlmUsdPrice?: string): string | undefined {
+  if (!fiatAmount || !xlmUsdPrice) return undefined;
+  const fiat = parseFloat(fiatAmount);
+  const price = parseFloat(xlmUsdPrice);
+  if (!Number.isFinite(fiat) || fiat <= 0) return undefined;
+  if (!Number.isFinite(price) || price <= 0) return undefined;
+  return (fiat / price).toFixed(7);
+}
+
 const Home = () => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
+  const tabBarScroll = useTabBarScroll();
 
   const { smartAccountAddress, accounts, activeAccountIndex, mnemonic, avatars } = useWalletStore();
   const [showBalance, setShowBalance] = useState(false);
@@ -135,7 +168,107 @@ const Home = () => {
   const [fundVisible, setFundVisible] = useState(false);
   const [receiveVisible, setReceiveVisible] = useState(false);
 
-  const { data: depositInfo } = useDepositInfo();
+  const createDepositIntent = useCreateDepositIntent();
+
+  // A minted intent is only usable on the network it was minted against, and
+  // only while it belongs to the account on screen and its TTL hasn't elapsed.
+  // Once any of those fails the memo must not be shown: the relayer sweeps
+  // deposits carrying an expired or unknown memo_id to its recovery address
+  // instead of crediting the user.
+  //
+  // A mutation result outlives a network switch — useMutation's observer holds
+  // the mutation directly, so neither queryClient.clear() nor resetQueries()
+  // drops it — so without the mintedOn check an intent stays "live" after
+  // switching away, and the sheets would hand a provider a pool address nobody
+  // is watching on the network the user is now on.
+  const depositIntent =
+    createDepositIntent.data?.mintedOn === getNetworkId() &&
+    createDepositIntent.data &&
+    createDepositIntent.variables?.smartAccountAddress === smartAccountAddress &&
+    !isDepositIntentExpired(createDepositIntent.data.expires_at)
+      ? createDepositIntent.data
+      : undefined;
+
+  // Mint only when there isn't already a live intent. Re-minting on every Fund
+  // press would orphan a memo the user may have already copied into a sending
+  // wallet — the old intent stays valid until its TTL, but the status sheet
+  // would then be polling the wrong memo_id.
+  //
+  // Whether the active network has a relayer is the backend's call, not a
+  // build-time constant here: it answers 400 "funding is only available on
+  // testnet" when RELAYER_URL_MAINNET is unset, and starts minting the moment
+  // it is — with no new app build. A rejected mint leaves depositIntent
+  // undefined, so the sheets fall back to the direct C-address path exactly as
+  // they did when this was gated client-side.
+  //
+  // Names whichever guard stopped a mint, or null when one should go ahead.
+  // Every early exit below is invisible from the outside — the sheet just opens
+  // with no memo, and one of them (reusing a still-live intent) is correct
+  // behaviour that looks identical to a bug in a network inspector. Without this,
+  // "the deposit endpoint wasn't called" can't be told apart from an unhydrated
+  // store or an in-flight mint.
+  // Carries the address rather than just a boolean so the null check narrows for
+  // the caller — mutate() takes a plain string.
+  const depositMintPlan = (): { address: string } | { skip: string } => {
+    if (!smartAccountAddress) return { skip: 'no smart account address yet' };
+    if (depositIntent) {
+      return {
+        skip: `reusing live intent memo=${depositIntent.memo_id} expires=${depositIntent.expires_at}`,
+      };
+    }
+    if (createDepositIntent.isPending) return { skip: 'a mint is already in flight' };
+    return { address: smartAccountAddress };
+  };
+
+  const ensureDepositIntent = () => {
+    const plan = depositMintPlan();
+    if ('skip' in plan) {
+      if (__DEV__) console.log('[deposit] no mint —', plan.skip);
+      return;
+    }
+    if (__DEV__) console.log('[deposit] minting intent for', plan.address);
+    createDepositIntent.mutate({ smartAccountAddress: plan.address });
+  };
+
+  // The Fund-sheet intent above is minted at the backend's default 1h TTL, which
+  // suits someone about to paste an address into a wallet they already hold funds
+  // in. An on-ramp is a different bet: card purchases usually settle inside the
+  // hour, but a bank transfer can take days, and an expired memo_id is swept to
+  // recovery just like an unknown one. So re-mint with a long TTL at the moment
+  // the user actually commits to a provider, rather than widening the window for
+  // every deposit.
+  //
+  // Returns undefined on failure so the caller can fall back to the intent it
+  // already holds instead of opening a provider with no tag at all.
+  //
+  // fiatAmount is what the user typed on the amount screen (USD). expected_amt
+  // is denominated in the deposited asset, so it's converted here rather than
+  // passed straight through — see estimateXlmForFiat.
+  const prepareOnrampIntent = async (fiatAmount?: string) => {
+    if (!smartAccountAddress) {
+      if (__DEV__) console.log('[deposit] no on-ramp mint — no smart account address yet');
+      return undefined;
+    }
+    const expectedAmt = pricesArePlaceholder
+      ? undefined
+      : estimateXlmForFiat(fiatAmount, prices?.XLM?.price);
+    if (__DEV__) {
+      console.log('[deposit] minting on-ramp intent', { fiatAmount, expectedAmt });
+    }
+    try {
+      return await createDepositIntent.mutateAsync({
+        smartAccountAddress,
+        expiresIn: ONRAMP_INTENT_TTL_SECONDS,
+        expectedAmt,
+      });
+    } catch (err) {
+      // Swallowed so the caller can fall back to the intent it already holds,
+      // but the reason has to surface somewhere — a failed mint here is why a
+      // provider would open with no tag at all.
+      if (__DEV__) console.log('[deposit] on-ramp mint failed —', err);
+      return undefined;
+    }
+  };
 
   const activeAccount = accounts[activeAccountIndex];
   const activeAccountName = activeAccount?.name ?? 'Account 1';
@@ -145,11 +278,22 @@ const Home = () => {
 
   const { tokens: trackedTokens } = useTrackedTokens();
 
-  const { data: prices, refetch: refetchPrices } = usePrices();
+  const {
+    data: prices,
+    refetch: refetchPrices,
+    isPlaceholderData: pricesArePlaceholder,
+  } = usePrices();
+  // No blocking overlay on either of these. Both render their own section
+  // state, so balances are usable while the (far slower) history scan is still
+  // running, and a cold start paints the last known values immediately from the
+  // persisted snapshot instead of a spinner.
   const {
     data: portfolio,
     isLoading: portfolioLoading,
+    isFetching: portfolioFetching,
+    isError: portfolioError,
     refetch: refetchPortfolio,
+    snapshotAt: portfolioSnapshotAt,
   } = usePortfolio(smartAccountAddress, activeAccount?.gAddress, trackedTokens);
 
   const {
@@ -158,24 +302,20 @@ const Home = () => {
     isLoading: txLoading,
   } = useStellarTransactions(smartAccountAddress);
 
-  const showOverlay = useLoadingOverlay((s) => s.show);
-  const hideOverlay = useLoadingOverlay((s) => s.hide);
-
-  useEffect(() => {
-    if (portfolioLoading || txLoading) {
-      showOverlay('Loading...');
-    } else {
-      hideOverlay();
-    }
-    return () => hideOverlay();
-  }, [portfolioLoading, txLoading, showOverlay, hideOverlay]);
-
   const { data: migrationState } = useQuery({
     queryKey: ['migration-state', smartAccountAddress, activeAccount?.gAddress],
     queryFn: () => discoverMigration(activeAccount!),
     enabled: !!activeAccount?.gAddress && !!smartAccountAddress && !!mnemonic,
     staleTime: 60_000,
   });
+
+  const balanceStatus = portfolioError
+    ? 'Could not refresh — showing last known'
+    : portfolioSnapshotAt
+      ? `As of ${format(new Date(portfolioSnapshotAt), 'MMM d, HH:mm')}`
+      : portfolioFetching && !portfolioLoading
+        ? 'Updating…'
+        : null;
 
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
@@ -197,6 +337,18 @@ const Home = () => {
       portfolio: portfolio as TokenBalance[],
     });
   }, [portfolio, livePrices]);
+
+  // Tint the 24h badge by direction. Null when flat (or when the balance is
+  // hidden) so it falls back to the neutral chip rather than claiming a gain of
+  // exactly 0.00% is "up". dayChange is a toFixed string, so parse before
+  // comparing — '-0.00' and '0.00' both land on 0 and stay neutral.
+  const dayChangeTint = useMemo(() => {
+    const value = parseFloat(dayChange);
+    if (!showBalance || !Number.isFinite(value) || value === 0) return null;
+    return value > 0
+      ? { background: 'rgba(0,199,53,0.16)', text: theme.colors.success600 }
+      : { background: 'rgba(254,95,56,0.16)', text: theme.colors.danger900 };
+  }, [dayChange, showBalance, theme.colors.success600, theme.colors.danger900]);
 
   const xlmToken = useMemo(() => portfolio?.find((t) => t.code === 'XLM'), [portfolio]);
   const spendableXlm = useMemo(() => parseFloat(xlmToken?.amount ?? '0') || 0, [xlmToken]);
@@ -290,6 +442,7 @@ const Home = () => {
       </Box>
 
       <ScrollView
+        {...tabBarScroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -319,16 +472,24 @@ const Home = () => {
             />
           </TouchableOpacity>
 
-          <Text variant="h5" color="textPrimary" style={{ fontWeight: '700', letterSpacing: -1 }}>
-            {showBalance
-              ? portfolioLoading
-                ? '...'
-                : `$${totalUsd.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
-              : '***'}
-          </Text>
+          {portfolioLoading ? (
+            <Box my="s">
+              <Skeleton width={180} height={38} borderRadius={10} />
+            </Box>
+          ) : (
+            <Text variant="h5" color="textPrimary" style={{ fontWeight: '700', letterSpacing: -1 }}>
+              {!showBalance
+                ? '***'
+                : // No figure at all beats a fabricated one: with nothing fetched
+                  // and nothing cached, "$0.00" would read as an empty wallet.
+                  portfolio
+                  ? `$${totalUsd.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : '—'}
+            </Text>
+          )}
 
           <Box flexDirection="row" alignItems="center" gap="s" mt="xs">
             <Text variant="p7" color="textSecondary" fontWeight="600">
@@ -346,13 +507,33 @@ const Home = () => {
               justifyContent={'center'}
               alignItems={'center'}
               paddingVertical="xs"
-              style={!isDark ? { borderWidth: 1, borderColor: '#F0F0F0' } : {}}
+              style={
+                dayChangeTint
+                  ? { backgroundColor: dayChangeTint.background }
+                  : !isDark
+                    ? { borderWidth: 1, borderColor: '#F0F0F0' }
+                    : {}
+              }
             >
-              <Text variant="p7" color="textPrimary" fontWeight="700">
+              <Text
+                variant="p7"
+                color="textPrimary"
+                fontWeight="700"
+                style={dayChangeTint ? { color: dayChangeTint.text } : undefined}
+              >
                 {showBalance ? `${dayChange ?? 0.0}%` : '****'}
               </Text>
             </Box>
           </Box>
+
+          {/* Freshness, not a spinner. A background refresh has to be visible
+              without blocking, and a persisted snapshot must never pass for a
+              live figure. */}
+          {balanceStatus && (
+            <Text variant="p8" color="textSecondary" mt="xs">
+              {balanceStatus}
+            </Text>
+          )}
         </Box>
 
         {/* Action Buttons */}
@@ -376,6 +557,12 @@ const Home = () => {
                 onPress={() => {
                   if (item.label === 'Fund') {
                     setFundVisible(true);
+                    ensureDepositIntent();
+                  } else if (item.label === 'Swap') {
+                    // Swap is a tab, not a stacked screen — navigate() switches
+                    // to it (matching the tab bar) instead of pushing a second
+                    // copy on top of Home with no way back to the tab bar.
+                    router.navigate('/swap');
                   } else if ('route' in item && item.route) {
                     router.push(item.route as any);
                   }
@@ -460,9 +647,9 @@ const Home = () => {
             )}
           />
           <Box flexDirection="row" justifyContent="center" mt="m" gap="xs">
-            {[0, 1, 2].map((i) => (
+            {banners.map((banner, i) => (
               <Box
-                key={i}
+                key={banner.id}
                 width={bannerIndex === i ? 20 : 6}
                 height={6}
                 borderRadius={3}
@@ -529,7 +716,17 @@ const Home = () => {
             </TouchableOpacity>
           </Box>
 
-          {recentTx.length === 0 ? (
+          {/* The history scan is much slower than the balance fetch, so it gets
+              its own state here rather than holding the screen. "No transactions
+              found" is only the truth once a fetch has actually completed —
+              while one is still running it would be a guess. */}
+          {txLoading ? (
+            <Box>
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} width="100%" height={64} borderRadius={16} mb="s" />
+              ))}
+            </Box>
+          ) : recentTx.length === 0 ? (
             <Box
               py="xl"
               alignItems="center"
@@ -560,14 +757,17 @@ const Home = () => {
           setFundVisible(false);
           setReceiveVisible(true);
         }}
-        poolAddress={depositInfo?.pool_address ?? ''}
-        memo={depositInfo?.memo}
+        poolAddress={depositIntent?.pool_address ?? ''}
+        memo={depositIntent?.memo_id}
+        prepareOnrampIntent={prepareOnrampIntent}
       />
       <FundWalletSheet
         visible={receiveVisible}
         onClose={() => setReceiveVisible(false)}
-        address={depositInfo?.pool_address ?? ''}
-        memo={depositInfo?.memo}
+        cAddress={smartAccountAddress ?? ''}
+        proxyAddress={depositIntent?.pool_address}
+        memo={depositIntent?.memo_id}
+        memoExpiresAt={depositIntent?.expires_at}
       />
     </Box>
   );

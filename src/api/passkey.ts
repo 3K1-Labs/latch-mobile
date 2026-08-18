@@ -19,31 +19,31 @@
  * Horizon calls: native fetch (works on Android for non-Soroban endpoints).
  */
 
-import {
-  Account,
-  Contract,
-  Keypair,
-  Networks,
-  rpc,
-  scValToNative,
-  TransactionBuilder,
-  xdr,
-} from '@stellar/stellar-sdk';
+import { Account, Contract, Keypair, rpc, scValToNative, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 import { Buffer } from 'buffer';
 import * as SecureStore from 'expo-secure-store';
 import QuickCrypto from 'react-native-quick-crypto';
 
 import { encodeAccountInitParams } from '@/src/lib/account-signers';
+import {
+  HORIZON_URL,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { SECURE_KEYS } from '../store/wallet';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
+// Reads live off ACTIVE_NETWORK (src/constants/config.ts) on every call, so it
+// follows switchActiveNetwork() without a restart — see smart-account.ts.
 
 const getConfig = () => ({
-  rpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org',
-  horizonUrl: process.env.EXPO_PUBLIC_HORIZON_TESTNET_URL || 'https://horizon-testnet.stellar.org',
-  networkPassphrase: process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET,
-  factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS,
-  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET,
+  rpcUrl: STELLAR_RPC_URL,
+  horizonUrl: HORIZON_URL,
+  networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
+  factoryAddress: STELLAR_FACTORY_ADDRESS,
+  bundlerSecret: STELLAR_BUNDLER_SECRET,
 });
 
 // ─── XDR → base64 (React Native safe) ────────────────────────────────────────

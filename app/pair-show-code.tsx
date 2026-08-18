@@ -27,10 +27,15 @@ import {
 } from '@/src/lib/pairing-payload';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { AccountSigner } from '@/src/lib/account-signers';
+import {
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
-import { Networks } from '@stellar/stellar-sdk';
 import { useTheme } from '@shopify/restyle';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -249,12 +254,12 @@ async function runAdminTx(
   newSigner: AccountSigner,
   updateAccountDevices: ReturnType<typeof useWalletStore.getState>['updateAccountDevices'],
 ): Promise<void> {
-  const rpcUrl = process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
-  const networkPassphrase = process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
-  const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
+  const rpcUrl = STELLAR_RPC_URL;
+  const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
   if (!factoryAddress || !bundlerSecret) {
-    throw new Error('Missing EXPO_PUBLIC_FACTORY_ADDRESS or EXPO_PUBLIC_BUNDLER_SECRET');
+    throw new Error('Factory/bundler secret is not configured for the active network');
   }
 
   // Need a Keypair for the initiator (mnemonic users only). Passkey

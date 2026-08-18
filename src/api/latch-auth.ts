@@ -6,9 +6,21 @@
  * plaintext credentials.
  */
 
+import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
-import { getPasskeyStorageKeys, SECURE_KEYS, type WalletAccount } from '../store/wallet';
+import { getNetworkId } from '../constants/config';
+import {
+  ensureWalletSession,
+  getWalletSessionWithoutSignIn,
+  reSignInWallet,
+} from '../lib/wallet-auth';
+import {
+  getPasskeyStorageKeys,
+  SECURE_KEYS,
+  useWalletStore,
+  type WalletAccount,
+} from '../store/wallet';
 
 const API_ROOT = process.env.EXPO_PUBLIC_WALLET_BACKEND_URL ?? '';
 const API_BASE = `${API_ROOT}/v1`;
@@ -69,11 +81,15 @@ async function silentRefresh(): Promise<string | null> {
 export class LatchAPIError extends Error {
   status: number;
   code?: string;
-  constructor(status: number, code: string | undefined, message: string) {
+  /** Present only on GET /recovery/blob's 400 when the account has more than
+   * one wallet — the addresses to offer the user, e.g. via a wallet picker. */
+  wallets?: string[];
+  constructor(status: number, code: string | undefined, message: string, wallets?: string[]) {
     super(message);
     this.name = 'LatchAPIError';
     this.status = status;
     this.code = code;
+    this.wallets = wallets;
   }
 }
 
@@ -95,6 +111,7 @@ async function latchFetch(path: string, options: RequestInit = {}, token?: strin
       status,
       body?.error?.code,
       body?.error?.message ?? `Request failed (${status})`,
+      body?.wallets,
     );
   }
   return body?.data;
@@ -112,6 +129,29 @@ export async function clearEmailSession(): Promise<void> {
     SecureStore.deleteItemAsync(SECURE_KEYS.REFRESH_TOKEN),
     SecureStore.deleteItemAsync(SECURE_KEYS.USER_EMAIL),
   ]);
+}
+
+/**
+ * Revoke the current session's refresh token server-side. Best-effort: never
+ * throws — a network failure here shouldn't block whatever the caller is
+ * doing (logging out, or clearing a stale session before a fresh wallet
+ * takes over). Does not touch SecureStore; callers clear tokens separately.
+ */
+export async function logout(): Promise<void> {
+  try {
+    const [accessToken, refreshToken] = await Promise.all([
+      SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN),
+      SecureStore.getItemAsync(SECURE_KEYS.REFRESH_TOKEN),
+    ]);
+    if (!accessToken || !refreshToken) return;
+    await latchFetch(
+      '/auth/logout',
+      { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) },
+      accessToken,
+    );
+  } catch {
+    // Best-effort — the local token clear that follows is what actually matters.
+  }
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -293,8 +333,38 @@ export async function verifyRecoveryOTP(email: string, otp: string): Promise<str
 }
 
 /**
+ * Guard against declaring recovery "complete" on a truncated or corrupted
+ * blob — validates the restored accounts array is non-empty and every entry
+ * has a well-formed C-address before any SecureStore writes happen.
+ */
+function validateRestoredAccounts(accountsJson: string | undefined): void {
+  if (!accountsJson) throw new Error('Recovered backup is incomplete or corrupted');
+
+  let accounts: WalletAccount[];
+  try {
+    accounts = JSON.parse(accountsJson);
+  } catch {
+    throw new Error('Recovered backup is incomplete or corrupted');
+  }
+
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    throw new Error('Recovered backup is incomplete or corrupted');
+  }
+  for (const account of accounts) {
+    if (!account.smartAccountAddress || !StrKey.isValidContract(account.smartAccountAddress)) {
+      throw new Error('Recovered backup is incomplete or corrupted');
+    }
+  }
+}
+
+/**
  * Fetch the encrypted backup blob, decrypt it client-side, and restore all
  * keys to SecureStore. Called after a successful recovery OTP verify.
+ *
+ * The recovery token is unscoped unless the account has exactly one wallet.
+ * If the account has more than one, the backend responds 400 with a
+ * `wallets` list on the thrown LatchAPIError — call again with the address
+ * the user picked, reusing the same still-valid token (no new OTP needed).
  *
  * Throws 'Incorrect recovery password' if the password is wrong (GCM auth tag
  * mismatch), so the caller can surface a user-facing error.
@@ -302,8 +372,12 @@ export async function verifyRecoveryOTP(email: string, otp: string): Promise<str
 export async function fetchAndRestoreBackup(
   recoveryToken: string,
   password: string,
+  smartAccountAddress?: string,
 ): Promise<void> {
-  const data = await latchFetch('/recovery/blob', { method: 'GET' }, recoveryToken);
+  const path = smartAccountAddress
+    ? `/recovery/blob?address=${encodeURIComponent(smartAccountAddress)}`
+    : '/recovery/blob';
+  const data = await latchFetch(path, { method: 'GET' }, recoveryToken);
 
   const encryptedBlob = data.encrypted_blob as EncryptedBackup;
 
@@ -315,6 +389,8 @@ export async function fetchAndRestoreBackup(
   }
 
   const blob = JSON.parse(plaintext) as Record<string, string>;
+
+  validateRestoredAccounts(blob.accounts);
 
   const writes: Promise<void>[] = [];
 
@@ -412,29 +488,156 @@ export async function getPrices(tokens: string[]): Promise<Record<string, PriceD
 
 // ─── Deposit ─────────────────────────────────────────────────────────────────
 
-export interface DepositInfo {
+export interface DepositIntent {
+  intent_id: string;
+  memo_id: string;
   pool_address: string;
-  memo: string;
+  expires_at: string;
 }
 
-export interface DepositJob {
-  id: number;
-  stellar_op_id: string;
-  amount_stroops: number;
+export interface DepositForward {
+  tx_hash: string;
+  amount: string;
+  asset: string;
   status: string;
-  error?: string;
+  forward_tx?: string;
   created_at: string;
-  processed_at?: string;
 }
 
-export async function fetchDepositInfo(): Promise<DepositInfo> {
-  const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
-  if (!accessToken) throw new Error('Not authenticated');
-  return latchFetch('/deposit', {}, accessToken);
+export interface DepositStatus {
+  intent_id: string;
+  memo_id: string;
+  c_address: string;
+  pool_address: string;
+  status: 'pending' | 'completed' | 'expired' | 'failed';
+  expires_at: string;
+  forwards: DepositForward[];
 }
 
-export async function fetchDepositStatus(): Promise<{ jobs: DepositJob[] }> {
-  const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
-  if (!accessToken) return { jobs: [] };
-  return latchFetch('/deposit/status', {}, accessToken);
+export interface DepositIntentOptions {
+  /**
+   * Expected deposit size, in the deposited asset's own units (e.g. XLM) — not
+   * fiat. The relayer compares it against what actually arrives and logs a
+   * mismatch; a fiat figure here would differ from every real deposit. Advisory
+   * only: a mismatch never blocks crediting.
+   */
+  expectedAmt?: string;
+  /** On-ramp provider's order/transaction ID, so a deposit can be traced end to end. */
+  externalId?: string;
+  /** Seconds until the intent expires. The backend clamps; omit for its default (1h). */
+  expiresIn?: number;
+}
+
+/**
+ * TTL for an intent the user is about to fund through an on-ramp.
+ *
+ * The relayer's 1h default is sized for someone pasting an address into a wallet
+ * they already hold funds in. A card purchase usually settles inside that, but an
+ * ACH/SEPA bank transfer can take days — and an expired memo_id is swept to the
+ * recovery address exactly like an unknown one, so a slow settlement would lose
+ * the deposit outright.
+ */
+export const ONRAMP_INTENT_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * Bearer token for the deposit endpoints.
+ *
+ * Funding is the one latch-api feature reachable by a user who never entered an
+ * email — onboarding's collect-email step is skippable — so the email-scope
+ * ACCESS_TOKEN cannot be the only credential we look for, or those users hit
+ * "Not authenticated" and the request never leaves the device. Prefer the email
+ * token when it exists (unchanged for users who did back up), then fall back to
+ * the wallet-scope session every user has by definition.
+ *
+ * `allowSignIn` is false on timer-driven callers: minting a wallet session reads
+ * a biometric-gated passkey key, and a Face ID prompt raised by a 15s poll the
+ * user didn't trigger is worse than a skipped refresh.
+ */
+async function depositAccessToken(allowSignIn: boolean): Promise<string> {
+  const emailToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
+  if (emailToken) return emailToken;
+
+  const account = activeWalletAccount();
+  const walletToken =
+    account && allowSignIn
+      ? await ensureWalletSession(account)
+      : await getWalletSessionWithoutSignIn();
+  if (!walletToken) throw new Error('Not authenticated');
+  return walletToken;
+}
+
+function activeWalletAccount(): WalletAccount | undefined {
+  const { accounts, activeAccountIndex } = useWalletStore.getState();
+  return accounts[activeAccountIndex];
+}
+
+/**
+ * Mints a fresh, TTL-bound funding intent for smartAccountAddress. Call this
+ * when the user opens the Fund flow — not cached across sessions, since
+ * latch-relayer intents are one-per-funding-session (default 1hr expiry),
+ * not permanent per-account registrations.
+ *
+ * `expectedAmt`/`externalId`/`expiresIn` are optional pass-throughs to the
+ * relayer's POST /intents. The relayer stores them on the intent row; a backend
+ * that doesn't forward them yet simply ignores them — so always read the TTL you
+ * actually got back off `expires_at`, never assume the one you asked for.
+ */
+export async function createDepositIntent(
+  smartAccountAddress: string,
+  options: DepositIntentOptions = {},
+): Promise<DepositIntent> {
+  const accessToken = await depositAccessToken(true);
+  // Which relayer mints the intent. Omitting it defaults the backend to
+  // testnet, which on mainnet would hand back a pool address nothing watches.
+  const body: Record<string, string | number> = {
+    smart_account_address: smartAccountAddress,
+    network: getNetworkId(),
+  };
+  if (options.expectedAmt) body.expected_amt = options.expectedAmt;
+  if (options.externalId) body.external_id = options.externalId;
+  if (options.expiresIn) body.expires_in = options.expiresIn;
+  const request = { method: 'POST', body: JSON.stringify(body) };
+
+  try {
+    return await latchFetch('/accounts/deposit-intent', request, accessToken);
+  } catch (err) {
+    // latchFetch's built-in 401 retry refreshes the EMAIL session, so a rejected
+    // wallet-scope token still lands here. Re-sign-in once and retry — the same
+    // recovery use-portfolio applies to its own wallet-scope 401s. Safe to
+    // prompt: this call only ever runs off a user opening the Fund flow.
+    const account = activeWalletAccount();
+    if (err instanceof LatchAPIError && err.status === 401 && account) {
+      return latchFetch('/accounts/deposit-intent', request, await reSignInWallet(account));
+    }
+    throw err;
+  }
+}
+
+/**
+ * The relayer parses inbound deposits with `memo.ParseID` — it only recognises
+ * MEMO_ID (numeric). A deposit sent with a TEXT memo, no memo, or an expired
+ * memo_id is swept to the relayer's recovery address and is NOT credited to the
+ * user. Surface this wherever the memo is shown or handed to a provider.
+ */
+export const DEPOSIT_MEMO_TYPE = 'id' as const;
+
+/** True once a minted intent's TTL has elapsed and it can no longer be deposited against. */
+export function isDepositIntentExpired(expiresAt: string | undefined): boolean {
+  if (!expiresAt) return true;
+  const ts = Date.parse(expiresAt);
+  return Number.isNaN(ts) || ts <= Date.now();
+}
+
+/**
+ * Polls the status of a previously-created funding intent by memo_id.
+ */
+export async function fetchDepositIntentStatus(memoId: string): Promise<DepositStatus> {
+  const accessToken = await depositAccessToken(false);
+  // Memo IDs are allocated per relayer deployment, so the same memo_id can
+  // exist on both networks — the lookup has to say which one it means.
+  return latchFetch(
+    `/accounts/deposit/status/${encodeURIComponent(memoId)}?network=${getNetworkId()}`,
+    {},
+    accessToken,
+  );
 }

@@ -43,11 +43,11 @@ const GetStarted = () => {
       title: 'Recover Account',
       description: 'Restore your wallet using your recovery email',
     },
-    {
-      id: 'recover' as OptionType,
-      title: 'Recover Account',
-      description: 'Restore your wallet using your recovery email',
-    },
+    // {
+    //   id: 'recover' as OptionType,
+    //   title: 'Recover Account',
+    //   description: 'Restore your wallet using your recovery email',
+    // },
   ];
 
   const handleContinue = () => {

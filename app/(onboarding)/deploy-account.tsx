@@ -9,7 +9,7 @@
  */
 
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
-import { uploadBackup } from '@/src/api/latch-auth';
+import { logout, uploadBackup } from '@/src/api/latch-auth';
 import { deploySmartAccount as deploySmartAccountPasskey } from '@/src/api/passkey';
 import { deploySmartAccount as deploySmartAccountEd25519 } from '@/src/api/smart-account';
 import { discoverMigration } from '@/src/lib/migration';
@@ -21,7 +21,7 @@ import Text from '@/src/components/shared/Text';
 import DeployTimeline, { type DeployStep, type StepStatus } from '@/src/components/deploy/DeployTimeline';
 import { createPasskeyCredential, storePasskeyCredential } from '@/src/lib/passkey-webauthn';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
-import { SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
+import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -170,6 +170,26 @@ const DeployAccount = () => {
 
         if (cancelled) return;
 
+        // ── Step 2.5: clear any stale session before this wallet takes over ────
+        // A previous session's tokens can still be sitting in SecureStore here
+        // (e.g. iCloud Keychain persistence after reinstall — same class of
+        // staleness Step 4 below already handles for wallet data). Left alone,
+        // the backup upload a few lines down would silently run under a
+        // previous identity's access token.
+        const staleRefreshToken = await SecureStore.getItemAsync(SECURE_KEYS.REFRESH_TOKEN);
+        if (staleRefreshToken) {
+          await logout();
+          await Promise.all([
+            SecureStore.deleteItemAsync(SECURE_KEYS.ACCESS_TOKEN),
+            SecureStore.deleteItemAsync(SECURE_KEYS.REFRESH_TOKEN),
+            SecureStore.deleteItemAsync(SECURE_KEYS.USER_EMAIL),
+            SecureStore.deleteItemAsync(SECURE_KEYS.WALLET_ACCESS_TOKEN),
+            SecureStore.deleteItemAsync(SECURE_KEYS.WALLET_REFRESH_TOKEN),
+          ]);
+        }
+
+        if (cancelled) return;
+
         // ── Step 3: persist smart account address ─────────────────────────────
         await SecureStore.setItemAsync(SECURE_KEYS.SMART_ACCOUNT, deployedAddress);
 
@@ -213,15 +233,25 @@ const DeployAccount = () => {
         }
         setSmartAccountAddress(deployedAddress);
 
-        // ── Step 5: upload encrypted backup (best-effort, non-blocking) ───────
+        // ── Step 5: upload encrypted backup ───────────────────────────────────
         // Skip for the shared flow: uploadBackup consumes and deletes the
         // recovery-password session, and the multisig doesn't exist yet. The
         // single backup is deferred to shared-wallet-review, which runs once
         // both the personal and multisig accounts are in ACCOUNTS.
+        //
+        // Awaited (not fire-and-forget): the user is about to be told setup
+        // succeeded, so a failed upload must be known before that happens.
+        // We still let them proceed to the dashboard either way — the wallet
+        // itself deployed fine — but a failure here leaves a durable flag so
+        // the dashboard can prompt a retry via BackupSheet, since this screen
+        // navigates away and can't show a retry action itself. See BACKUP_PENDING.
         if (flow !== 'shared') {
-          uploadBackup().catch((err) => {
+          try {
+            await uploadBackup();
+          } catch (err: any) {
             __DEV__ && console.log('[backup] upload failed:', err?.message);
-          });
+            await AsyncStorage.setItem(ASYNC_KEYS.BACKUP_PENDING, 'true');
+          }
         }
 
         if (!cancelled) {

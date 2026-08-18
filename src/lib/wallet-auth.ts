@@ -18,10 +18,11 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
-import { PASSKEY_RP_ID } from '../constants/config';
+import { getNetworkId, PASSKEY_RP_ID } from '../constants/config';
+import { findDeployedNetwork } from './account-network';
 import { signWithPasskey } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
-import { getPasskeyStorageKeys, SECURE_KEYS, type WalletAccount } from '../store/wallet';
+import { getPasskeyStorageKeys, SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
 
 const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
 const API_BASE = `${API_ROOT}/v1`;
@@ -112,7 +113,16 @@ export async function signInWithWallet(account: WalletAccount): Promise<TokenPai
   if (__DEV__) console.log('[wallet-auth] signInWithWallet: wallet=', wallet, 'keyType=', keyType, 'index=', account.index);
   if (!wallet) throw new Error('wallet address not available — smart account may not be deployed yet');
 
-  const ch = await xhrPost('/auth/challenge', { wallet, key_type: keyType });
+  // The backend resolves a passkey wallet's on-chain signers over the RPC for
+  // the network it's told, and defaults to testnet when told nothing — so a
+  // mainnet account signing in without this finds no signer and is rejected as
+  // "signature verification failed". The nonce is bound to the network at issue
+  // and re-checked on consume, so both calls must carry the same value.
+  const network = getNetworkId();
+
+  if (isPasskey) await assertWalletIsOnNetwork(account, wallet, network);
+
+  const ch = await xhrPost('/auth/challenge', { wallet, key_type: keyType, network });
   if (__DEV__) console.log('[wallet-auth] challenge status=', ch.status, 'body=', JSON.stringify(ch.body));
   if (ch.status !== 200 || !ch.body?.data?.nonce) {
     throw new Error(ch.body?.error?.message ?? `challenge failed (${ch.status})`);
@@ -131,7 +141,7 @@ export async function signInWithWallet(account: WalletAccount): Promise<TokenPai
     throw e;
   }
 
-  const si = await xhrPost('/auth/sign-in', payload);
+  const si = await xhrPost('/auth/sign-in', { ...payload, network });
   if (__DEV__) console.log('[wallet-auth] sign-in status=', si.status, 'body=', JSON.stringify(si.body));
   if (si.status !== 200 || !si.body?.data?.access_token) {
     throw new Error(si.body?.error?.message ?? `sign-in failed (${si.status})`);
@@ -146,6 +156,43 @@ export async function signInWithWallet(account: WalletAccount): Promise<TokenPai
     SecureStore.setItemAsync(SECURE_KEYS.WALLET_REFRESH_TOKEN, tokens.refreshToken),
   ]);
   return tokens;
+}
+
+/**
+ * Refuse a sign-in for a wallet that lives on a different network than the app
+ * is pointed at. The backend reads a passkey wallet's signers from the chain we
+ * declare, so a mismatch comes back as an opaque "signature verification
+ * failed" — indistinguishable from a forged assertion, and unactionable. Here
+ * we still know which network the wallet is really on, so say so.
+ *
+ * Passkey accounts only: an ed25519 sign-in is verified against the G-address
+ * alone, with no chain read that could be aimed at the wrong ledger.
+ *
+ * Accounts deployed after `network` was added carry it and cost nothing to
+ * check; older ones are probed once and stamped. A network that can't be
+ * resolved (RPC down, or a wallet on neither chain) proceeds exactly as before
+ * — a bad connection must never lock someone out of their own wallet.
+ */
+async function assertWalletIsOnNetwork(
+  account: WalletAccount,
+  wallet: string,
+  network: 'testnet' | 'mainnet',
+): Promise<void> {
+  let deployedOn = account.network;
+  if (!deployedOn) {
+    const found = await findDeployedNetwork(wallet);
+    if (!found) return;
+    deployedOn = found;
+    // Best-effort cache of the probe result; a failed write just re-probes.
+    await useWalletStore.getState().setAccountNetwork(wallet, found).catch(() => {});
+  }
+  if (deployedOn === network) return;
+
+  const label = (n: string) => (n === 'testnet' ? 'Testnet' : 'Mainnet');
+  throw new Error(
+    `This wallet is on ${label(deployedOn)}, but the app is on ${label(network)}. ` +
+      `Switch networks under Profile → Network to use it.`,
+  );
 }
 
 async function buildEd25519Payload(
@@ -243,13 +290,23 @@ function isJwtExpired(token: string, skewSeconds = 30): boolean {
  * sign-in. If the refresh fails the (stale) cached token is returned so the
  * caller's own 401 handling still applies — never worse than before.
  */
-export async function ensureWalletSession(account: WalletAccount): Promise<string> {
+/**
+ * Return a usable session token without ever signing in, or null if that isn't
+ * possible. Signing in reads this device's passkey private key, and on a
+ * biometric-gated key that read raises an OS Face ID / Touch ID prompt — which
+ * must never happen on background work the user didn't ask for. Callers running
+ * off a timer or an app-foreground event use this and skip when it returns null.
+ */
+export async function getWalletSessionWithoutSignIn(): Promise<string | null> {
   const existing = await SecureStore.getItemAsync(SECURE_KEYS.WALLET_ACCESS_TOKEN);
-  if (existing && !isJwtExpired(existing)) return existing;
-  if (existing) {
-    const refreshed = await refreshWalletSession();
-    return refreshed ?? existing;
-  }
+  if (!existing) return null;
+  if (!isJwtExpired(existing)) return existing;
+  return (await refreshWalletSession()) ?? existing;
+}
+
+export async function ensureWalletSession(account: WalletAccount): Promise<string> {
+  const cached = await getWalletSessionWithoutSignIn();
+  if (cached) return cached;
   const tokens = await signInWithWallet(account);
   return tokens.accessToken;
 }

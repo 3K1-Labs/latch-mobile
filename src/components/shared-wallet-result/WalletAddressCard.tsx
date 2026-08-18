@@ -1,7 +1,7 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { useAppTheme } from '@/src/theme/ThemeContext';
-import * as Clipboard from 'expo-clipboard';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import React from 'react';
 import { Share, StyleSheet, View } from 'react-native';
 import AddressActionButton from './AddressActionButton';
@@ -14,7 +14,7 @@ interface WalletAddressCardProps {
 const WalletAddressCard: React.FC<WalletAddressCardProps> = ({ address, onShowQR }) => {
   const { isDark } = useAppTheme();
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(address);
+    await copyToClipboard(address);
   };
 
   const handleShare = async () => {

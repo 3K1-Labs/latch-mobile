@@ -1,7 +1,13 @@
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+  getNetworkId,
+} from '@/src/constants/config';
+import { clearSacTransferCache } from '@/src/lib/sac-transfer-cache';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Networks } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
@@ -34,6 +40,10 @@ export const SECURE_KEYS = {
 
 export const ASYNC_KEYS = {
   AVATARS: 'latch_account_avatars',
+  // Set when an onboarding backup upload fails so the app can nudge the user
+  // to complete it once they reach the dashboard, instead of losing the
+  // failure silently. Cleared as soon as the nudge is shown (one-shot).
+  BACKUP_PENDING: 'latch_backup_pending',
 } as const;
 
 /**
@@ -83,6 +93,14 @@ export interface WalletAccount {
   publicKeyHex: string;
   /** Deployed C-address on Stellar, null if not yet deployed */
   smartAccountAddress: string | null;
+  /**
+   * Network the smart account was deployed on. The C-address only exists on
+   * that one chain, but the active network is switchable at runtime — so
+   * without this the two can silently disagree and every on-chain read for
+   * this account hits a ledger it isn't in. Absent on accounts persisted
+   * before the field existed; resolved on demand by findDeployedNetwork.
+   */
+  network?: 'testnet' | 'mainnet';
   /** Custom profile image URI, null if default */
   image: string | null;
   /** Passkey credential ID (hex). Present only on passkey accounts added after account 0. */
@@ -222,6 +240,14 @@ interface WalletStore {
   updateAccountSmartAddress: (bip44Index: number, smartAddress: string) => Promise<void>;
 
   /**
+   * Record which network an account's smart account is deployed on, keyed by
+   * C-address (unique across the list, unlike `index`). Backfills accounts
+   * persisted before `network` existed, so the chain is probed once per
+   * account rather than on every sign-in.
+   */
+  setAccountNetwork: (smartAddress: string, network: 'testnet' | 'mainnet') => Promise<void>;
+
+  /**
    * Remove an account by its BIP-44/passkey index. Used to roll back an
    * optimistically-added account when its on-chain deployment fails.
    */
@@ -352,8 +378,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       set({ smartAccountAddress: address });
       return;
     }
+    // Stamp the network it was deployed on — the C-address is only valid there.
     const updated = accounts.map((a, i) =>
-      i === activeAccountIndex ? { ...a, smartAccountAddress: address } : a,
+      i === activeAccountIndex ? { ...a, smartAccountAddress: address, network: getNetworkId() } : a,
     );
     persistAccounts(updated).catch(() => { });
     // Also write the legacy key so app/index.tsx can still find it
@@ -416,12 +443,15 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return accounts[existingIndex];
     }
 
-    const updated = [...accounts, account];
+    // A shared wallet can only be joined on the network it lives on, so the
+    // active one is the right stamp when the caller didn't supply it.
+    const appended = { ...account, network: account.network ?? getNetworkId() };
+    const updated = [...accounts, appended];
     const newIndex = updated.length - 1;
     await persistAccounts(updated);
     set({ accounts: updated });
     if (makeActive) await get().switchAccount(newIndex);
-    return account;
+    return appended;
   },
 
   switchAccount: (listIndex) => {
@@ -492,7 +522,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
   updateAccountSmartAddress: async (bip44Index, smartAddress) => {
     const { accounts, activeAccountIndex } = get();
     const updated = accounts.map((a) =>
-      a.index === bip44Index ? { ...a, smartAccountAddress: smartAddress } : a,
+      a.index === bip44Index
+        ? { ...a, smartAccountAddress: smartAddress, network: getNetworkId() }
+        : a,
     );
     await persistAccounts(updated);
 
@@ -508,6 +540,15 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       accounts: updated,
       ...(isActive ? { smartAccountAddress: smartAddress } : {}),
     });
+  },
+
+  setAccountNetwork: async (smartAddress, network) => {
+    const { accounts } = get();
+    const updated = accounts.map((a) =>
+      a.smartAccountAddress === smartAddress ? { ...a, network } : a,
+    );
+    await persistAccounts(updated);
+    set({ accounts: updated });
   },
 
   markAccountMultisig: async (listIndex, threshold, signers) => {
@@ -550,9 +591,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return false;
     }
 
-    const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
+    const factoryAddress = STELLAR_FACTORY_ADDRESS;
     if (!factoryAddress) {
-      if (__DEV__) console.log('[syncSigners] abort: EXPO_PUBLIC_FACTORY_ADDRESS not set in bundle');
+      if (__DEV__) console.log('[syncSigners] abort: factory address not configured for the active network');
       return false;
     }
     if (__DEV__) {
@@ -560,9 +601,8 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         `[syncSigners] start: account=${account.smartAccountAddress.slice(0, 8)}… factory=${factoryAddress.slice(0, 8)}…`,
       );
     }
-    const rpcUrl =
-      process.env.EXPO_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
-    const networkPassphrase = process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
+    const rpcUrl = STELLAR_RPC_URL;
+    const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
 
     let rule;
     try {
@@ -793,6 +833,8 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       SecureStore.deleteItemAsync(SECURE_KEYS.KEY_DATA_HEX),
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
       AsyncStorage.removeItem(ASYNC_KEYS.AVATARS),
+      AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING),
+      clearSacTransferCache(),
       ...indexedPasskeyDeletions,
     ]);
     set({

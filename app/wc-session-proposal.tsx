@@ -2,12 +2,12 @@ import DappHeader from '@/src/components/walletconnect/DappHeader';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { WC_CHAIN, approveProposal, rejectProposal } from '@/src/lib/walletconnect';
+import { getWcChain, approveProposal, rejectProposal } from '@/src/lib/walletconnect';
 import { useWalletStore } from '@/src/store/wallet';
 import { useWalletConnectStore } from '@/src/store/walletconnect';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,8 +17,16 @@ export default function WCSessionProposalScreen() {
   const { smartAccountAddress } = useWalletStore();
   const [loading, setLoading] = useState(false);
 
+  // router.back() updates NavigationContainer's state — doing it inline during
+  // render (instead of an effect) trips React's "Cannot update a component
+  // while rendering a different component" warning.
+  useEffect(() => {
+    if (!pendingProposal) {
+      router.back();
+    }
+  }, [pendingProposal]);
+
   if (!pendingProposal) {
-    router.back();
     return null;
   }
 
@@ -26,11 +34,16 @@ export default function WCSessionProposalScreen() {
   const meta = proposer.metadata;
   const icon = meta.icons?.[0];
 
-  const requiredChains = Object.values(pendingProposal.params.requiredNamespaces ?? {}).flatMap(
-    (ns: any) => ns.chains ?? [],
-  );
-  const chainMismatch = requiredChains.length > 0 && !requiredChains.includes(WC_CHAIN);
-  const requiredNetwork = requiredChains
+  // WalletConnect deprecated requiredNamespaces in favor of optionalNamespaces
+  // (the SDK auto-migrates one to the other and logs a warning) — dApps now
+  // commonly declare their chain only under optionalNamespaces, so reading
+  // requiredNamespaces alone would silently miss real mismatches.
+  const declaredChains = [
+    ...Object.values(pendingProposal.params.requiredNamespaces ?? {}),
+    ...Object.values(pendingProposal.params.optionalNamespaces ?? {}),
+  ].flatMap((ns: any) => ns.chains ?? []);
+  const chainMismatch = declaredChains.length > 0 && !declaredChains.includes(getWcChain());
+  const requiredNetwork = declaredChains
     .find((c: string) => c.startsWith('stellar:'))
     ?.split(':')[1]
     ?.toUpperCase();
@@ -46,8 +59,11 @@ export default function WCSessionProposalScreen() {
       // Refresh session list
       const { getActiveSessions } = await import('@/src/lib/walletconnect');
       setActiveSessions(getActiveSessions());
+      // Don't also call router.back() here — the effect above does it when
+      // pendingProposal flips to null. Calling it in both places double-pops
+      // the modal (second pop races the first mid-transition — the "presenting
+      // a screen whose view is not in the window hierarchy" freeze).
       setPendingProposal(null);
-      router.back();
     } catch (e: any) {
       Alert.alert('Connection failed', e?.message ?? 'Unknown error');
     } finally {
@@ -62,7 +78,6 @@ export default function WCSessionProposalScreen() {
       // best-effort
     }
     setPendingProposal(null);
-    router.back();
   };
 
   return (
@@ -107,7 +122,7 @@ export default function WCSessionProposalScreen() {
             </Text>
             <Text variant="p8" color="textWhite">
               This dApp requires Stellar {requiredNetwork ?? 'Mainnet'}. Your wallet is on{' '}
-              {WC_CHAIN === 'stellar:testnet' ? 'Testnet' : 'Mainnet'}. Reject and reconnect with a
+              {getWcChain() === 'stellar:testnet' ? 'Testnet' : 'Mainnet'}. Reject and reconnect with a
               matching build.
             </Text>
           </Box>

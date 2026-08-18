@@ -11,12 +11,13 @@
  */
 
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
-import { fetchAndRestoreBackup, uploadBackup } from '@/src/api/latch-auth';
+import { fetchAndRestoreBackup, LatchAPIError, uploadBackup } from '@/src/api/latch-auth';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
+import { shortenAddress } from '@/src/utils';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
@@ -25,7 +26,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { Formik } from 'formik';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -64,10 +65,39 @@ const SetRecoveryPassword = () => {
   const isEnter = mode === 'enter';
   const schema = isEnter ? enterSchema : setSchema;
 
-  const title = isEnter ? 'Enter Recovery Password' : 'Create Recovery Password';
-  const subtitle = isEnter
-    ? 'Enter the recovery password you set when you created your wallet.'
-    : 'This password encrypts your wallet backup. Write it down — if you forget it, your backup cannot be recovered.';
+  // Set only when the account has more than one wallet (GET /recovery/blob
+  // 400 VALIDATION_ERROR with a `wallets` list) — the password form is
+  // replaced with a picker until the user chooses one.
+  const [walletChoices, setWalletChoices] = useState<string[] | null>(null);
+  const [pendingPassword, setPendingPassword] = useState('');
+  const [pickerError, setPickerError] = useState('');
+  const [isRestoringChoice, setIsRestoringChoice] = useState(false);
+
+  const title = walletChoices
+    ? 'Select a Wallet'
+    : isEnter
+      ? 'Enter Recovery Password'
+      : 'Create Recovery Password';
+  const subtitle = walletChoices
+    ? 'Multiple backups were found for this email. Choose which one to restore.'
+    : isEnter
+      ? 'Enter the recovery password you set when you created your wallet.'
+      : 'This password encrypts your wallet backup. Write it down — if you forget it, your backup cannot be recovered.';
+
+  const restoreWithWallet = async (address: string) => {
+    if (!recoveryToken) return;
+    setIsRestoringChoice(true);
+    setPickerError('');
+    try {
+      await fetchAndRestoreBackup(recoveryToken, pendingPassword, address);
+      await AsyncStorage.setItem('latch_onboarding_complete', 'true');
+      router.replace({ pathname: '/(onboarding)/set-pin', params: { from: 'recovery' } });
+    } catch (err: any) {
+      setPickerError(err?.message ?? 'Something went wrong. Please try again.');
+    } finally {
+      setIsRestoringChoice(false);
+    }
+  };
 
   const handleSubmit = async (
     values: { password: string; confirm: string },
@@ -76,7 +106,16 @@ const SetRecoveryPassword = () => {
     try {
       if (isEnter) {
         if (!recoveryToken) throw new Error('Missing recovery token');
-        await fetchAndRestoreBackup(recoveryToken, values.password);
+        try {
+          await fetchAndRestoreBackup(recoveryToken, values.password);
+        } catch (err) {
+          if (err instanceof LatchAPIError && err.code === 'VALIDATION_ERROR' && err.wallets?.length) {
+            setPendingPassword(values.password);
+            setWalletChoices(err.wallets);
+            return;
+          }
+          throw err;
+        }
         await AsyncStorage.setItem('latch_onboarding_complete', 'true');
         router.replace({ pathname: '/(onboarding)/set-pin', params: { from: 'recovery' } });
       } else {
@@ -161,11 +200,48 @@ const SetRecoveryPassword = () => {
           </Text>
         </Box>
 
-        <Formik
-          initialValues={{ password: '', confirm: '' }}
-          validationSchema={schema}
-          onSubmit={handleSubmit}
-        >
+        {walletChoices ? (
+          <Box flex={1}>
+            {walletChoices.map((address) => (
+              <TouchableOpacity
+                key={address}
+                onPress={() => restoreWithWallet(address)}
+                disabled={isRestoringChoice}
+                activeOpacity={0.7}
+              >
+                <Box
+                  backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+                  borderRadius={16}
+                  paddingHorizontal="m"
+                  height={56}
+                  justifyContent="center"
+                  mb="s"
+                >
+                  <Text variant="body" color="textPrimary">
+                    {shortenAddress(address)}
+                  </Text>
+                </Box>
+              </TouchableOpacity>
+            ))}
+
+            {pickerError !== '' && (
+              <Text variant="body" color="danger900" textAlign="center" mb="m">
+                {pickerError}
+              </Text>
+            )}
+
+            {isRestoringChoice && (
+              <Box alignItems="center" mt="m">
+                <ActivityIndicator color={theme.colors.primary700} />
+              </Box>
+            )}
+          </Box>
+        ) : (
+          <Formik
+            initialValues={{ password: '', confirm: '' }}
+            validationSchema={schema}
+            onSubmit={handleSubmit}
+          >
           {({
             handleChange,
             handleBlur,
@@ -266,7 +342,8 @@ const SetRecoveryPassword = () => {
               </Box>
             </Box>
           )}
-        </Formik>
+          </Formik>
+        )}
       </Box>
     </KeyboardAwareScrollView>
   );

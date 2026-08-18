@@ -4,7 +4,6 @@ import {
   isVerifierCompatible,
   type ChainSigner,
 } from '@/src/api/account-admin';
-import { uploadBackup } from '@/src/api/latch-auth';
 import { deployMultiSigSmartAccount } from '@/src/api/smart-account';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
 import { announceMembership } from '@/src/lib/membership';
@@ -27,7 +26,11 @@ import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 import {
@@ -70,6 +73,11 @@ interface ResultState {
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Called after the new multisig wallet is created, once this sheet has
+   * closed, so the caller can prompt for the recovery password and back it
+   * up (e.g. by opening BackupSheet) — uploadBackup() can't do this itself
+   * post-onboarding, since the password session is gone by then. */
+  onNeedsBackup?: () => void;
 }
 
 const STEP_TITLES: Record<Step, string> = {
@@ -95,7 +103,7 @@ function describeMemberReadError(message: string): string {
   return 'could not read account';
 }
 
-const SharedWalletWizardSheet = ({ visible, onClose }: Props) => {
+const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
   const insets = useSafeAreaInsets();
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
@@ -278,7 +286,7 @@ const SharedWalletWizardSheet = ({ visible, onClose }: Props) => {
     const simParams = {
       rpcUrl: STELLAR_RPC_URL,
       networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-      factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+      factoryAddress: STELLAR_FACTORY_ADDRESS,
     };
     const pendingInvites: string[] = [];
     const invalidAddresses: string[] = [];
@@ -404,10 +412,6 @@ const SharedWalletWizardSheet = ({ visible, onClose }: Props) => {
         if (__DEV__) console.log('[membership] announce failed:', err?.message);
       });
 
-      uploadBackup().catch((err) => {
-        if (__DEV__) console.log('[backup] upload failed:', err?.message);
-      });
-
       setResult({
         success: true,
         walletAddress: deployResult.smartAccountAddress,
@@ -440,6 +444,10 @@ const SharedWalletWizardSheet = ({ visible, onClose }: Props) => {
     setResult(null);
     if (wasSuccess) {
       resetAndClose();
+      // Close this sheet's Modal before opening BackupSheet's — two Modals
+      // changing presentation state in the same tick wedges the native
+      // modal host on iOS.
+      onNeedsBackup?.();
     }
   };
 

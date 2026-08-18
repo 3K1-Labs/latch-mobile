@@ -18,7 +18,11 @@ import SharePacketModal from '@/src/components/cosign/SharePacketModal';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import {
   decodePacketParam,
   decodeTransferSummary,
@@ -85,7 +89,7 @@ function simParams() {
   return {
     rpcUrl: STELLAR_RPC_URL,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+    factoryAddress: STELLAR_FACTORY_ADDRESS,
   };
 }
 

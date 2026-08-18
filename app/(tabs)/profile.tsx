@@ -12,22 +12,24 @@ import NetworkSheet from '@/src/components/profile/NetworkSheet';
 import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
 // import PoliciesSheet from '@/src/components/profile/PoliciesSheet';
+import { logout } from '@/src/api/latch-auth';
 import PrivacyPolicySheet from '@/src/components/profile/PrivacyPolicySheet';
 import RecoveryPhraseSheet from '@/src/components/profile/RecoveryPhraseSheet';
 import SettingItem from '@/src/components/profile/SettingItem';
 import SignersSheet from '@/src/components/profile/SignersSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
-import { useWalletStore } from '@/src/store/wallet';
+import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BIOMETRIC_ENABLED_KEY } from '../(auth)/biometric';
@@ -48,6 +50,7 @@ const Profile = () => {
   // const [policiesVisible, setPoliciesVisible] = useState(false);
   const [addressBookVisible, setAddressBookVisible] = useState(false);
   const [networkVisible, setNetworkVisible] = useState(false);
+  const [, forceNetworkLabelRefresh] = useState(0);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [helpSupportVisible, setHelpSupportVisible] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
@@ -59,9 +62,22 @@ const Profile = () => {
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
 
+  // One-shot nudge: if onboarding's backup upload failed, prompt for it here
+  // instead of losing the failure silently — see BACKUP_PENDING and
+  // deploy-account.tsx's Step 5.
+  useEffect(() => {
+    AsyncStorage.getItem(ASYNC_KEYS.BACKUP_PENDING).then((pending) => {
+      if (pending === 'true') {
+        AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING);
+        setBackupVisible(true);
+      }
+    });
+  }, []);
+
   if (!activeAccount) return null;
 
   const handleLogout = async () => {
+    await logout();
     await clearAll();
     await AsyncStorage.multiRemove([BIOMETRIC_ENABLED_KEY, 'latch_onboarding_complete']);
     router.replace('/onboarding');
@@ -69,7 +85,7 @@ const Profile = () => {
 
   return (
     <Box flex={1} backgroundColor="cardbg" style={{ paddingTop: insets.top }}>
-<StatusBar style="light" />
+      <StatusBar style="light" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -86,8 +102,9 @@ const Profile = () => {
           address={activeAccount?.smartAccountAddress || activeAccount?.gAddress || ''}
           image={activeAccount ? (avatars[activeAccount.publicKeyHex] ?? null) : null}
           onCopyAddress={async () => {
+            console.log('activeAccount', activeAccount);
             if (activeAccount?.smartAccountAddress) {
-              await Clipboard.setStringAsync(activeAccount?.smartAccountAddress);
+              await copyToClipboard(activeAccount.smartAccountAddress);
             }
           }}
           onPress={() => setSwitcherVisible(true)}
@@ -96,6 +113,7 @@ const Profile = () => {
         <AccountSwitcherSheet
           visible={switcherVisible}
           onClose={() => setSwitcherVisible(false)}
+          onNeedsBackup={() => setBackupVisible(true)}
         />
         <AccountInfoSheet
           visible={accountInfoVisible}
@@ -117,7 +135,11 @@ const Profile = () => {
           visible={addressBookVisible}
           onClose={() => setAddressBookVisible(false)}
         />
-        <NetworkSheet visible={networkVisible} onClose={() => setNetworkVisible(false)} />
+        <NetworkSheet
+          visible={networkVisible}
+          onClose={() => setNetworkVisible(false)}
+          onNetworkChanged={() => forceNetworkLabelRefresh((n) => n + 1)}
+        />
         <NotificationSheet
           visible={notificationsVisible}
           onClose={() => setNotificationsVisible(false)}
@@ -137,6 +159,7 @@ const Profile = () => {
         <SharedWalletWizardSheet
           visible={sharedWalletVisible}
           onClose={() => setSharedWalletVisible(false)}
+          onNeedsBackup={() => setBackupVisible(true)}
         />
 
         <Box paddingHorizontal="m">
@@ -241,7 +264,7 @@ const Profile = () => {
             <SettingItem
               icon="globe-outline"
               label="Network"
-              value={'Testnet'}
+              value={ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network'}
               onPress={() => setNetworkVisible(true)}
             />
             <SettingItem

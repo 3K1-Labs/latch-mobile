@@ -13,9 +13,15 @@ import { Asset } from '@stellar/stellar-sdk';
 
 import { STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
 import { CIRCLE_USDC_CONTRACT, USDC_CODE } from '@/src/constants/constants';
-import { WELL_KNOWN_TOKENS } from '@/src/constants/known-tokens';
+import { getWellKnownTokens } from '@/src/constants/known-tokens';
 
 let cache: Record<string, string> | null = null;
+
+// Contract ids are network-specific — a switch (src/lib/network-switch.ts)
+// must drop this memoized cache or it keeps resolving the old network's ids.
+export function resetSacAssetCodeCache(): void {
+  cache = null;
+}
 
 function buildMap(): Record<string, string> {
   const map: Record<string, string> = {};
@@ -24,7 +30,7 @@ function buildMap(): Record<string, string> {
   } catch {
     /* SDK contractId unavailable — skip native */
   }
-  for (const t of WELL_KNOWN_TOKENS) {
+  for (const t of getWellKnownTokens()) {
     try {
       const cid =
         t.sacContractId ??

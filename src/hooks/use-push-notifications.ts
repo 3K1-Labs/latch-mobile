@@ -11,7 +11,7 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, InteractionManager } from 'react-native';
 
 import { discoverSharedWallets, retryPendingAnnouncements } from '@/src/lib/membership';
 import { registerPushToken } from '@/src/lib/push-registration';
@@ -60,18 +60,32 @@ export function usePushNotifications(): void {
       lastSweepRef.current = now;
       // Re-fire any announce a transient failure (e.g. 429) dropped, then poll
       // for wallets this device was added to. Both are non-fatal.
-      retryPendingAnnouncements().catch((err) => {
+      // allowSignIn: false — this sweep runs on mount and on app-foreground, so
+      // it must never sign in. Sign-in reads the device passkey, and a
+      // biometric-gated key raises Face ID on read: an unexplained prompt the
+      // user didn't ask for, which also backgrounds the app and re-fires the
+      // `active` handler below. Both calls defer instead when there's no cached
+      // session; the throttle alone only bounded that, it didn't prevent it.
+      retryPendingAnnouncements({ allowSignIn: false }).catch((err) => {
         if (__DEV__) console.log('[membership] re-announce sweep failed:', err?.message);
       });
-      discoverSharedWallets().catch((err) => {
+      discoverSharedWallets({ allowSignIn: false }).catch((err) => {
         if (__DEV__) console.log('[membership] discovery failed:', err?.message);
       });
     };
-    run();
+    // Defer the initial sweep until after the dashboard's first paint and any
+    // in-flight touch/gesture settle. discoverSharedWallets() ends in a
+    // synchronous pure-JS P-256 signature (signWithPasskey) for passkey
+    // accounts signing in for the first time — running it on the mount tick
+    // froze the JS thread right as the user landed on the dashboard.
+    const interaction = InteractionManager.runAfterInteractions(run);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') run();
     });
-    return () => sub.remove();
+    return () => {
+      interaction.cancel();
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {

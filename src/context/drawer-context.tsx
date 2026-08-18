@@ -8,6 +8,8 @@ import {
   View,
 } from 'react-native';
 
+import AppToast from '@/src/components/toast/AppToast';
+
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.9;
 const DURATION_OPEN = 250;
@@ -88,6 +90,13 @@ export function DrawerProvider({
           <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
             {drawerContent}
           </Animated.View>
+          {/* A React Native Modal is its own native window above the root view,
+              so the <Toast/> in app/_layout.tsx can never paint over this
+              drawer. Mount one inside, after the panel. react-native-toast-
+              message keeps a stack of refs and shows on the most recently
+              mounted, restoring the previous on unmount — gated on `visible` so
+              a closed drawer never sits on top of that stack. */}
+          {visible && <AppToast />}
         </View>
       </Modal>
     </DrawerContext.Provider>

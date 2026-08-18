@@ -16,6 +16,7 @@ import { useAddressBook } from '@/src/hooks/use-address-book';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
+import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createTransfer } from '@/src/lib/cosign-transport';
 import { diagnoseAuthFailure, isAuthFailure } from '@/src/lib/tx-diagnostics';
 import { friendlyTxError } from '@/src/lib/tx-errors';
@@ -30,7 +31,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Dimensions, Image, TouchableOpacity } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -47,11 +48,19 @@ const SendToken = () => {
   const { data: prices } = usePrices();
   const { entries: addressBookEntries } = useAddressBook();
 
-  const { data: portfolio } = usePortfolio(
+  const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
     smartAccountAddress,
     activeAccount?.gAddress,
     trackedTokens,
   );
+
+  // usePortfolio can serve a persisted snapshot for instant paint (see
+  // dashboard-snapshot.ts). That is fine for glancing at a balance; it is not
+  // authority to spend. Force a live read when this screen opens so Max and the
+  // insufficient-funds check are based on the chain, not on last launch.
+  useEffect(() => {
+    void refetchPortfolio();
+  }, [refetchPortfolio]);
 
   const [selectedToken, setSelectedToken] = useState<SendTokenType | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<Recipient | null>(null);
@@ -69,6 +78,15 @@ const SendToken = () => {
   const [isRedeploying, setIsRedeploying] = useState(false);
 
   const tokens = portfolio ?? [];
+
+  // When signing raises its own OS prompt, TxAuthModal must not raise a second
+  // one — see signingRaisesBiometricPrompt.
+  const [signingPromptsForBiometrics, setSigningPromptsForBiometrics] = useState(false);
+  useEffect(() => {
+    signingRaisesBiometricPrompt()
+      .then(setSigningPromptsForBiometrics)
+      .catch(() => setSigningPromptsForBiometrics(false));
+  }, [activeAccountIndex]);
 
   const requestAuth = (message: string): Promise<boolean> =>
     new Promise((resolve) => {
@@ -433,6 +451,7 @@ const SendToken = () => {
         visible={showAuthModal}
         promptMessage={authPromptMessage}
         onResult={handleAuthResult}
+        signingPromptsForBiometrics={signingPromptsForBiometrics}
       />
 
       <AddressBookSheet

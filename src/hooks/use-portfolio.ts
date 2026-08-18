@@ -21,12 +21,15 @@
 // fallback. See docs/phase-3-wallet-auth-and-history.md for the rationale.
 
 import { Address, Asset, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { HORIZON_URL, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '../constants/config';
-import { WELL_KNOWN_TOKENS, type TokenConfig } from '../constants/known-tokens';
+import { getWellKnownTokens, type TokenConfig } from '../constants/known-tokens';
 import { fetchAccountBalances, GraphQLError } from '../api/wallet-backend';
+import { writeSnapshot } from '../lib/dashboard-snapshot';
 import { ensureWalletSession, reSignInWallet } from '../lib/wallet-auth';
 import { useWalletStore } from '../store/wallet';
+import { useSnapshotSeed } from './use-snapshot-seed';
 
 const USE_WB_BALANCES = process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES === 'true';
 
@@ -76,25 +79,39 @@ function fetchAllSacBalances(cAddress: string, sacIds: string[]): Promise<Record
   const keys = sacIds.map((id) => buildLedgerKeyB64(cAddress, id));
   const keyToSacId = new Map(keys.map((k, i) => [k, sacIds[i]]));
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', STELLAR_RPC_URL, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.timeout = 15000;
+    // A transport failure is NOT a balance of zero. Resolving `zero` here meant
+    // a slow or unreachable RPC rendered as a confident, fully-loaded empty
+    // wallet — indistinguishable from actually having no funds. Rejecting hands
+    // React Query an error, which keeps the last known balances on screen (see
+    // placeholderData in usePortfolio) and drives the error state instead.
+    //
+    // A key that is simply absent from `result.entries` is different: the chain
+    // has no balance entry for it, which genuinely is zero. That still resolves.
     xhr.onload = () => {
-      const result = { ...zero };
       try {
         const json = JSON.parse(xhr.responseText);
+        if (json.error) {
+          reject(new Error(`getLedgerEntries: ${json.error.message ?? 'RPC error'}`));
+          return;
+        }
+        const result = { ...zero };
         for (const entry of json.result?.entries ?? []) {
           const sacId = keyToSacId.get(entry.key);
           if (sacId) result[sacId] = parseBalanceFromXdr(entry.xdr);
         }
-      } catch { }
-      resolve(result);
+        resolve(result);
+      } catch {
+        reject(new Error('getLedgerEntries: unparseable response'));
+      }
     };
-    xhr.onerror = () => resolve(zero);
-    xhr.ontimeout = () => resolve(zero);
+    xhr.onerror = () => reject(new Error('getLedgerEntries: network error'));
+    xhr.ontimeout = () => reject(new Error('getLedgerEntries: request timed out'));
     xhr.send(
       JSON.stringify({
         jsonrpc: '2.0',
@@ -128,7 +145,7 @@ async function fetchAllSacBalancesViaWalletBackend(
   if (sacIds.length === 0) return zero;
 
   const account = useWalletStore.getState().accounts[useWalletStore.getState().activeAccountIndex];
-  if (!account) return zero;
+  if (!account) throw new Error('wallet-backend balances: no active account');
 
   let token = await ensureWalletSession(account);
   let balances;
@@ -139,7 +156,9 @@ async function fetchAllSacBalancesViaWalletBackend(
       token = await reSignInWallet(account);
       balances = await fetchAccountBalances(cAddress, token);
     } else {
-      return zero;
+      // Same reasoning as the RPC fetcher: a failed request is not a zero
+      // balance, and must not be cached or rendered as one.
+      throw err;
     }
   }
 
@@ -163,21 +182,73 @@ const chooseSacBalanceFetcher = USE_WB_BALANCES
   : fetchAllSacBalances;
 
 /**
+ * Assets held by the classic G-address, as extra tokens to price.
+ *
+ * Deliberately its own request (and its own query — see useTrustlineTokens):
+ * discovery only ever *widens* the token set, so awaiting it before fetching
+ * balances put a 10s Horizon round trip in front of the XLM balance that never
+ * needed it. Rejects rather than returning [] so a flaky Horizon isn't cached
+ * as "this account has no trustlines".
+ */
+function fetchTrustlineTokens(gAddress: string): Promise<TokenConfig[]> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', `${HORIZON_URL}/accounts/${encodeURIComponent(gAddress)}`, true);
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.timeout = 10000;
+    xhr.onload = () => {
+      try {
+        const account = JSON.parse(xhr.responseText);
+        const tokens: TokenConfig[] = [];
+        for (const b of account.balances ?? []) {
+          if (b.asset_type === 'native' || b.asset_type === 'liquidity_pool_shares') continue;
+          tokens.push({ code: b.asset_code, issuer: b.asset_issuer, name: b.asset_code });
+        }
+        resolve(tokens);
+      } catch {
+        reject(new Error('trustline lookup: unparseable response'));
+      }
+    };
+    xhr.onerror = () => reject(new Error('trustline lookup: network error'));
+    xhr.ontimeout = () => reject(new Error('trustline lookup: request timed out'));
+    xhr.send();
+  });
+}
+
+/**
+ * G-address trustline discovery, cached separately from balances.
+ *
+ * Trustlines change rarely, so this is refetched far less often than balances
+ * and — crucially — never blocks them. Its result feeds usePortfolio's query
+ * key, so when it does land the balance query refetches in the background with
+ * the previous balances still on screen.
+ */
+export function useTrustlineTokens(gAddress?: string | null) {
+  return useQuery({
+    queryKey: ['trustline-tokens', gAddress],
+    queryFn: () => fetchTrustlineTokens(gAddress!),
+    enabled: !!gAddress,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
  * Fetch all token balances for a smart account (C-address).
  *
  * Token discovery strategy (union of all, deduplicated by code+issuer):
  *  1. XLM — always included (native SAC).
  *  2. Well-known tokens — auto-checked; zero-balance ones are filtered out.
  *  3. Tracked tokens — the user's persisted list (managed via useTrackedTokens).
- *  4. G-address trustlines — any additional assets held by the classic G-address.
+ *  4. G-address trustlines — discovered by useTrustlineTokens and passed in;
+ *     absent on the first load, which is the point (see fetchTrustlineTokens).
  *
  * All SAC balance fetches run in parallel. Tokens with zero balance are hidden
  * (except XLM which is always shown).
  */
 async function fetchPortfolio(
   cAddress: string,
-  gAddress: string | null | undefined,
   trackedTokens: TokenConfig[],
+  trustlineTokens: TokenConfig[],
 ): Promise<TokenBalance[]> {
   const nativeSacId = Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE);
 
@@ -186,7 +257,7 @@ async function fetchPortfolio(
   const tokenMap = new Map<string, TokenConfig>();
 
   // 1. Well-known tokens — auto-detected; zero-balance ones are filtered out below
-  for (const t of WELL_KNOWN_TOKENS) {
+  for (const t of getWellKnownTokens()) {
     const key = t.sacContractId ?? `${t.code}:${t.issuer}`;
     tokenMap.set(key, t);
   }
@@ -197,36 +268,11 @@ async function fetchPortfolio(
     tokenMap.set(key, t);
   }
 
-  // 3. G-address trustlines
-  if (gAddress) {
-    try {
-      const account = await new Promise<any>((resolve) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', `${HORIZON_URL}/accounts/${gAddress}`, true);
-        xhr.setRequestHeader('Accept', 'application/json');
-        xhr.timeout = 10000;
-        xhr.onload = () => {
-          try {
-            resolve(JSON.parse(xhr.responseText));
-          } catch {
-            resolve({});
-          }
-        };
-        xhr.onerror = () => resolve({});
-        xhr.ontimeout = () => resolve({});
-        xhr.send();
-      });
-
-      for (const b of account.balances ?? []) {
-        if (b.asset_type === 'native' || b.asset_type === 'liquidity_pool_shares') continue;
-        const key = `${b.asset_code}:${b.asset_issuer}`;
-        if (!tokenMap.has(key)) {
-          tokenMap.set(key, { code: b.asset_code, issuer: b.asset_issuer, name: b.asset_code });
-        }
-      }
-    } catch {
-      // G-address lookup failed — use tracked tokens only
-    }
+  // 3. G-address trustlines — first occurrence wins, so a well-known or tracked
+  //    entry keeps its richer config.
+  for (const t of trustlineTokens) {
+    const key = t.sacContractId ?? `${t.code}:${t.issuer}`;
+    if (!tokenMap.has(key)) tokenMap.set(key, t);
   }
 
   const nonNativeTokens = Array.from(tokenMap.values()).map((t) => ({
@@ -271,12 +317,35 @@ export function usePortfolio(
   gAddress?: string | null,
   trackedTokens: TokenConfig[] = [],
 ) {
+  const { data: trustlineTokens } = useTrustlineTokens(gAddress);
+  const snapshot = useSnapshotSeed<TokenBalance[]>('portfolio', cAddress);
+
   const tokenKey = trackedTokens.map((t) => t.sacContractId ?? `${t.code}:${t.issuer}`).join(',');
-  return useQuery({
-    queryKey: ['portfolio', cAddress, gAddress, tokenKey],
-    queryFn: () => fetchPortfolio(cAddress!, gAddress, trackedTokens),
-    placeholderData: keepPreviousData,
+  const trustlineKey = (trustlineTokens ?? [])
+    .map((t) => t.sacContractId ?? `${t.code}:${t.issuer}`)
+    .join(',');
+
+  const query = useQuery({
+    queryKey: ['portfolio', cAddress, tokenKey, trustlineKey],
+    queryFn: () => fetchPortfolio(cAddress!, trackedTokens, trustlineTokens ?? []),
+    // Previous data first (a token-set change must not blank the screen), then
+    // the persisted snapshot on a cold start. Either way the query reports
+    // success + isPlaceholderData rather than isLoading, so nothing blocks.
+    placeholderData: (previous) => previous ?? snapshot?.data,
     enabled: !!cAddress,
     staleTime: 30_000,
   });
+
+  const { data, isPlaceholderData } = query;
+
+  useEffect(() => {
+    if (!cAddress || isPlaceholderData || !data) return;
+    void writeSnapshot('portfolio', cAddress, data);
+  }, [cAddress, data, isPlaceholderData]);
+
+  return {
+    ...query,
+    /** When showing the persisted snapshot, when it was captured — else null. */
+    snapshotAt: isPlaceholderData ? (snapshot?.updatedAt ?? null) : null,
+  };
 }

@@ -31,9 +31,23 @@ interface Props {
   visible: boolean;
   promptMessage: string;
   onResult: (confirmed: boolean) => void;
+  /**
+   * True when signing will itself raise an OS biometric prompt — passkey
+   * accounts read their private key from SecureStore with
+   * requireAuthentication: true, which the Secure Enclave / Keystore gates on
+   * every read. Prompting here as well shows Face ID twice for one action, the
+   * second landing immediately after the first succeeds. When set, this modal
+   * is confirmation only and the single prompt comes from the keychain read.
+   */
+  signingPromptsForBiometrics?: boolean;
 }
 
-export default function TxAuthModal({ visible, promptMessage, onResult }: Props) {
+export default function TxAuthModal({
+  visible,
+  promptMessage,
+  onResult,
+  signingPromptsForBiometrics = false,
+}: Props) {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const { width } = Dimensions.get('window');
@@ -183,12 +197,16 @@ export default function TxAuthModal({ visible, promptMessage, onResult }: Props)
 
               {hasBiometrics && (
                 <Button
-                  label={`Use ${biometricLabel}`}
+                  label={signingPromptsForBiometrics ? 'Confirm' : `Use ${biometricLabel}`}
                   variant="primary"
                   leftIcon={
-                    <Ionicons name={biometricIcon} size={20} color={theme.colors.black} />
+                    <Ionicons
+                      name={signingPromptsForBiometrics ? 'checkmark' : biometricIcon}
+                      size={20}
+                      color={theme.colors.black}
+                    />
                   }
-                  onPress={handleBiometric}
+                  onPress={signingPromptsForBiometrics ? () => onResult(true) : handleBiometric}
                   mb="m"
                 />
               )}

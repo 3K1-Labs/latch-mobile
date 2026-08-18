@@ -1,7 +1,7 @@
 import { Address, Asset, Contract, nativeToScVal } from '@stellar/stellar-sdk';
 
 import { STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
-import { WELL_KNOWN_TOKENS } from '@/src/constants/known-tokens';
+import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { toBaseUnits } from '@/src/services/send-token';
 import type { SwapBuildResult, SwapProvider, SwapQuote, SwapQuoteParams } from '../types';
 
@@ -29,23 +29,38 @@ const MOCK_USD: Record<string, number> = {
 };
 
 // SAC contract id → token code, so the synthetic quote can price by symbol.
-const SAC_TO_CODE = new Map<string, string>();
-try {
-  SAC_TO_CODE.set(Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE), 'XLM');
-} catch {
-  // ignore — native SAC resolution should never fail
+// Lazily built/memoized — contract ids are network-specific, so a network
+// switch (src/lib/network-switch.ts) must drop this cache via resetMockSwapCache().
+let sacToCodeCache: Map<string, string> | null = null;
+
+export function resetMockSwapCache(): void {
+  sacToCodeCache = null;
 }
-for (const t of WELL_KNOWN_TOKENS) {
+
+function getSacToCode(): Map<string, string> {
+  if (sacToCodeCache) return sacToCodeCache;
+
+  const map = new Map<string, string>();
   try {
-    const sac = t.sacContractId ?? new Asset(t.code, t.issuer!).contractId(STELLAR_NETWORK_PASSPHRASE);
-    SAC_TO_CODE.set(sac, t.code.toUpperCase());
+    map.set(Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE), 'XLM');
   } catch {
-    // skip tokens we can't resolve a SAC id for
+    // ignore — native SAC resolution should never fail
   }
+  for (const t of getWellKnownTokens()) {
+    try {
+      const sac = t.sacContractId ?? new Asset(t.code, t.issuer!).contractId(STELLAR_NETWORK_PASSPHRASE);
+      map.set(sac, t.code.toUpperCase());
+    } catch {
+      // skip tokens we can't resolve a SAC id for
+    }
+  }
+
+  sacToCodeCache = map;
+  return map;
 }
 
 function usdFor(sacId: string): number {
-  const code = SAC_TO_CODE.get(sacId);
+  const code = getSacToCode().get(sacId);
   return (code && MOCK_USD[code]) || 0;
 }
 

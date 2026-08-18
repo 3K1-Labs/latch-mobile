@@ -4,7 +4,6 @@ import {
   isVerifierCompatible,
   type ChainSigner,
 } from '@/src/api/account-admin';
-import { uploadBackup } from '@/src/api/latch-auth';
 import { deploySmartAccount as deploySmartAccountPasskey } from '@/src/api/passkey';
 import {
   deployMultiSigSmartAccount,
@@ -26,9 +25,14 @@ import CreateWalletButton from '@/src/components/shared-wallet-review/CreateWall
 import MemberReviewList from '@/src/components/shared-wallet-review/MemberReviewList';
 import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard';
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
+import AppToast from '@/src/components/toast/AppToast';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
@@ -77,6 +81,11 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Called after a new account/multisig wallet is created, once this sheet
+   * has closed, so the caller can prompt for the recovery password and back
+   * it up (e.g. by opening BackupSheet) — uploadBackup() can't do this
+   * itself post-onboarding, since the password session is gone by then. */
+  onNeedsBackup?: () => void;
 }
 
 type SheetStep =
@@ -118,7 +127,7 @@ function describeMemberReadError(message: string): string {
   return 'could not read account';
 }
 
-const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
+const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -299,7 +308,7 @@ const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
     const simParams = {
       rpcUrl: STELLAR_RPC_URL,
       networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-      factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+      factoryAddress: STELLAR_FACTORY_ADDRESS,
     };
     const pendingInvites: string[] = [];
     const invalidAddresses: string[] = [];
@@ -411,10 +420,6 @@ const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
         if (__DEV__) console.log('[membership] announce failed:', err?.message);
       });
 
-      uploadBackup().catch((err) => {
-        if (__DEV__) console.log('[backup] upload failed:', err?.message);
-      });
-
       setMultisigResult({ success: true, walletAddress: deployResult.smartAccountAddress });
     } catch (err) {
       if (__DEV__) console.error('[multisig] deploy failed:', err);
@@ -446,6 +451,10 @@ const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
       resetMultisigState();
       setStep('list');
       onClose();
+      // Close this sheet's Modal before opening BackupSheet's — two Modals
+      // changing presentation state in the same tick wedges the native
+      // modal host on iOS (see handleSwitch below for the same constraint).
+      onNeedsBackup?.();
     }
   };
 
@@ -501,6 +510,10 @@ const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
 
       switchAccount(currentLength);
       onClose();
+      // This account's key material has never been backed up — prompt for
+      // the recovery password via BackupSheet rather than silently skipping
+      // it (uploadBackup() can't run here itself; see onNeedsBackup above).
+      onNeedsBackup?.();
     } catch (err: any) {
       setCreateAccountError(err?.message || 'Failed to create account');
       if (newAccount) {
@@ -899,6 +912,13 @@ const AccountSwitcherSheet = ({ visible, onClose }: Props) => {
             />
           </>
         )}
+
+        {/* This sheet is a Modal stacked on top of the drawer's Modal, and each
+            Modal is its own native window — so neither the root host nor the
+            drawer's can paint over it. Last child so it sits above the sheet
+            body; gated on the same condition as the Modal so a closed sheet
+            never sits on top of the toast library's ref stack. */}
+        {visible && multisigResult === null && <AppToast />}
       </Modal>
 
       <SharedWalletResultModal

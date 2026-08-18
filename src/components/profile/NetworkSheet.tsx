@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Modal,
@@ -18,27 +19,52 @@ import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
+import { ACTIVE_NETWORK, MAINNET_NETWORK, TESTNET_NETWORK } from '@/src/constants/config';
+import { switchActiveNetwork } from '@/src/lib/network-switch';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const NETWORKS = [
-  { id: 'public', name: 'Public Network', description: 'Standard production environment' },
+type NetworkId = 'testnet' | 'mainnet';
+
+const NETWORKS: { id: NetworkId; name: string; description: string }[] = [
   { id: 'testnet', name: 'Testnet', description: 'Environment for testing' },
-  { id: 'futurenet', name: 'Futurenet', description: 'Environment for early features' },
+  { id: 'mainnet', name: 'Public Network', description: 'Standard production environment' },
 ];
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Called after a successful switch so the parent (which reads ACTIVE_NETWORK
+   * directly, e.g. the Profile row label) knows to re-render. */
+  onNetworkChanged?: () => void;
 }
 
-const NetworkSheet = ({ visible, onClose }: Props) => {
+const NetworkSheet = ({ visible, onClose, onNetworkChanged }: Props) => {
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const { isDark } = useAppTheme();
-  const [selectedNetwork, setSelectedNetwork] = useState('public');
+  const [selectedNetwork, setSelectedNetwork] = useState<NetworkId>(
+    ACTIVE_NETWORK.network === 'TESTNET' ? 'testnet' : 'mainnet',
+  );
+  const [switching, setSwitching] = useState(false);
+
+  const applyNetwork = async (network: NetworkId) => {
+    setSwitching(true);
+    try {
+      await switchActiveNetwork(network === 'testnet' ? TESTNET_NETWORK : MAINNET_NETWORK);
+      onNetworkChanged?.();
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const handleSelect = (network: NetworkId) => {
+    if (network === selectedNetwork || switching) return;
+    setSelectedNetwork(network);
+    void applyNetwork(network);
+  };
 
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -116,7 +142,8 @@ const NetworkSheet = ({ visible, onClose }: Props) => {
             <TouchableOpacity
               key={network.id}
               activeOpacity={0.7}
-              onPress={() => setSelectedNetwork(network.id)}
+              disabled={switching}
+              onPress={() => handleSelect(network.id)}
             >
               <NetworkItem
                 name={network.name}
@@ -125,6 +152,11 @@ const NetworkSheet = ({ visible, onClose }: Props) => {
               />
             </TouchableOpacity>
           ))}
+          {switching && (
+            <Box mt="m" alignItems="center">
+              <ActivityIndicator size="small" color="orange" />
+            </Box>
+          )}
         </ScrollView>
       </Animated.View>
     </Modal>

@@ -9,7 +9,8 @@ import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
+import AppToast from '@/src/components/toast/AppToast';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
@@ -52,9 +53,9 @@ const ReceiveToken = () => {
     setStage('ADDRESS');
   };
 
-  const copyToClipboard = async () => {
+  const handleCopyAddress = async () => {
     if (smartAccountAddress) {
-      await Clipboard.setStringAsync(smartAccountAddress);
+      await copyToClipboard(smartAccountAddress);
     }
   };
 
@@ -124,9 +125,16 @@ const ReceiveToken = () => {
         <AddressStage
           token={selectedToken}
           address={smartAccountAddress}
-          onCopy={copyToClipboard}
+          onCopy={handleCopyAddress}
         />
       ) : null}
+
+      {/* This screen is presented with `presentation: 'modal'`, which puts it in
+          its own native container above the root view — so the <Toast/> mounted
+          in app/_layout.tsx renders behind it. The library keeps a stack of
+          refs and shows on the most recently mounted one, restoring the
+          previous when this unmounts, so a second instance here is safe. */}
+      <AppToast />
     </Box>
   );
 };

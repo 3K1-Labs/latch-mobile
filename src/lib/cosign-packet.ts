@@ -21,13 +21,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Address, Operation, scValToNative, Transaction } from '@stellar/stellar-sdk';
 import QuickCrypto from 'react-native-quick-crypto';
 
-import { ACTIVE_NETWORK, STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
+import { getNetworkId, STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
 import type { AssembledTransfer, CollectedEntry } from '@/src/lib/multisig-send';
 
 const PACKET_VERSION = 1 as const;
 const STORE_KEY = 'latch_cosign_packets';
-const NETWORK: 'testnet' | 'mainnet' = ACTIVE_NETWORK.network === 'TESTNET' ? 'testnet' : 'mainnet';
-
 export interface SwapMeta {
   fromCode: string;
   toCode: string;
@@ -88,7 +86,7 @@ export function createPacket(
   return {
     v: PACKET_VERSION,
     id: newId(),
-    network: NETWORK,
+    network: getNetworkId(),
     smartAccountAddress,
     unsignedTxXdr: assembled.unsignedTxXdr,
     threshold,

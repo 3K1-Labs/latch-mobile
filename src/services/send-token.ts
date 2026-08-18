@@ -3,6 +3,8 @@ import {
   HORIZON_URL,
   PASSKEY_RP_ID,
   STELLAR_AUTH_PREFIX,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
   STELLAR_VERIFIER_ADDRESS,
@@ -183,8 +185,8 @@ export interface SendTokenResult {
 export async function sendTokenFromSmartAccount(params: SendTokenParams): Promise<SendTokenResult> {
   const { smartAccountAddress, keypair, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is not configured');
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
+  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
   const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
 
   const amountInBaseUnits = toBaseUnits(amount);
@@ -277,8 +279,8 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
 // The factory stores separate verifier addresses per signer type; using the wrong
 // one (e.g. the Ed25519 verifier) produces a signer-mismatch error (#3002).
 export async function fetchWebAuthnVerifier(): Promise<string> {
-  const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
-  if (!factoryAddress) throw new Error('EXPO_PUBLIC_FACTORY_ADDRESS not set');
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
+  if (!factoryAddress) throw new Error('Factory address is not configured for the active network');
 
   const instanceKey = xdr.LedgerKey.contractData(
     new xdr.LedgerKeyContractData({
@@ -336,7 +338,7 @@ export async function resolveRegisteredWebAuthnVerifier(
   listIndex: number,
 ): Promise<string> {
   const deviceKeyDataHex = await getStoredKeyDataHex(listIndex);
-  const factoryAddress = process.env.EXPO_PUBLIC_FACTORY_ADDRESS;
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
   if (!deviceKeyDataHex || !factoryAddress) return fetchWebAuthnVerifier();
 
   try {
@@ -445,8 +447,8 @@ export async function sendTokenFromPasskeyAccount(
 ): Promise<SendTokenResult> {
   const { smartAccountAddress, listIndex, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is not configured');
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
+  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
   const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
 
   const amountInBaseUnits = toBaseUnits(amount);

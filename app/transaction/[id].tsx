@@ -14,7 +14,7 @@ import TransactionDetailCard from '@/src/components/transaction/TransactionDetai
 import TransactionHashBox from '@/src/components/transaction/TransactionHashBox';
 import TransactionStatusHeader from '@/src/components/transaction/TransactionStatusHeader';
 import TransactionTimeline from '@/src/components/transaction/TransactionTimeline';
-import { ACTIVE_NETWORK, HORIZON_URL } from '@/src/constants/config';
+import { ACTIVE_NETWORK, getTransactionExplorerUrl, HORIZON_URL } from '@/src/constants/config';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 
 async function fetchTxDetails(hash: string): Promise<{ fee: string; ledger: string }> {
@@ -66,7 +66,7 @@ const TransactionDetailScreen = () => {
   });
 
   const formattedDate = createdAt ? format(new Date(createdAt), 'MMM d, yyyy • HH:mm') : '—';
-  const explorerUrl = `${process.env.EXPO_PUBLIC_EXPLORER_URL || 'https://stellar.expert/explorer/testnet'}/tx/${hash}`;
+  const explorerUrl = getTransactionExplorerUrl(hash ?? '');
 
   return (
     <Box flex={1} backgroundColor="mainBackground">

@@ -1,14 +1,17 @@
 import { useTheme } from '@shopify/restyle';
 import { BlurView } from 'expo-blur';
+import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, {
   Easing,
+  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBarShrink } from '../context/tab-bar-scroll';
 import { usePendingPackets } from '../hooks/use-pending-packets';
 import { useAppTheme } from '../theme/ThemeContext';
 import { Theme } from '../theme/theme';
@@ -32,6 +35,11 @@ const INDICATOR_WIDTH = 76;
 const INDICATOR_HEIGHT = 44;
 const PILL_HEIGHT = 72;
 
+// iOS 26+ ships the Liquid Glass design; render a native GlassView background
+// there and fall back to the BlurView + translucent fill on older iOS/Android.
+// Availability never changes at runtime, so resolve it once at module load.
+const LIQUID_GLASS = isLiquidGlassAvailable();
+
 export function CustomTabBar({ state, navigation }: any) {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
@@ -40,6 +48,17 @@ export function CustomTabBar({ state, navigation }: any) {
 
   const pillWidth = useSharedValue(0);
   const activeIndex = useSharedValue(state.index);
+
+  // Scroll-reactive shrink: pill scales down a touch when the active screen
+  // scrolls downward, restoring on upward scroll / at the top.
+  const shrink = useTabBarShrink();
+  const shrinkStyle = useAnimatedStyle(() => {
+    const s = shrink?.value ?? 0;
+    return {
+      transform: [{ scale: interpolate(s, [0, 1], [1, 0.9]) }, { translateY: interpolate(s, [0, 1], [0, 6]) }],
+      opacity: interpolate(s, [0, 1], [1, 0.92]),
+    };
+  });
 
   useEffect(() => {
     activeIndex.value = withTiming(state.index, {
@@ -70,16 +89,37 @@ export function CustomTabBar({ state, navigation }: any) {
           internal child via addView() outside RN's Yoga-managed child list,
           so any real content (the tab row) nested inside it falls back to
           native top-left stacking instead of flexDirection: row. */}
-      <View
-        style={[styles.pill, { borderColor: containerBorder }]}
+      <Animated.View
+        style={[
+          styles.pill,
+          { borderColor: containerBorder },
+          // Liquid Glass supplies its own edge treatment — drop the manual border.
+          LIQUID_GLASS && styles.pillGlass,
+          shrinkStyle,
+        ]}
         onLayout={(e) => {
           pillWidth.value = e.nativeEvent.layout.width;
         }}
       >
-        <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-        <View
-          style={[StyleSheet.absoluteFill, { borderRadius: 36, backgroundColor: containerBg }]}
-        />
+        {LIQUID_GLASS ? (
+          <GlassView
+            style={[StyleSheet.absoluteFill, { borderRadius: 36 }]}
+            glassEffectStyle="regular"
+            colorScheme={isDark ? 'dark' : 'light'}
+            isInteractive
+          />
+        ) : (
+          <>
+            <BlurView
+              intensity={30}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
+            <View
+              style={[StyleSheet.absoluteFill, { borderRadius: 36, backgroundColor: containerBg }]}
+            />
+          </>
+        )}
         <Animated.View
           style={[
             styles.indicator,
@@ -124,7 +164,7 @@ export function CustomTabBar({ state, navigation }: any) {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -149,6 +189,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 10,
+  },
+  pillGlass: {
+    borderWidth: 0,
   },
   tabButton: {
     flex: 1,

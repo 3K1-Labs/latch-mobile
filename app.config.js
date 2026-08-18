@@ -17,7 +17,9 @@ export default {
     version: buildVersion,
     orientation: 'portrait',
     icon: appName === 'Latch' ? './assets/images/icon.png' : './assets/images/iconStaging.png',
-    scheme: 'latch',
+    // 'wc' lets Latch be offered as a handler for raw WalletConnect URIs
+    // (e.g. a wc: link shared outside of a QR code) in addition to its own latch:// scheme.
+    scheme: ['latch', 'wc'],
     userInterfaceStyle: 'automatic',
     splash: {
       // image: './assets/images/icon.png',

@@ -19,10 +19,12 @@ export interface TokenConfig {
 
 /**
  * Curated list of tokens shown on the "Add Token" screen.
- * Issuers are network-aware (testnet vs mainnet).
+ * Issuers are network-aware (testnet vs mainnet) — a function, not a frozen
+ * const, so a live network switch (see src/lib/network-switch.ts) is reflected
+ * on the next call instead of only after a fresh app launch.
  */
-export const WELL_KNOWN_TOKENS: TokenConfig[] =
-  ACTIVE_NETWORK.network === 'TESTNET'
+export function getWellKnownTokens(): TokenConfig[] {
+  return ACTIVE_NETWORK.network === 'TESTNET'
     ? [
         {
           code: 'USDC',
@@ -302,3 +304,4 @@ export const WELL_KNOWN_TOKENS: TokenConfig[] =
           name: 'EURC',
         },
       ];
+}

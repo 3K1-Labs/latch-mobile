@@ -11,6 +11,7 @@ import {
   executeSwapFromPasskeyAccount,
   executeSwapFromSmartAccount,
 } from '@/src/services/swap/execute-swap';
+import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createSwap } from '@/src/lib/cosign-transport';
 import { getActiveSwapProvider } from '@/src/services/swap/registry';
 import { useWalletStore } from '@/src/store/wallet';
@@ -22,7 +23,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -69,11 +70,22 @@ const ConfirmSwap = () => {
     amountIn: params.amountIn,
     slippageBps,
     providerId: params.providerId,
+    fromCode: params.fromCode,
+    toCode: params.toCode,
   });
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authPromptMessage, setAuthPromptMessage] = useState('');
   const authResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+
+  // When signing raises its own OS prompt, TxAuthModal must not raise a second
+  // one — see signingRaisesBiometricPrompt.
+  const [signingPromptsForBiometrics, setSigningPromptsForBiometrics] = useState(false);
+  useEffect(() => {
+    signingRaisesBiometricPrompt()
+      .then(setSigningPromptsForBiometrics)
+      .catch(() => setSigningPromptsForBiometrics(false));
+  }, [activeAccountIndex]);
 
   const requestAuth = (message: string): Promise<boolean> =>
     new Promise((resolve) => {
@@ -405,6 +417,7 @@ const ConfirmSwap = () => {
         visible={showAuthModal}
         promptMessage={authPromptMessage}
         onResult={handleAuthResult}
+        signingPromptsForBiometrics={signingPromptsForBiometrics}
       />
 
       <LoadingBlur

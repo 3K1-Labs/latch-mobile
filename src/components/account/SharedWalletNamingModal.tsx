@@ -10,7 +10,11 @@ import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Input from '@/src/components/shared/Input';
 import Text from '@/src/components/shared/Text';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { useSharedWalletNaming } from '@/src/store/shared-wallet-naming';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +29,7 @@ function simParams() {
   return {
     rpcUrl: STELLAR_RPC_URL,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+    factoryAddress: STELLAR_FACTORY_ADDRESS,
   };
 }
 

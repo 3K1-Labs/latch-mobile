@@ -1,5 +1,32 @@
 # MoonPay On-Ramp Integration
 
+> **⚠️ The memo model below is superseded.** Everything from "Solution" onward
+> describes the original in-backend watcher, which used a *permanent per-user
+> TEXT memo* (`LT` + 8 hex). What actually ships is **latch-relayer**
+> (`reference/latch-relayer`, deployed at `https://latch-relayer.onrender.com`).
+> Kept for historical context; do not implement against it.
+>
+> **Current model — per-session MEMO_ID with a TTL:**
+>
+> | | Superseded | Current (latch-relayer) |
+> |---|---|---|
+> | Memo type | `MEMO_TEXT` | **`MEMO_ID`** (numeric) — `memo.ParseID` rejects everything else |
+> | Memo value | `LT` + 8 hex, 10 chars | random `uint64`, e.g. `6526693008473226183` |
+> | Lifetime | permanent per user | **one funding session, default 1h TTL** |
+> | Minted by | `GetOrCreateDepositInfo(userID)` | `POST /intents { c_address, expected_amt?, external_id?, expires_in? }` |
+> | Status | `deposit_jobs` polling | `GET /deposit/status/{memo_id}` → intent + `forwards[]` |
+> | Unknown/expired memo | job marked `failed`, manual recovery | **swept to the relayer's `RECOVERY_ADDRESS`** |
+>
+> Consequences the mobile app must honour, and where:
+> - Never cache a memo across sessions or treat it as stable
+>   (`useCreateDepositIntent` mints per Fund-flow open; `isDepositIntentExpired`
+>   suppresses it once the TTL lapses).
+> - Always present it as memo **type ID**. A TEXT memo carrying the right digits
+>   is still swept to recovery — it is not credited to the user.
+> - The relayer is a single deployment bound to one network. `EXPO_PUBLIC_RELAYER_NETWORK`
+>   + `isDepositRelayerAvailable()` gate intent creation so a mainnet user is never
+>   handed a testnet pool address.
+
 ## Problem
 
 MoonPay can only send XLM to a **G-address** (a classic Stellar account). Latch users hold funds inside a **C-address** (a Soroban smart account). MoonPay has no concept of a Soroban smart account and cannot send directly to one.

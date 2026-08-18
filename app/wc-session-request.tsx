@@ -1,15 +1,23 @@
 import DappHeader from '@/src/components/walletconnect/DappHeader';
+import RequestWarnings from '@/src/components/walletconnect/RequestWarnings';
+import TransactionSummary from '@/src/components/walletconnect/TransactionSummary';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { approveSignRequest, rejectSignRequest, walletKit } from '@/src/lib/walletconnect';
+import {
+  approveSignRequest,
+  getWcChain,
+  rejectSignRequest,
+  walletKit,
+} from '@/src/lib/walletconnect';
+import { reviewSessionRequest } from '@/src/lib/wc-request-review';
 import { SECURE_KEYS, useWalletStore } from '@/src/store/wallet';
 import { useWalletConnectStore } from '@/src/store/walletconnect';
 import { confirmAuth } from '@/src/utils/confirm-auth';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,8 +27,16 @@ export default function WCSessionRequestScreen() {
   const { activeAccountIndex } = useWalletStore();
   const [loading, setLoading] = useState(false);
 
+  // router.back() updates NavigationContainer's state — doing it inline during
+  // render (instead of an effect) trips React's "Cannot update a component
+  // while rendering a different component" warning.
+  useEffect(() => {
+    if (!pendingRequest || !walletKit) {
+      router.back();
+    }
+  }, [pendingRequest]);
+
   if (!pendingRequest || !walletKit) {
-    router.back();
     return null;
   }
 
@@ -28,7 +44,19 @@ export default function WCSessionRequestScreen() {
   const session = sessions[pendingRequest.topic];
   const meta = session?.peer.metadata;
   const method = pendingRequest.params.request.method;
-  const { xdr } = pendingRequest.params.request.params as { xdr: string };
+
+  // The account the dApp session was approved against — taken from the session
+  // namespace rather than the store so it reflects what was actually connected.
+  const accountAddress =
+    session?.namespaces?.stellar?.accounts?.[0]?.split(':')[2] ?? null;
+
+  const reviewResult = reviewSessionRequest({
+    method,
+    chainId: pendingRequest.params.chainId,
+    activeChain: getWcChain(),
+    requestParams: pendingRequest.params.request.params,
+    accountAddress,
+  });
 
   const handleApprove = async () => {
     const authed = await confirmAuth('Authenticate to sign transaction');
@@ -39,8 +67,11 @@ export default function WCSessionRequestScreen() {
       const mnemonic = await SecureStore.getItemAsync(SECURE_KEYS.MNEMONIC);
       if (!mnemonic) throw new Error('No mnemonic found');
       await approveSignRequest(pendingRequest, mnemonic, activeAccountIndex);
+      // Don't also call router.back() here — the effect above does it when
+      // pendingRequest flips to null. Calling it in both places double-pops
+      // the modal (second pop races the first mid-transition — the "presenting
+      // a screen whose view is not in the window hierarchy" freeze).
       setPendingRequest(null);
-      router.back();
     } catch (e: any) {
       Alert.alert('Signing failed', e?.message ?? 'Unknown error');
     } finally {
@@ -55,7 +86,6 @@ export default function WCSessionRequestScreen() {
       // best-effort
     }
     setPendingRequest(null);
-    router.back();
   };
 
   return (
@@ -81,20 +111,37 @@ export default function WCSessionRequestScreen() {
           </Text>
         </Box>
 
-        <Box backgroundColor="cardBackground" borderRadius={16} padding="m" mb="l">
-          <Text variant="p7" color="textSecondary" mb="xs">
-            Transaction XDR
-          </Text>
-          <ScrollView style={{ maxHeight: 120 }} showsVerticalScrollIndicator={false}>
-            <Text variant="p7" color="textPrimary" style={{ fontFamily: 'monospace' }}>
-              {xdr}
-            </Text>
-          </ScrollView>
-        </Box>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {reviewResult.ok ? (
+            <>
+              <RequestWarnings warnings={reviewResult.review.warnings} />
+              <TransactionSummary review={reviewResult.review} accountAddress={accountAddress} />
+            </>
+          ) : (
+            // Reaching this means the request is structurally invalid. Approving
+            // would be rejected by approveSignRequest anyway, so say why and
+            // leave Reject as the only sensible action.
+            <Box backgroundColor="cardBackground" borderRadius={16} padding="m">
+              <Text variant="p7" color="textPrimary" fontFamily="SFproSemibold" mb="xs">
+                This request can&apos;t be signed
+              </Text>
+              <Text variant="p7" color="textSecondary">
+                {reviewResult.rejection.message}
+              </Text>
+            </Box>
+          )}
+        </ScrollView>
       </Box>
 
       <Box paddingHorizontal="xl" gap="s">
-        <Button label="Approve" onPress={handleApprove} loading={loading} />
+        {/* Disabled only for a structurally invalid request — warnings never
+            gate the button, they inform. */}
+        <Button
+          label="Approve"
+          onPress={handleApprove}
+          loading={loading}
+          disabled={!reviewResult.ok}
+        />
         <Button
           label="Reject"
           onPress={handleReject}

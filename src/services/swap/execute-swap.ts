@@ -1,7 +1,11 @@
 import { Address, Keypair, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 
 import { parseSimResult, sorobanCall, txToBase64 } from '@/src/api/smart-account';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import {
   loadAccount,
   resolveRegisteredWebAuthnVerifier,
@@ -40,8 +44,8 @@ export async function executeSwapFromSmartAccount(
 ): Promise<ExecuteSwapResult> {
   const { smartAccountAddress, keypair, operation } = params;
 
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is not configured');
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
+  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
   const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
 
   const account = await loadAccount(bundlerKeypair.publicKey());
@@ -107,8 +111,8 @@ export async function executeSwapFromPasskeyAccount(
 ): Promise<ExecuteSwapResult> {
   const { smartAccountAddress, listIndex, operation } = params;
 
-  const bundlerSecret = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('EXPO_PUBLIC_BUNDLER_SECRET is not configured');
+  const bundlerSecret = STELLAR_BUNDLER_SECRET;
+  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
   const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
 
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);

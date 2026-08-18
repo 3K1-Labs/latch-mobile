@@ -242,17 +242,29 @@
 // // the new flow but kept per the Phase 3 plan in case classification needs it.
 // export { BUNDLER_G_ADDRESS };
 import { Address, Asset, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { HORIZON_URL, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '../constants/config';
-import { WELL_KNOWN_TOKENS } from '../constants/known-tokens';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import {
+  HORIZON_URL,
+  STELLAR_BUNDLER_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '../constants/config';
+import { getWellKnownTokens } from '../constants/known-tokens';
+import { writeSnapshot } from '../lib/dashboard-snapshot';
+import { rememberSacTransfers, sacPaymentKey } from '../lib/sac-transfer-cache';
 import { useWalletStore } from '../store/wallet';
+import { useSnapshotSeed } from './use-snapshot-seed';
 
-// Derived once at module load — safe since the secret is EXPO_PUBLIC_* (client-visible)
-let BUNDLER_G_ADDRESS: string | null = null;
-try {
-  const s = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
-  if (s) BUNDLER_G_ADDRESS = Keypair.fromSecret(s).publicKey();
-} catch {}
+// Computed per call (not module load) so it follows switchActiveNetwork() —
+// the bundler G-address differs between testnet and mainnet.
+function getBundlerGAddress(): string | null {
+  try {
+    return STELLAR_BUNDLER_SECRET ? Keypair.fromSecret(STELLAR_BUNDLER_SECRET).publicKey() : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface StellarPayment {
   id: string;
@@ -271,41 +283,68 @@ export interface StellarPayment {
 
 // ─── Shared XHR helpers ──────────────────────────────────────────────────────
 
+// Resolves for 2xx, and for 404 — a Horizon "Resource Missing" is a real answer
+// (an unfunded account genuinely has no operations). Everything else — transport
+// error, timeout, 429/5xx, unparseable body — REJECTS.
+//
+// Resolving null for all of those was indistinguishable from "no history", and
+// callers turned it into an empty list. See fetchStellarPayments for why a
+// source that *failed* must never be reported as a source that returned nothing.
 function horizonGet(url: string): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.timeout = 12000;
     xhr.onload = () => {
+      let body: any;
       try {
-        resolve(JSON.parse(xhr.responseText));
+        body = JSON.parse(xhr.responseText);
       } catch {
-        resolve(null);
+        reject(new Error(`Horizon ${xhr.status}: unparseable response`));
+        return;
       }
+      if ((xhr.status >= 200 && xhr.status < 300) || xhr.status === 404) {
+        resolve(body);
+        return;
+      }
+      reject(new Error(`Horizon ${xhr.status}: ${body?.title ?? 'request failed'}`));
     };
-    xhr.onerror = () => resolve(null);
-    xhr.ontimeout = () => resolve(null);
+    xhr.onerror = () => reject(new Error('Horizon request failed'));
+    xhr.ontimeout = () => reject(new Error('Horizon request timed out'));
     xhr.send();
   });
 }
 
+// Rejects on any transport-level failure. A JSON-RPC error carried in a 200 body
+// still resolves, so the reach-shrinking loop in fetchTransferEvents keeps
+// working — that loop is for "the query was too expensive", not "the query never
+// landed".
+//
+// Previously every failure resolved `{}`, which has no `.error` key, so callers
+// read `resp?.result?.events ?? []` and treated a dropped request as an empty
+// result set — the reach-shrinking branch could never even fire for the failure
+// mode mobile networks actually produce.
 function sorobanRpc(method: string, params: object): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', STELLAR_RPC_URL, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.timeout = 15000;
     xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(`Soroban RPC ${method}: HTTP ${xhr.status}`));
+        return;
+      }
       try {
         resolve(JSON.parse(xhr.responseText));
       } catch {
-        resolve({});
+        reject(new Error(`Soroban RPC ${method}: unparseable response`));
       }
     };
-    xhr.onerror = () => resolve({});
-    xhr.ontimeout = () => resolve({});
+    xhr.onerror = () => reject(new Error(`Soroban RPC ${method}: request failed`));
+    xhr.ontimeout = () => reject(new Error(`Soroban RPC ${method}: request timed out`));
     xhr.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }));
   });
 }
@@ -477,10 +516,11 @@ async function fetchGAddressOps(gAddress: string, cAddress: string): Promise<Ste
 // (Latch-to-Latch transfers go through the same bundler on both sides).
 
 async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
-  if (!BUNDLER_G_ADDRESS) return [];
+  const bundlerGAddress = getBundlerGAddress();
+  if (!bundlerGAddress) return [];
 
   const resp = await horizonGet(
-    `${HORIZON_URL}/accounts/${BUNDLER_G_ADDRESS}/operations?limit=200&order=desc&include_failed=false`,
+    `${HORIZON_URL}/accounts/${bundlerGAddress}/operations?limit=200&order=desc&include_failed=false`,
   );
 
   const allOps = (resp?._embedded?.records ?? []) as any[];
@@ -523,47 +563,134 @@ async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
   return results;
 }
 
-// ─── Soroban RPC: SAC transfer events (last ~7 days) ─────────────────────────
+// ─── Soroban RPC: SAC transfer events (last several hours) ──────────────────
 //
 // Catches: incoming transfers from ANY sender (external wallets, other Latch
 // users, passkey accounts). Queries ALL contracts — no contractIds filter —
-// so any SAC (including custom tokens) is covered. Just 2 XHR requests vs the
-// previous 14+ batched requests.
-// Coverage limited to the RPC retention window (~7 days / ~17,000 ledgers).
+// so any SAC (including custom tokens) is covered.
+//
+// getEvents has no end-ledger parameter — every call scans from `startLedger`
+// to the CURRENT chain tip, so its cost is purely a function of how far back
+// startLedger reaches, regardless of filters or how many events actually
+// match. That means there is no way to page further into the past: an
+// earlier "chunk" doesn't scan a separate, cheaper window — it scans a wider
+// one (further start, same tip), so it costs *more*, not the same. Verified
+// live against mainnet.sorobanrpc.com: a wildcard-topic query passes at an
+// 8,000-ledger reach and fails with "request exceeded processing limit
+// threshold" at 12,000; scoping to a single known contractId (native XLM
+// SAC) does not change this — the cost is the ledger range, not the filter.
+// A prior version of this function tried to walk further back in chunks;
+// every chunk after the first re-scans from an even earlier start to the
+// same tip, so it reliably fails once the cumulative reach passes the
+// threshold. There is no client-side way around this on this RPC — anything
+// older than the safe reach below needs a proper indexer (see the
+// commented-out wallet-backend GraphQL path atop this file), not a client
+// scan.
 
-const SAC_CONTRACT_INFO = new Map<string, { code: string; assetType: string }>();
+let sacContractInfoCache: Map<string, { code: string; assetType: string }> | null = null;
 
-try {
-  SAC_CONTRACT_INFO.set(Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE), {
-    code: 'XLM',
-    assetType: 'native',
-  });
-} catch {}
+// Contract ids are network-specific — a switch (src/lib/network-switch.ts)
+// must drop this memoized cache or it keeps resolving the old network's ids.
+export function resetSacContractInfoCache(): void {
+  sacContractInfoCache = null;
+}
 
-for (const t of WELL_KNOWN_TOKENS) {
+function getSacContractInfo(): Map<string, { code: string; assetType: string }> {
+  if (sacContractInfoCache) return sacContractInfoCache;
+
+  const map = new Map<string, { code: string; assetType: string }>();
   try {
-    const id =
-      t.sacContractId ?? new Asset(t.code, t.issuer!).contractId(STELLAR_NETWORK_PASSPHRASE);
-    SAC_CONTRACT_INFO.set(id, { code: t.code, assetType: 'credit_alphanum4' });
+    map.set(Asset.native().contractId(STELLAR_NETWORK_PASSPHRASE), {
+      code: 'XLM',
+      assetType: 'native',
+    });
   } catch {}
+
+  for (const t of getWellKnownTokens()) {
+    try {
+      const id =
+        t.sacContractId ?? new Asset(t.code, t.issuer!).contractId(STELLAR_NETWORK_PASSPHRASE);
+      map.set(id, { code: t.code, assetType: 'credit_alphanum4' });
+    } catch {}
+  }
+
+  sacContractInfoCache = map;
+  return map;
+}
+
+// Largest reach that clears mainnet's processing-limit error for a
+// wildcard-topic query (verified live: 8,000 passes, 12,000 fails) — kept a
+// margin below that since the limit tracks total ledger range, which is a
+// hard ceiling on this RPC regardless of chunking (see comment above).
+const SAC_EVENTS_REACH_LEDGERS = 6_000;
+const SAC_EVENTS_MIN_REACH_LEDGERS = 500;
+
+// Wall-clock ceiling for one direction's scan. The halving sequence
+// (6000→3000→1500→750→500) is up to five sequential getEvents calls, each with
+// its own 15s transport timeout, so an RPC that is slow rather than erroring
+// could hold the history query for over a minute before the reach floor was
+// even reached — and React Query's retry then paid it a second time.
+//
+// The budget bounds that. It is checked before starting another attempt, never
+// mid-flight, so a call already in progress is always allowed to finish.
+const SAC_EVENTS_SCAN_BUDGET_MS = 25_000;
+
+/**
+ * Fetches one direction of transfer events, shrinking the reach on a
+ * processing-limit error. Only ever shrinks from SAC_EVENTS_REACH_LEDGERS —
+ * never grows past it — since a wider startLedger costs more, not less.
+ */
+async function fetchTransferEvents(
+  buildParams: (start: number) => object,
+  latestLedger: number,
+): Promise<any[]> {
+  let reach = SAC_EVENTS_REACH_LEDGERS;
+  const deadline = Date.now() + SAC_EVENTS_SCAN_BUDGET_MS;
+
+  for (;;) {
+    const start = Math.max(1, latestLedger - reach);
+    const resp = await sorobanRpc('getEvents', buildParams(start));
+
+    if (resp?.error) {
+      if (reach <= SAC_EVENTS_MIN_REACH_LEDGERS) {
+        if (__DEV__) console.warn('[SAC events] giving up at min reach:', resp.error);
+        // Throw, don't return [] — a JSON-RPC error is never a valid empty
+        // result, and swallowing it here drops every incoming transfer from an
+        // external wallet while looking like a clean fetch.
+        throw new Error(`getEvents failed at min reach: ${resp.error?.message ?? 'unknown error'}`);
+      }
+      // Out of budget mid-shrink. Same reasoning as above: give up loudly.
+      // The caller keeps the last known history on screen and shows a retry.
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `getEvents exceeded the ${SAC_EVENTS_SCAN_BUDGET_MS}ms scan budget at reach ${reach}`,
+        );
+      }
+      reach = Math.max(SAC_EVENTS_MIN_REACH_LEDGERS, Math.floor(reach / 2));
+      continue;
+    }
+
+    return resp?.result?.events ?? [];
+  }
 }
 
 async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[]> {
   const latestLedgerResp = await sorobanRpc('getLatestLedger', {});
   const latestLedger: number = latestLedgerResp?.result?.sequence ?? 0;
-  if (latestLedger === 0) return [];
+  // No sequence in a 200 body means the RPC answered but we can't anchor the
+  // scan window — an unusable answer, not an empty history.
+  if (latestLedger === 0) throw new Error('getLatestLedger returned no sequence');
 
-  const startLedger = Math.max(1, latestLedger - 17_000);
   const transferSym = scValB64(xdr.ScVal.scvSymbol('transfer'));
   const cAddressVal = scValB64(new Address(cAddress).toScVal());
   const wildcard = '*';
 
   if (__DEV__) {
-    console.log('[SAC events] cAddress:', cAddress, '| startLedger:', startLedger);
+    console.log('[SAC events] cAddress:', cAddress, '| latestLedger:', latestLedger);
   }
 
   // No contractIds filter — catches transfers from any SAC, including unknown tokens
-  const buildParams = (sender: string, recipient: string, start: number) => ({
+  const buildParams = (sender: string, recipient: string) => (start: number) => ({
     startLedger: start,
     filters: [
       {
@@ -574,30 +701,22 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
     pagination: { limit: 200 },
   });
 
-  const runQueries = (start: number) =>
-    Promise.all([
-      sorobanRpc('getEvents', buildParams(wildcard, cAddressVal, start)), // incoming
-      sorobanRpc('getEvents', buildParams(cAddressVal, wildcard, start)), // outgoing
-    ]);
-
-  let responses = await runQueries(startLedger);
-
-  if (responses.some((r) => r?.error)) {
-    if (__DEV__) console.warn('[SAC events] error — retrying with 4,320-ledger window');
-    responses = await runQueries(Math.max(1, latestLedger - 4_320));
-  }
+  const [incoming, outgoing] = await Promise.all([
+    fetchTransferEvents(buildParams(wildcard, cAddressVal), latestLedger), // incoming
+    fetchTransferEvents(buildParams(cAddressVal, wildcard), latestLedger), // outgoing
+  ]);
 
   if (__DEV__) {
-    const total = responses.reduce((s, r) => s + (r?.result?.events?.length ?? 0), 0);
-    console.log('[SAC events] total raw events:', total);
-    responses.forEach((r, i) => {
-      if (r?.error) console.warn('[SAC events] response', i, 'error:', JSON.stringify(r.error));
-    });
+    console.log('[SAC events] incoming:', incoming.length, '| outgoing:', outgoing.length);
   }
 
   const mapEvent = (event: any): StellarPayment | null => {
     try {
-      const topics: string[] = event.topics ?? [];
+      // stellar-rpc names this `topic` (singular). `topicXdr`/`topics` are
+      // accepted too so a provider using either spelling still decodes —
+      // reading the wrong key silently drops every event (see the mapped-count
+      // warning below, which exists to make that failure loud).
+      const topics: string[] = event.topic ?? event.topicXdr ?? event.topics ?? [];
       if (topics.length < 3) return null;
 
       const fnNameScVal = xdr.ScVal.fromXDR(topics[0], 'base64');
@@ -609,11 +728,12 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
       const from = Address.fromScVal(fromScVal).toString();
       const to = Address.fromScVal(toScVal).toString();
 
-      if (!event.value) return null;
-      const amountRaw = scValToNative(xdr.ScVal.fromXDR(event.value, 'base64'));
+      const rawAmountXdr: string | undefined = event.value ?? event.valueXdr;
+      if (!rawAmountXdr) return null;
+      const amountRaw = scValToNative(xdr.ScVal.fromXDR(rawAmountXdr, 'base64'));
       const rawValue = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw ?? 0);
 
-      const assetInfo = SAC_CONTRACT_INFO.get(event.contractId) ?? {
+      const assetInfo = getSacContractInfo().get(event.contractId) ?? {
         code: 'XLM',
         assetType: 'native',
       };
@@ -636,17 +756,26 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
     }
   };
 
+  const raw = [...incoming, ...outgoing];
+  const mapped = raw.map(mapEvent);
+
+  if (__DEV__ && raw.length > 0 && mapped.every((tx) => tx === null)) {
+    console.warn(
+      '[SAC events] fetched',
+      raw.length,
+      'events but mapped 0 — event shape may have changed. Keys:',
+      Object.keys(raw[0] ?? {}).join(','),
+    );
+  }
+
   const seen = new Set<string>();
-  return responses
-    .flatMap((r) => r?.result?.events ?? [])
-    .map(mapEvent)
-    .filter((tx): tx is StellarPayment => {
-      if (!tx) return false;
-      const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  return mapped.filter((tx): tx is StellarPayment => {
+    if (!tx) return false;
+    const key = sacPaymentKey(tx);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ─── Transaction type classification ─────────────────────────────────────────
@@ -689,7 +818,8 @@ function classifyTxTypes(payments: StellarPayment[], cAddress: string): StellarP
 // ─── Merge + deduplicate ──────────────────────────────────────────────────────
 //
 // G-addr ops: outgoing + all G-addr-signed txs (full history via asset_balance_changes)
-// SAC events: incoming from other users, passkey accounts, last ~7 days
+// SAC events: incoming from other users, passkey accounts, last several hours only —
+// see the reach-limit comment on fetchSacTransferEvents
 //
 // Dedup key: composite of hash+from+to+asset — preserves swap legs (different
 // assets in the same tx) while dropping true duplicates across sources.
@@ -704,9 +834,39 @@ export async function fetchStellarPayments(
     fetchSacTransferEvents(cAddress),
   ]);
 
+  // A source that failed is not a source that returned nothing. Substituting []
+  // for a rejection is what made externally-sent transfers vanish: SAC events are
+  // the ONLY source for incoming transfers from non-Latch wallets, so a single
+  // flaky poll dropped that whole category and React Query cached the result as a
+  // complete, successful history until the next refetch happened to succeed.
+  //
+  // allSettled (not all) so every failing source is named in one message rather
+  // than just whichever rejected first. Throwing is what the screens want:
+  // placeholderData: keepPreviousData holds the last good list on screen while
+  // isError drives the existing retry banner.
+  const failures = (
+    [
+      ['G-address', gAddrResult],
+      ['bundler', bundlerResult],
+      ['SAC events', sacResult],
+    ] as const
+  )
+    .filter(([, result]) => result.status === 'rejected')
+    .map(([name, result]) => `${name}: ${(result as PromiseRejectedResult).reason?.message}`);
+
+  if (failures.length > 0) {
+    throw new Error(`Transaction history incomplete — ${failures.join('; ')}`);
+  }
+
   const gAddrTxs = gAddrResult.status === 'fulfilled' ? gAddrResult.value : [];
   const bundlerTxs = bundlerResult.status === 'fulfilled' ? bundlerResult.value : [];
   const sacTxs = sacResult.status === 'fulfilled' ? sacResult.value : [];
+
+  // Reached only when every source succeeded (the throw above), so this scan is
+  // real evidence and not an empty list standing in for a failure. Returns every
+  // transfer ever observed for this account, which is what keeps incoming
+  // transfers alive past the ~8h reach of the scan window.
+  const durableSacTxs = await rememberSacTransfers(cAddress, sacTxs);
 
   if (__DEV__) {
     console.log(
@@ -716,14 +876,17 @@ export async function fetchStellarPayments(
       bundlerTxs.length,
       '| SAC events:',
       sacTxs.length,
+      '| durable SAC:',
+      durableSacTxs.length,
     );
   }
 
   const seen = new Set<string>();
 
-  // G-addr / bundler first (full Horizon history), SAC events fill incoming from non-Latch wallets
-  const merged = [...gAddrTxs, ...bundlerTxs, ...sacTxs].filter((tx) => {
-    const key = `${tx.transactionHash || tx.id}|${tx.from}|${tx.to}|${tx.assetCode ?? 'XLM'}`;
+  // G-addr / bundler first (full Horizon history), then SAC transfers — incoming
+  // from non-Latch wallets, live scan plus everything previously observed.
+  const merged = [...gAddrTxs, ...bundlerTxs, ...durableSacTxs].filter((tx) => {
+    const key = sacPaymentKey(tx);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -738,16 +901,38 @@ export async function fetchStellarPayments(
   return classifyTxTypes(sorted, cAddress);
 }
 
+// Only the recent slice is worth persisting — it exists to fill the screen on
+// the next launch, not to be a second history store (sac-transfer-cache.ts is
+// the durable one).
+const SNAPSHOT_ENTRIES = 50;
+
 export function useStellarTransactions(cAddress: string | null) {
   const { accounts, activeAccountIndex } = useWalletStore();
   const gAddress = accounts[activeAccountIndex]?.gAddress || null;
+  const snapshot = useSnapshotSeed<StellarPayment[]>('history', cAddress);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ['stellar-transactions', cAddress, gAddress],
     queryFn: () => fetchStellarPayments(cAddress!, gAddress),
     enabled: !!cAddress,
-    placeholderData: keepPreviousData,
+    // Previous data first, then the persisted snapshot on a cold start, so the
+    // activity list is populated before the scan finishes instead of showing a
+    // skeleton (or worse, "No transactions found") on every launch.
+    placeholderData: (previous) => previous ?? snapshot?.data,
     staleTime: 30_000,
     retry: 1,
   });
+
+  const { data, isPlaceholderData } = query;
+
+  useEffect(() => {
+    if (!cAddress || isPlaceholderData || !data) return;
+    void writeSnapshot('history', cAddress, data.slice(0, SNAPSHOT_ENTRIES));
+  }, [cAddress, data, isPlaceholderData]);
+
+  return {
+    ...query,
+    /** When showing the persisted snapshot, when it was captured — else null. */
+    snapshotAt: isPlaceholderData ? (snapshot?.updatedAt ?? null) : null,
+  };
 }

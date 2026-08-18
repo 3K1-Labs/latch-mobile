@@ -3,7 +3,7 @@ import TrackedTokenRow from '@/src/components/add-token/TrackedTokenRow';
 import WellKnownTokenRow from '@/src/components/add-token/WellKnownTokenRow';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { WELL_KNOWN_TOKENS } from '@/src/constants/known-tokens';
+import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -92,7 +92,7 @@ export default function AddToken() {
             <ActivityIndicator size="small" color={theme.colors.primary700} />
           </Box>
         ) : (
-          WELL_KNOWN_TOKENS.map((token) => {
+          getWellKnownTokens().map((token) => {
             const key = token.sacContractId ?? `${token.code}:${token.issuer}`;
             return (
               <WellKnownTokenRow

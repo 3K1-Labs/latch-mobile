@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StrKey } from '@stellar/stellar-sdk';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -21,7 +22,7 @@ import { AccountSigner } from '@/src/lib/account-signers';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
-import { SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
+import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -220,11 +221,16 @@ const SharedWalletReview = () => {
 
       // Upload the encrypted backup now that the multisig is in ACCOUNTS, so
       // the creator's signer credential and this wallet are recoverable.
-      // Best-effort and non-blocking — same contract as the personal deploy
-      // path; the user can also re-run it later from Profile → Backup.
-      uploadBackup().catch((err) => {
+      // Awaited so a failure is known before navigating away — this screen
+      // can't show a retry action once we've replaced it with the result
+      // screen, so a failure here leaves BACKUP_PENDING for Profile to pick
+      // up (same contract as deploy-account.tsx's onboarding backup step).
+      try {
+        await uploadBackup();
+      } catch (err: any) {
         if (__DEV__) console.log('[backup] upload failed:', err?.message);
-      });
+        await AsyncStorage.setItem(ASYNC_KEYS.BACKUP_PENDING, 'true');
+      }
 
       router.replace({
         pathname: '/(onboarding)/shared-wallet-result',

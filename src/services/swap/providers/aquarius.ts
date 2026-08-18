@@ -36,6 +36,7 @@ interface AquariusPool {
   address: string;
   tokens_addresses: string[]; // canonical sorted order
   pool_type?: string;
+  total_volume?: number | string; // lifetime volume; free depth proxy from the API
 }
 
 interface AquariusRaw {
@@ -93,7 +94,13 @@ async function simulateRead(method: string, args: xdr.ScVal[]): Promise<unknown>
 }
 
 // Cache the pool list briefly — the discovery API paginates and changes rarely.
+// Pools are network-specific, so a live switch (src/lib/network-switch.ts) must
+// drop this or mainnet quotes get filtered against testnet pool data.
 let poolCache: { at: number; pools: AquariusPool[] } = { at: 0, pools: [] };
+
+export function resetAquariusPoolCache(): void {
+  poolCache = { at: 0, pools: [] };
+}
 
 async function fetchAllPools(): Promise<AquariusPool[]> {
   if (Date.now() - poolCache.at < 60_000 && poolCache.pools.length) return poolCache.pools;
@@ -137,46 +144,76 @@ export const aquariusProvider: SwapProvider = {
 
     const inBase = toBaseUnits(amountIn);
 
-    // Estimate across candidate pools (cap to limit latency) and keep the best.
-    let best: { out: bigint; pool: AquariusPool } | null = null;
-    for (const pool of pools.slice(0, 4)) {
-      try {
-        const out = (await simulateRead('estimate_swap', [
-          tokensVec(pool.tokens_addresses),
-          new Address(fromSacId).toScVal(),
-          new Address(toSacId).toScVal(),
-          poolIndexScVal(pool.index),
-          nativeToScVal(inBase, { type: 'u128' }),
-        ])) as bigint;
-        if (__DEV__) console.log('[aquarius] estimate', pool.index.slice(0, 8), '→', out.toString());
-        if (out > 0n && (!best || out > best.out)) best = { out, pool };
-      } catch (e) {
-        if (__DEV__) {
-          console.log('[aquarius] estimate err', pool.index.slice(0, 8), (e as Error).message?.slice(0, 80));
+    // Pick the DEEPEST pool, not the one quoting the highest raw output. A
+    // thin, imbalanced pool can quote a more generous amountOut purely
+    // because its reserves are skewed relative to real value — not because
+    // it's a genuinely better trade; anyone can permissionlessly create an
+    // Aquarius pool at an arbitrary ratio. Verified live on mainnet: a 59-XLM
+    // pool priced 5 XLM at 0.7929 USDC while the 9.6M-XLM pool priced the same
+    // trade at 0.8528 USDC (spot 0.17073 USDC/XLM, the real market rate).
+    // Selecting on raw output alone systematically favours the skewed pool.
+    //
+    // Candidates are ordered by the API's lifetime `total_volume` before the
+    // slice: the API's own order is not depth-ranked (it returns the thin pool
+    // first for XLM/USDC on both networks), so slicing raw order could drop
+    // the deepest pool from consideration entirely. Volume tracked depth
+    // correctly for every pool pair inspected on both networks.
+    const candidates = [...pools]
+      .sort((a, b) => Number(b.total_volume ?? 0) - Number(a.total_volume ?? 0))
+      .slice(0, 4);
+
+    // Estimate + reserves per pool, all in flight at once — sequential awaits
+    // here cost ~2.9s on mainnet, which is far too slow for a screen that
+    // re-quotes on every debounced keystroke.
+    const probes = await Promise.all(
+      candidates.map(async (pool) => {
+        try {
+          const [out, reserves] = await Promise.all([
+            simulateRead('estimate_swap', [
+              tokensVec(pool.tokens_addresses),
+              new Address(fromSacId).toScVal(),
+              new Address(toSacId).toScVal(),
+              poolIndexScVal(pool.index),
+              nativeToScVal(inBase, { type: 'u128' }),
+            ]) as Promise<bigint>,
+            simulateRead('get_reserves', [
+              tokensVec(pool.tokens_addresses),
+              poolIndexScVal(pool.index),
+            ]) as Promise<bigint[]>,
+          ]);
+          if (out <= 0n) return null;
+          const depth = Number(reserves[pool.tokens_addresses.indexOf(fromSacId)] ?? 0n);
+          if (__DEV__) {
+            console.log('[aquarius] estimate', pool.index.slice(0, 8), '→', out.toString(), '| depth', depth);
+          }
+          return { out, pool, depth, reserves };
+        } catch (e) {
+          if (__DEV__) {
+            console.log('[aquarius] estimate err', pool.index.slice(0, 8), (e as Error).message?.slice(0, 80));
+          }
+          return null;
         }
-      }
+      }),
+    );
+
+    let best: { out: bigint; pool: AquariusPool; depth: number; reserves: bigint[] } | null = null;
+    for (const p of probes) {
+      if (p && (!best || p.depth > best.depth)) best = p;
     }
     if (!best) throw new Error('No Aquarius route for this amount');
 
     // Price impact = how far the effective price is from the pool spot price.
-    // spot = reserveOut/reserveIn; effective = amountOut/amountIn.
+    // spot = reserveOut/reserveIn; effective = amountOut/amountIn. Reserves
+    // come from the probe above — no second fetch.
     let priceImpactPct = 0;
-    try {
-      const reserves = (await simulateRead('get_reserves', [
-        tokensVec(best.pool.tokens_addresses),
-        poolIndexScVal(best.pool.index),
-      ])) as bigint[];
-      const idxIn = best.pool.tokens_addresses.indexOf(fromSacId);
-      const idxOut = best.pool.tokens_addresses.indexOf(toSacId);
-      const rIn = Number(reserves[idxIn]);
-      const rOut = Number(reserves[idxOut]);
-      if (rIn > 0 && rOut > 0) {
-        const spot = rOut / rIn;
-        const effective = Number(best.out) / Number(inBase);
-        priceImpactPct = Math.max(0, (1 - effective / spot) * 100);
-      }
-    } catch {
-      // reserves unavailable (e.g. non-constant-product pool) — leave impact 0
+    const idxIn = best.pool.tokens_addresses.indexOf(fromSacId);
+    const idxOut = best.pool.tokens_addresses.indexOf(toSacId);
+    const rIn = Number(best.reserves[idxIn] ?? 0n);
+    const rOut = Number(best.reserves[idxOut] ?? 0n);
+    if (rIn > 0 && rOut > 0) {
+      const spot = rOut / rIn;
+      const effective = Number(best.out) / Number(inBase);
+      priceImpactPct = Math.max(0, (1 - effective / spot) * 100);
     }
 
     const amountOut = fromBaseUnits(best.out.toString());

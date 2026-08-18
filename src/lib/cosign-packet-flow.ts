@@ -21,7 +21,11 @@
 import * as SecureStore from 'expo-secure-store';
 
 import { fetchRuleThreshold } from '@/src/api/account-admin';
-import { STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from '@/src/constants/config';
+import {
+  STELLAR_FACTORY_ADDRESS,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from '@/src/constants/config';
 import {
   addEntryToPacket,
   createPacket,
@@ -53,7 +57,7 @@ function simParams() {
   return {
     rpcUrl: STELLAR_RPC_URL,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
+    factoryAddress: STELLAR_FACTORY_ADDRESS,
   };
 }
 
@@ -99,6 +103,25 @@ export function pickSigner(): SignerMatch | null {
   if (active && isSignable(active)) return { account: active, listIndex: activeAccountIndex };
   const i = accounts.findIndex(isSignable);
   return i >= 0 ? { account: accounts[i], listIndex: i } : null;
+}
+
+/**
+ * True when signing on this device will itself raise an OS biometric prompt.
+ *
+ * That happens for passkey signers whose private key was stored with
+ * requireAuthentication (see storePasskeyCredential) — the Secure Enclave /
+ * Keystore gates every read. An app-level biometric gate on top of that shows
+ * Face ID twice for one action, the second landing the instant the first
+ * succeeds. PIN-only passkey users store the key WITHOUT that flag and get no
+ * prompt on read, so for them the app-level gate is the only one and must stay.
+ * Mnemonic accounts sign from the in-memory seed and never prompt.
+ */
+export async function signingRaisesBiometricPrompt(): Promise<boolean> {
+  const me = pickSigner();
+  if (!me || me.account.gAddress) return false;
+  const keys = getPasskeyStorageKeys(me.listIndex);
+  const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
+  return requiresBiometric !== 'false';
 }
 
 /** This device's External signer-key id (ed25519 pubkey hex or passkey keyDataHex). */

@@ -3,22 +3,24 @@ import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import * as Clipboard from 'expo-clipboard';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import React from 'react';
 import { TouchableOpacity } from 'react-native';
 
 interface DetailRowProps {
   label: string;
   value: string;
+  /** Full string to copy when `value` is a truncated display form. */
+  copyValue?: string;
   copyable?: boolean;
   isLast?: boolean;
 }
 
-const DetailRow = ({ label, value, copyable, isLast }: DetailRowProps) => {
+const DetailRow = ({ label, value, copyValue, copyable, isLast }: DetailRowProps) => {
   const theme = useTheme<Theme>();
 
   const handleCopy = () => {
-    if (copyable) Clipboard.setStringAsync(value);
+    if (copyable) copyToClipboard(copyValue ?? value, label);
   };
 
   return (
@@ -79,8 +81,8 @@ const TransactionDetailCard = ({
       borderColor="gray900"
     >
       <DetailRow label="Date" value={date} />
-      <DetailRow label="From" value={truncate(from)} copyable />
-      <DetailRow label="To" value={truncate(to)} copyable />
+      <DetailRow label="From" value={truncate(from)} copyValue={from} copyable />
+      <DetailRow label="To" value={truncate(to)} copyValue={to} copyable />
       <DetailRow label="Network Fee" value={fee} />
       <DetailRow label="Block Number" value={block} />
       <DetailRow label="Network" value={network} isLast />

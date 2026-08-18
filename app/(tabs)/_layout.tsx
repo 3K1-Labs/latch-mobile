@@ -2,6 +2,7 @@ import SharedWalletNamingModal from '@/src/components/account/SharedWalletNaming
 import { CustomTabBar } from '@/src/components/CustomTabBar';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import { DrawerProvider } from '@/src/context/drawer-context';
+import { TabBarScrollProvider } from '@/src/context/tab-bar-scroll';
 import { usePushNotifications } from '@/src/hooks/use-push-notifications';
 import { useLoadingOverlay } from '@/src/store/loading-overlay';
 import { useWalletStore } from '@/src/store/wallet';
@@ -28,16 +29,18 @@ const TabsLayout = () => {
     <BottomSheetModalProvider>
       <DrawerProvider drawerContent={<Profile />}>
         <View style={{ flex: 1 }}>
-          <Tabs
-            tabBar={(props) => <CustomTabBar {...props} />}
-            screenOptions={{ headerShown: false }}
-          >
-            <Tabs.Screen name="index" options={{ title: 'Home' }} />
-            <Tabs.Screen name="swap" options={{ title: 'Swap' }} />
-            <Tabs.Screen name="history" options={{ title: 'History' }} />
-            <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
-            <Tabs.Screen name="profile" options={{ href: null }} />
-          </Tabs>
+          <TabBarScrollProvider>
+            <Tabs
+              tabBar={(props) => <CustomTabBar {...props} />}
+              screenOptions={{ headerShown: false }}
+            >
+              <Tabs.Screen name="index" options={{ title: 'Home' }} />
+              <Tabs.Screen name="swap" options={{ title: 'Swap' }} />
+              <Tabs.Screen name="history" options={{ title: 'History' }} />
+              <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
+              <Tabs.Screen name="profile" options={{ href: null }} />
+            </Tabs>
+          </TabBarScrollProvider>
           {/* Sibling of <Tabs> so the overlay sits ABOVE the CustomTabBar but
             still inside the DrawerProvider — the drawer can't slide over it. */}
           <LoadingBlur visible={visible} text={text} subText={subText} />

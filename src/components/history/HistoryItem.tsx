@@ -23,6 +23,10 @@ const HistoryItem = ({
   const isReceived = item.txType === 'receive' || (item.txType === 'unknown' && item.to === smartAccountAddress);
   const isSwap = item.txType === 'swap';
   const isBridge = item.txType === 'bridge';
+  // A swap is two payment rows under one hash — the asset sold leaves the
+  // account, the asset bought arrives — so sign each leg by its own direction
+  // rather than by the transaction type.
+  const isOutgoingLeg = item.from === smartAccountAddress;
   const code = item.assetCode ?? 'XLM';
   const amountNum = parseFloat(item.amount);
   const formattedAmount = amountNum.toLocaleString(undefined, {
@@ -74,7 +78,7 @@ const HistoryItem = ({
           <Box alignItems="flex-end">
             <Text variant="h10" color="textPrimary" fontWeight="700">
               {isSwap || isBridge
-                ? `${formattedAmount} ${code}`
+                ? `${isOutgoingLeg ? '-' : '+'}${formattedAmount} ${code}`
                 : isSent || isReceived
                   ? `${isSent ? '-' : '+'}${formattedAmount} ${code}`
                   : '—'}
