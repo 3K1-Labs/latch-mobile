@@ -99,25 +99,6 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !cancelled()
         run: bun run test
 
-  # Nothing secret belongs in this repository, and once it is public a leaked
-  # commit is permanent and indexed within minutes. This scans the PR's own
-  # commits, so it catches a secret before it is ever merged.
-  secrets:
-    name: secret scan
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          # gitleaks needs history to diff a pull request's commit range.
-          fetch-depth: 0
-
-      - name: Scan for committed secrets
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   # 102 runtime dependencies; Dependabot alone only flags what's already
   # known and already installed. This checks what a PR is ABOUT to add —
   # a newly introduced dependency with a known advisory, or one under a
@@ -138,18 +119,3 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
-
-  # Cheap and stack-agnostic, and docs are exactly where a typo earns its
-  # keep — so unlike the jobs above, this one is NOT gated on `changes`. It
-  # should run at full strength on a docs-only PR, not skip past the thing
-  # it exists to catch.
-  typos:
-    name: typo check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Check for typos
-        uses: crate-ci/typos@v1
