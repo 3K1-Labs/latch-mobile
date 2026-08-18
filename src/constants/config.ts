@@ -16,13 +16,18 @@ export interface NetworkDetails {
   networkPassphrase: string;
   sorobanRpcUrl: string;
   friendbotUrl?: string;
-  // Deploy-time-pinned contract config — differs per network, see
-  // reference/LATCH_REFERENCE.md. The ed25519 verifier is the only one passed
-  // client-side; secp256k1/webauthn verifiers are read on-chain from the
-  // active factory (see fetchFactoryVerifiers in src/api/account-admin.ts).
+  // Verifiers are NOT configured here. They are read from the chain — from the
+  // account's own context rule where possible, else from the factory's
+  // FactoryConfig (see resolveRegisteredEd25519Verifier in
+  // src/services/send-token.ts and fetchFactoryVerifiers in
+  // src/api/account-admin.ts).
+  //
+  // There used to be a `verifierAddress` here, mirroring the factory's ed25519
+  // verifier. It went stale on a contract redeploy and every Ed25519 signature
+  // failed __check_auth with #3002, because the account matches on the exact
+  // `External(verifier, key_data)` tuple. Configuration must not hold a second
+  // copy of something the chain already publishes.
   factoryAddress: string;
-  bundlerSecret: string;
-  verifierAddress: string;
 }
 
 export const TESTNET_NETWORK: NetworkDetails = {
@@ -33,9 +38,6 @@ export const TESTNET_NETWORK: NetworkDetails = {
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
   friendbotUrl: 'https://friendbot.stellar.org',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
-  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET ?? '',
-  verifierAddress:
-    process.env.EXPO_PUBLIC_VERIFIER_ADDRESS ?? 'CCRB63MFFBYXBZCRLRGLJVTHC7O4SUGAYTO5ZZEUNVY5W5DVGKHETI67',
 };
 
 export const MAINNET_NETWORK: NetworkDetails = {
@@ -45,8 +47,6 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkPassphrase: Networks.PUBLIC,
   sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
-  bundlerSecret: process.env.EXPO_PUBLIC_BUNDLER_SECRET_MAINNET ?? '',
-  verifierAddress: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET ?? '',
 };
 
 // `let`, not `const` — switchActiveNetwork() (src/lib/network-switch.ts) reassigns
@@ -54,18 +54,22 @@ export const MAINNET_NETWORK: NetworkDetails = {
 // (hook, event handler, render), never a module-top-level computation, so the
 // live binding is picked up on the next call/render — see network-switch.ts.
 //
-// Starts on mainnet and is corrected by hydrateActiveNetwork() during startup.
-// The app root gates rendering on that hydration, so nothing reads a network
-// value before the persisted choice has been applied.
-export let ACTIVE_NETWORK: NetworkDetails = MAINNET_NETWORK;
+// Starts on testnet and is corrected by hydrateActiveNetwork() during startup
+// from the user's persisted choice. The app root gates rendering on that
+// hydration, so nothing reads a network value before it is applied.
+//
+// Testnet is the default deliberately. A fresh install has no persisted choice,
+// so whatever sits here is what a first run uses — and a first run that lands
+// on mainnet deploys a real account and spends real bundler XLM before the user
+// has chosen anything. The safe default is the one that costs nothing when it
+// is wrong.
+export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
 
 // Convenience shortcuts derived from the active network
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
 let STELLAR_NETWORK_PASSPHRASE = ACTIVE_NETWORK.networkPassphrase;
 let STELLAR_RPC_URL = ACTIVE_NETWORK.sorobanRpcUrl;
 let STELLAR_FACTORY_ADDRESS = ACTIVE_NETWORK.factoryAddress;
-let STELLAR_BUNDLER_SECRET = ACTIVE_NETWORK.bundlerSecret;
-let STELLAR_VERIFIER_ADDRESS = ACTIVE_NETWORK.verifierAddress;
 
 // Minimum XLM reserve per Stellar protocol:
 //   (BASE_RESERVE_MIN_COUNT + subentry_count + num_sponsoring - num_sponsored) × BASE_RESERVE
@@ -78,7 +82,7 @@ const PASSKEY_RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'latch.finance';
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
 // The API key is baked into the bundle (EXPO_PUBLIC_*). Testnet only — move the
-// key behind a backend proxy before production, same as EXPO_PUBLIC_BUNDLER_SECRET.
+// key behind a backend proxy before production, as the bundler key already is.
 const SOROSWAP_API_URL = (
   process.env.EXPO_PUBLIC_SOROSWAP_API_URL ?? 'https://api.soroswap.finance'
 ).replace(/\/+$/, '');
@@ -133,8 +137,6 @@ function applyNetworkDetails(details: NetworkDetails): void {
   STELLAR_NETWORK_PASSPHRASE = details.networkPassphrase;
   STELLAR_RPC_URL = details.sorobanRpcUrl;
   STELLAR_FACTORY_ADDRESS = details.factoryAddress;
-  STELLAR_BUNDLER_SECRET = details.bundlerSecret;
-  STELLAR_VERIFIER_ADDRESS = details.verifierAddress;
   SOROSWAP_NETWORK = getNetworkId();
 
   const isTestnet = details.network === 'TESTNET';
@@ -216,9 +218,7 @@ export {
   SOROSWAP_API_URL,
   SOROSWAP_NETWORK,
   STELLAR_AUTH_PREFIX,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
-  STELLAR_VERIFIER_ADDRESS,
 };

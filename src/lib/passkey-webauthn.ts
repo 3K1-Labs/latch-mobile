@@ -27,25 +27,18 @@ import * as SecureStore from 'expo-secure-store';
 import QuickCrypto from 'react-native-quick-crypto';
 import { hashSorobanAuthPayload } from './soroban-auth-payload';
 
+import { createLogger } from './logger';
+import { b64uDecode, b64uEncode } from './base64url';
+
+// Moved to ./base64url so pure consumers need not import this module (it
+// reaches SecureStore and the wallet store); re-exported so existing callers
+// are unaffected. See the note there.
+export { b64uDecode, b64uEncode };
+
+const log = createLogger('passkey');
+
 // ─── base64url helpers (btoa-based — no Buffer polyfill) ─────────────────────
 
-export function b64uEncode(data: Uint8Array | string): string {
-  const bytes =
-    typeof data === 'string'
-      ? new TextEncoder().encode(data)
-      : new Uint8Array(data instanceof Uint8Array ? data : new Uint8Array(data));
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-export function b64uDecode(str: string): Uint8Array {
-  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
 
 // ─── Key generation ───────────────────────────────────────────────────────────
 
@@ -202,21 +195,12 @@ export async function signWithPasskey(
   const clientDataJSONStr = JSON.stringify({ type: 'webauthn.get', challenge, origin: rpId });
   const clientDataJSON = new TextEncoder().encode(clientDataJSONStr);
 
-  if (__DEV__) {
-    console.log('[PASSKEY DIAG] challenge:', challenge);
-    console.log('[PASSKEY DIAG] clientDataJSON:', clientDataJSONStr);
-  }
-
   // Sign SHA256(authenticatorData || SHA256(clientDataJSON)) with P-256
   const clientDataHash = sha256(clientDataJSON);
   const messageToSign = new Uint8Array(authenticatorData.length + clientDataHash.length);
   messageToSign.set(authenticatorData, 0);
   messageToSign.set(clientDataHash, authenticatorData.length);
   const msgHash = sha256(messageToSign);
-
-  if (__DEV__) {
-    console.log('[PASSKEY DIAG] msgHash:', Buffer.from(msgHash).toString('hex'));
-  }
 
   // msgHash is already the final digest the on-chain verifier checks, so we must
   // sign it as-is. @noble/curves v2 defaults `prehash: true` (v1 defaulted false),
@@ -325,14 +309,10 @@ export async function signWithStoredPasskeyAtIndex(
     const derivedPub = Buffer.from(
       p256.getPublicKey(Buffer.from(paddedPrivKey, 'hex'), false),
     ).toString('hex');
-    if (__DEV__) {
-      console.log('[PASSKEY DIAG] privKeyLen:', privateKeyHex.length, '| pubKeyPrefix:', storedPub.slice(0, 10));
-      console.log('[PASSKEY DIAG] keyPairMatch:', derivedPub === storedPub);
-      if (derivedPub !== storedPub) {
-        console.log('[PASSKEY DIAG] storedPub :', storedPub.slice(0, 20));
-        console.log('[PASSKEY DIAG] derivedPub:', derivedPub.slice(0, 20));
-      }
-    }
+    // The verdict is the whole diagnostic. A key length identifies the key
+    // format and a prefix narrows a search space, so neither is logged — and
+    // the mismatch below already raises a clear, actionable error.
+    if (__DEV__) log.debug('stored key matches deployed signer:', derivedPub === storedPub);
     if (derivedPub !== storedPub) {
       throw new Error(
         'PASSKEY_KEY_MISMATCH: The stored credential no longer matches the deployed smart account. Re-initialize your account to continue.',
@@ -340,7 +320,7 @@ export async function signWithStoredPasskeyAtIndex(
     }
   } catch (e: any) {
     if (e.message?.startsWith('PASSKEY_KEY_MISMATCH')) throw e;
-    if (__DEV__) console.log('[PASSKEY DIAG] getPublicKey error:', e);
+    if (__DEV__) log.debug('getPublicKey failed:', e);
   }
 
   const sig = await signWithPasskey(paddedPrivKey, authDigest, rpId);
@@ -357,9 +337,9 @@ export async function signWithStoredPasskeyAtIndex(
       // sig over mHash directly). Without it, v2 double-hashes and reports a
       // false "valid" even when on-chain secp256r1 verification fails.
       const localValid = p256.verify(sig.signature, mHash, pubBytes, { prehash: false });
-      console.log('[PASSKEY DIAG] localVerify:', localValid);
+      log.debug('local signature self-check:', localValid);
     } catch (e) {
-      console.log('[PASSKEY DIAG] localVerify error:', e);
+      log.debug('local signature self-check failed:', e);
     }
   }
 

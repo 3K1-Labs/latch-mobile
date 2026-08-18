@@ -13,7 +13,7 @@ const ScannerFrame = ({ onBarcodeScanned, scanned }: ScannerFrameProps) => {
   return (
     <Box flex={1} backgroundColor="black">
       <CameraView
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         onBarcodeScanned={scanned ? undefined : ({ data }) => onBarcodeScanned(data)}
         barcodeScannerSettings={{
           barcodeTypes: ['qr'],
@@ -21,7 +21,7 @@ const ScannerFrame = ({ onBarcodeScanned, scanned }: ScannerFrameProps) => {
       />
       
       {/* Overlay */}
-      <Box style={StyleSheet.absoluteFillObject} justifyContent="center" alignItems="center">
+      <Box style={StyleSheet.absoluteFill} justifyContent="center" alignItems="center">
         <Box
           width={280}
           height={280}

@@ -4,7 +4,6 @@ import { useWalletStore } from '@/src/store/wallet';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { BlurView } from 'expo-blur';
-import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
@@ -26,12 +25,17 @@ import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
 import { LinearGradient } from 'expo-linear-gradient';
+import { copySecretToClipboard } from '@/src/utils/copy-to-clipboard';
+import { useSecureScreen } from '@/src/hooks/use-secure-screen';
 
 export const PENDING_MNEMONIC_KEY = 'latch_pending_mnemonic';
 
 const { width } = Dimensions.get('window');
 
 const RecoveryPhrase = () => {
+  // A recovery phrase or PIN on screen must not end up in the photo library.
+  useSecureScreen();
+
   const theme = useTheme<Theme>();
   const statusBarStyle = useStatusBarStyle();
   const router = useRouter();
@@ -74,7 +78,7 @@ const RecoveryPhrase = () => {
 
   const handleCopyAll = async () => {
     if (!pendingWallet) return;
-    await Clipboard.setStringAsync(pendingWallet.mnemonic);
+    await copySecretToClipboard(pendingWallet.mnemonic);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

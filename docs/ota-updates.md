@@ -235,9 +235,52 @@ those test devices in seconds. Production users untouched.
 
 ---
 
+## Trust — who can push code straight to installed wallets
+
+OTA is the highest-leverage path into every user's device: it skips App Store
+/ Play Store review entirely, and `useOtaUpdate` (`src/hooks/use-ota-update.ts`)
+applies whatever it downloads with no on-device verification of *content*,
+only of update-manifest validity. What follows is the actual trust boundary
+today, not the aspirational one.
+
+**Who can publish today:** anyone with `eas login` access to the
+`frankiepower` Expo account and permission on this project. Publishing is a
+local, human-run command (`bun run update:production`, see
+[Daily workflow](#daily-workflow--ship-a-fix-to-production-users)) — there is
+no CI job, no required review, and no branch protection gating it. Treat EAS
+account credentials (and anyone's laptop with a cached `eas login` session)
+with the same seriousness as prod deploy access, because that is what it is.
+
+**Code signing is not configured.** `expo-updates` supports signing published
+updates with a key pair the app verifies before applying a bundle
+(`npx expo-updates codesigning:generate`, then `codeSigningCertificate` /
+`codeSigningMetadata` in `app.config.js`). Without it, anyone who can publish
+to the `production` branch — or anyone who compromises the Expo account —
+can push arbitrary JS to every installed wallet with nothing on-device to
+reject it. This is the single highest-value hardening item in this file;
+enabling it doesn't change the daily workflow above, only what an attacker
+with publish access (or a stolen EAS token) can do with it.
+
+**`hot-updater` is inert, but its dead config still shipped a live secret.**
+The `@hot-updater/react-native` config plugin is commented out
+(`app.config.js`), so it never runs — EAS Update is the only active OTA
+path, as noted at the top of this doc. That did not stop `env.js` from
+unconditionally inlining `EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY` into
+every shipped bundle: any `EXPO_PUBLIC_*` value gets compiled in as soon as
+it's referenced, whether or not the feature reading it ever runs. Worse, the
+value in `.env` decodes as a Supabase **`service_role`** key — full,
+RLS-bypassing database access — mislabeled as an anon key. That's now
+removed from `env.js` and `.env.example` (dead code — the same class of gap
+as the mainnet bundler secret, just an unused path instead of a live one).
+**Two things only you can do:** rotate/revoke that key in the Supabase
+project dashboard, and delete the three `EXPO_PUBLIC_HOT_UPDATER_SUPABASE_*`
+lines from your local `.env` — it's gitignored, so it was never in the repo,
+but the key itself is still live until you rotate it.
+
 ## Reference
 
 - EAS Update docs: <https://docs.expo.dev/eas-update/introduction/>
+- Code signing: <https://docs.expo.dev/eas-update/code-signing/>
 - Latch dashboard: <https://expo.dev/accounts/frankiepower/projects/latch-mobile/updates>
 - Project ID: `8b122713-0d94-4940-a71c-58da86f923ad`
 - Owner: `frankiepower`

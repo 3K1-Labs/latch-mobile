@@ -14,8 +14,9 @@
  */
 
 import { ApiError } from './api-error';
+import { API_BASE_URL } from '@/src/constants/api-host';
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1/pair-codes`;
 
 export interface PairCodeMeta {

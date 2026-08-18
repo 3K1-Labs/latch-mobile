@@ -1,22 +1,17 @@
 /**
  * Smart account API service.
  *
- * Handles deploying and looking up Soroban smart accounts directly via
- * the Soroban RPC. Bundler signing, simulation, and polling all run client-side.
+ * Address prediction and lookups run client-side against the Soroban RPC.
+ * Deployment goes through latch-api, which owns the bundler keypair — see
+ * src/api/smart-account-deploy.ts.
  *
  * Ed25519 path (mobile seed wallet):
  *   deploySmartAccount(publicKeyHex)
  *   lookupSmartAccount(publicKeyHex)
  *
  * Freighter / delegated G-address path:
- *   deploySmartAccountForGAddress(gAddress)
  *   lookupSmartAccountByGAddress(gAddress)
  *
- * ⚠️  SECURITY NOTE — EXPO_PUBLIC_BUNDLER_SECRET / EXPO_PUBLIC_BUNDLER_SECRET_MAINNET
- * EXPO_PUBLIC_* variables are baked into the JS bundle at build time and are
- * readable by anyone who extracts the APK/IPA. The bundler keypair should be
- * moved server-side (a backend endpoint that receives { publicKeyHex } and
- * returns { smartAccountAddress }) before shipping either network build.
  */
 
 import {
@@ -24,20 +19,18 @@ import {
   Address,
   Contract,
   Keypair,
-  rpc,
   scValToNative,
-  SorobanDataBuilder,
   StrKey,
   TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
 import QuickCrypto from 'react-native-quick-crypto';
 
+import { deployMultisigAccount, deploySeedWalletAccount } from '@/src/api/smart-account-deploy';
 import { AccountSigner, encodeAccountInitParams } from '@/src/lib/account-signers';
 import {
   ACTIVE_NETWORK,
   HORIZON_URL,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -47,98 +40,18 @@ import {
   generateMultisigNonce,
   sortSignersCanonical,
 } from '@/src/lib/multisig-address';
+import {
+  ledgerKeyToBase64,
+  parseSimResult,
+  sorobanCall,
+  toBase64,
+  txToBase64,
+} from '@/src/api/soroban-rpc';
 
-// ─── XHR-based JSON-RPC ───────────────────────────────────────────────────────
-// The stellar SDK uses Axios internally, which fails with "Network Error" on
-// Android because the bundled Axios doesn't go through the platform TLS stack.
-// Using XMLHttpRequest directly routes through OkHttp and respects the
-// network_security_config.xml trust anchors.
-
-export function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-export function txToBase64(tx: { toEnvelope(): { toXDR(): Uint8Array } }): string {
-  return toBase64(new Uint8Array(tx.toEnvelope().toXDR()));
-}
-
-export function ledgerKeyToBase64(key: xdr.LedgerKey): string {
-  return toBase64(new Uint8Array(key.toXDR()));
-}
-
-export function sorobanCall(rpcUrl: string, method: string, params: object): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', rpcUrl, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.setRequestHeader('Accept', 'application/json');
-    xhr.timeout = 60000;
-    xhr.onload = function () {
-      try {
-        const json = JSON.parse(xhr.responseText);
-        if (json.error) {
-          reject(new Error(`${method}: ${json.error.message ?? JSON.stringify(json.error)}`));
-        } else {
-          resolve(json.result);
-        }
-      } catch {
-        reject(new Error(`${method}: parse error (status=${xhr.status})`));
-      }
-    };
-    xhr.onerror = function () {
-      reject(new Error(`${method}: network error (status=${xhr.status})`));
-    };
-    xhr.ontimeout = function () {
-      reject(new Error(`${method}: timed out`));
-    };
-    xhr.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }));
-  });
-}
-
-function extractAddressFromMeta(resultMetaXdr: string): string | undefined {
-  try {
-    const meta = xdr.TransactionMeta.fromXDR(resultMetaXdr, 'base64');
-    const arm = (meta as any).arm(); // SDK types don't reflect v4 meta changes yet
-    let sorobanMeta: any;
-    if (arm === 'v3') sorobanMeta = meta.v3().sorobanMeta();
-    else if (arm === 'v4') sorobanMeta = (meta as any).v4().sorobanMeta();
-    if (sorobanMeta) return scValToNative(sorobanMeta.returnValue());
-  } catch (e) {
-    if (__DEV__) console.warn('Could not parse address from resultMetaXdr:', e);
-  }
-  return undefined;
-}
-
-export function parseSimResult(raw: any): rpc.Api.SimulateTransactionSuccessResponse {
-  return {
-    // _parsed: true tells rpc.assembleTransaction's internal parseRawSimulation to skip
-    // re-parsing. Without it, the SDK calls fromXDR(xdrObject, 'base64') on already-decoded
-    // auth entries, which passes a plain object to Buffer.from and throws "Received type object".
-    _parsed: true,
-    id: String(raw.id ?? '1'),
-    latestLedger: raw.latestLedger,
-    minResourceFee: raw.minResourceFee,
-    // assembleTransaction calls success.transactionData.build(), so this must be a
-    // SorobanDataBuilder, not a raw xdr.SorobanTransactionData.
-    transactionData: new SorobanDataBuilder(raw.transactionData),
-    cost: raw.cost ?? { cpuInsns: '0', memBytes: '0' },
-    events: [],
-    result: {
-      auth: (raw.results?.[0]?.auth ?? []).map((a: string) =>
-        xdr.SorobanAuthorizationEntry.fromXDR(a, 'base64'),
-      ),
-      retval: (() => {
-        try {
-          return xdr.ScVal.fromXDR(raw.results?.[0]?.retval || 'AAAAAA==', 'base64');
-        } catch {
-          return xdr.ScVal.scvVoid();
-        }
-      })(),
-    },
-  } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
-}
+// The Soroban RPC transport and XDR/base64 helpers live in ./soroban-rpc.
+// Re-exported here because this module's callers have always imported them
+// from it, and because they belong to the same conceptual surface.
+export { ledgerKeyToBase64, parseSimResult, sorobanCall, toBase64, txToBase64 };
 
 // Reads live off ACTIVE_NETWORK (src/constants/config.ts) on every call, not
 // module-top-level, so it follows switchActiveNetwork() without a restart.
@@ -146,7 +59,6 @@ const getActiveNetworkConfig = () => ({
   rpcUrl: STELLAR_RPC_URL,
   networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
   factoryAddress: STELLAR_FACTORY_ADDRESS,
-  bundlerSecret: STELLAR_BUNDLER_SECRET,
 });
 
 // ─── Unified deployment cache ─────────────────────────────────────────────────
@@ -218,14 +130,7 @@ async function fundAccountIfNeeded(gAddress: string): Promise<void> {
   }
 }
 
-// rpc.Server.getAccount() uses getLedgerEntries on the Soroban RPC, which can
-// return empty even when the account exists. Horizon is authoritative for sequence.
-async function getAccountFromHorizon(publicKey: string): Promise<Account> {
-  const response = await fetch(`${HORIZON_URL}/accounts/${publicKey}`);
-  if (!response.ok) throw new Error(`Account not found: ${publicKey}`);
-  const data = await response.json();
-  return new Account(publicKey, data.sequence);
-}
+
 
 async function predictAddress(
   rpcUrl: string,
@@ -286,101 +191,17 @@ export async function deploySmartAccount(
 
     if (!skipFunding) await fundAccountIfNeeded(userGAddress);
 
-    if (__DEV__) console.log(`Deploying smart account for pubkey: ${publicKeyHex}`);
-
-    const config = getActiveNetworkConfig();
-
-    if (!config.bundlerSecret) {
-      throw new Error(
-        `Missing bundler secret for ${ACTIVE_NETWORK.networkName} (EXPO_PUBLIC_BUNDLER_SECRET${ACTIVE_NETWORK.network === 'PUBLIC' ? '_MAINNET' : ''}).`,
-      );
-    }
-    if (!config.factoryAddress) {
-      throw new Error(
-        `Missing factory address for ${ACTIVE_NETWORK.networkName} (EXPO_PUBLIC_FACTORY_ADDRESS${ACTIVE_NETWORK.network === 'PUBLIC' ? '_MAINNET' : ''}).`,
-      );
-    }
-
-    const bundlerKeypair = Keypair.fromSecret(config.bundlerSecret);
-    const salt = await deriveSalt(publicKeyHex);
-    const paramsMap = buildParamsMap(publicKeyHex, salt);
-    const contract = new Contract(config.factoryAddress);
-    const bundlerAccount = await getAccountFromHorizon(bundlerKeypair.publicKey());
-
-    let smartAccountAddress = '';
-
-    const deployTx = new TransactionBuilder(bundlerAccount, {
-      fee: '1500000',
-      networkPassphrase: config.networkPassphrase,
-    })
-      .addOperation(contract.call('create_account', paramsMap))
-      .setTimeout(300)
-      .build();
-
-    if (__DEV__) console.log('Simulating factory create_account...');
-    const rawSim = await sorobanCall(config.rpcUrl, 'simulateTransaction', {
-      transaction: txToBase64(deployTx),
-    });
-    if (rawSim.error) throw new Error(`Factory deployment simulation failed: ${rawSim.error}`);
-
-    try {
-      smartAccountAddress = scValToNative(
-        xdr.ScVal.fromXDR(rawSim.results?.[0]?.retval || 'AAAAAA==', 'base64'),
-      );
-      if (__DEV__) console.log(`Simulation preview. Predicted Account: ${smartAccountAddress}`);
-    } catch {
-      if (__DEV__)
-        console.log('Could not pre-read address from simulation — will parse from settled tx.');
-    }
-
-    const assembledTx = rpc.assembleTransaction(deployTx, parseSimResult(rawSim)).build();
-    assembledTx.sign(bundlerKeypair);
-
-    const sendRaw = await sorobanCall(config.rpcUrl, 'sendTransaction', {
-      transaction: txToBase64(assembledTx),
-    });
-
-    if (sendRaw.status === 'ERROR') {
-      throw new Error(
-        `Factory deployment failed: ${sendRaw.errorResultXdr ?? JSON.stringify(sendRaw)}`,
-      );
-    }
-
-    const txHash: string = sendRaw.hash;
-    let finalStatus: string | undefined;
-    let returnValueXdr: string | undefined;
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const poll = await sorobanCall(config.rpcUrl, 'getTransaction', { hash: txHash });
-      finalStatus = poll.status;
-      if (poll.status !== 'NOT_FOUND') {
-        returnValueXdr = poll.resultMetaXdr;
-        break;
-      }
-    }
-
-    if (!finalStatus) throw new Error('Transaction not found after polling');
-
-    if (finalStatus === 'SUCCESS') {
-      if (returnValueXdr) {
-        smartAccountAddress = extractAddressFromMeta(returnValueXdr) ?? '';
-      }
-      if (!smartAccountAddress) {
-        throw new Error('Transaction settled but could not extract smart account address');
-      }
-      if (__DEV__) console.log(`Deployment successful via factory: ${smartAccountAddress}`);
-    } else {
-      throw new Error(`Factory deployment transaction status: ${finalStatus}`);
-    }
+    // The bundler signs and pays for this on the server; the app proves it
+    // holds `publicKeyHex` rather than holding the bundler key itself.
+    const { smartAccountAddress, alreadyDeployed } = await deploySeedWalletAccount(publicKeyHex);
 
     deploymentCache.set(publicKeyHex, { smartAccountAddress, gAddress: userGAddress });
 
     return {
       smartAccountAddress,
       gAddress: userGAddress,
-      factoryAddress: config.factoryAddress,
-      alreadyDeployed: false,
+      factoryAddress: getActiveNetworkConfig().factoryAddress,
+      alreadyDeployed,
     };
   } catch (error) {
     console.error('Error creating via factory:', error);
@@ -444,91 +265,6 @@ export async function lookupSmartAccount(publicKeyHex: string): Promise<LookupRe
 }
 
 // ─── G-address / Freighter (delegated) path ───────────────────────────────────
-
-/**
- * Deploy a smart account using a Stellar G-address as a delegated signer.
- *
- * @param gAddress  Stellar G-address (e.g., "GABC...")
- */
-export async function deploySmartAccountForGAddress(gAddress: string): Promise<DeployResult> {
-  try {
-    if (!gAddress || !StrKey.isValidEd25519PublicKey(gAddress)) {
-      return { smartAccountAddress: '', gAddress: '', alreadyDeployed: false };
-    }
-
-    const cached = deploymentCache.get(gAddress);
-    if (cached) {
-      return { smartAccountAddress: cached.smartAccountAddress, alreadyDeployed: true };
-    }
-
-    await fundAccountIfNeeded(gAddress);
-
-    const cfg = getActiveNetworkConfig();
-    const bundlerKeypair = Keypair.fromSecret(cfg.bundlerSecret || '');
-    const salt = await deriveSalt(gAddress);
-    const paramsMap = buildParamsMap(gAddress, salt);
-    const factory = new Contract(cfg.factoryAddress || '');
-
-    const predictedAddress = await predictAddress(
-      cfg.rpcUrl,
-      cfg.networkPassphrase,
-      cfg.factoryAddress || '',
-      paramsMap,
-    );
-
-    const bundlerAccount = await getAccountFromHorizon(bundlerKeypair.publicKey());
-
-    const createTx = new TransactionBuilder(bundlerAccount, {
-      fee: '1500000',
-      networkPassphrase: cfg.networkPassphrase,
-    })
-      .addOperation(factory.call('create_account', paramsMap))
-      .setTimeout(300)
-      .build();
-
-    const rawSim = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', {
-      transaction: txToBase64(createTx),
-    });
-    if (rawSim.error) throw new Error(`create_account simulation failed: ${rawSim.error}`);
-
-    const assembled = rpc.assembleTransaction(createTx, parseSimResult(rawSim)).build();
-    assembled.sign(bundlerKeypair);
-
-    const sendRaw = await sorobanCall(cfg.rpcUrl, 'sendTransaction', {
-      transaction: txToBase64(assembled),
-    });
-    if (sendRaw.status === 'ERROR') {
-      throw new Error(
-        `Factory create_account failed: ${sendRaw.errorResultXdr ?? JSON.stringify(sendRaw)}`,
-      );
-    }
-
-    let smartAccountAddress: string | undefined;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const poll = await sorobanCall(cfg.rpcUrl, 'getTransaction', { hash: sendRaw.hash });
-      if (poll.status === 'NOT_FOUND') continue;
-      if (poll.status === 'SUCCESS') {
-        if (poll.resultMetaXdr) smartAccountAddress = extractAddressFromMeta(poll.resultMetaXdr);
-        break;
-      }
-      throw new Error(`Factory deployment failed with status: ${poll.status}`);
-    }
-
-    if (!smartAccountAddress) smartAccountAddress = predictedAddress;
-    if (smartAccountAddress !== predictedAddress) {
-      throw new Error(
-        `Address mismatch: predicted=${predictedAddress} actual=${smartAccountAddress}`,
-      );
-    }
-
-    deploymentCache.set(gAddress, { smartAccountAddress });
-    return { smartAccountAddress, alreadyDeployed: false };
-  } catch (error) {
-    console.error('Freighter account deploy error:', error);
-    return { smartAccountAddress: '', gAddress: '', alreadyDeployed: false };
-  }
-}
 
 /**
  * Look up whether a smart account already exists for the given G-address.
@@ -618,89 +354,25 @@ export async function deployMultiSigSmartAccount(
     );
   }
 
-  const config = getActiveNetworkConfig();
-  if (!config.bundlerSecret) {
-    throw new Error(`Missing bundler secret for ${ACTIVE_NETWORK.networkName}.`);
-  }
-  if (!config.factoryAddress) {
-    throw new Error(`Missing factory address for ${ACTIVE_NETWORK.networkName}.`);
-  }
-
   const canonicalSigners = sortSignersCanonical(signers);
   // Fresh nonce per deploy so the same signer set can open multiple distinct
   // wallets (distinct salt → distinct C-address).
   const nonceHex = generateMultisigNonce();
   const salt = deriveMultisigSalt({ signers: canonicalSigners, threshold, nonceHex });
-  const paramsMap = encodeAccountInitParams({
-    signers: canonicalSigners,
+
+  // Signer order and salt are computed here and sent verbatim: every
+  // participating device derives the same pair and so predicts the same
+  // C-address without coordination. The server must not re-derive either.
+  const { smartAccountAddress, alreadyDeployed } = await deployMultisigAccount(
+    canonicalSigners,
     threshold,
-    salt,
-  });
-
-  const bundlerKeypair = Keypair.fromSecret(config.bundlerSecret);
-  const contract = new Contract(config.factoryAddress);
-  const bundlerAccount = await getAccountFromHorizon(bundlerKeypair.publicKey());
-
-  const deployTx = new TransactionBuilder(bundlerAccount, {
-    fee: '2000000',
-    networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(contract.call('create_account', paramsMap))
-    .setTimeout(300)
-    .build();
-
-  const rawSim = await sorobanCall(config.rpcUrl, 'simulateTransaction', {
-    transaction: txToBase64(deployTx),
-  });
-  console.log({ error: rawSim.error });
-  if (rawSim.error) throw new Error(`multisig deploy simulation failed: ${rawSim.error}`);
-
-  let predicted = '';
-  try {
-    predicted = scValToNative(
-      xdr.ScVal.fromXDR(rawSim.results?.[0]?.retval || 'AAAAAA==', 'base64'),
-    );
-  } catch {
-    /* best-effort; final address comes from settled tx */
-  }
-
-  const assembled = rpc.assembleTransaction(deployTx, parseSimResult(rawSim)).build();
-  assembled.sign(bundlerKeypair);
-
-  const sendRaw = await sorobanCall(config.rpcUrl, 'sendTransaction', {
-    transaction: txToBase64(assembled),
-  });
-  if (sendRaw.status === 'ERROR') {
-    throw new Error(
-      `multisig deploy send failed: ${sendRaw.errorResultXdr ?? JSON.stringify(sendRaw)}`,
-    );
-  }
-
-  const txHash: string = sendRaw.hash;
-  let finalStatus: string | undefined;
-  let returnMeta: string | undefined;
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const poll = await sorobanCall(config.rpcUrl, 'getTransaction', { hash: txHash });
-    finalStatus = poll.status;
-    if (poll.status !== 'NOT_FOUND') {
-      returnMeta = poll.resultMetaXdr;
-      break;
-    }
-  }
-  if (finalStatus !== 'SUCCESS') {
-    throw new Error(`multisig deploy status: ${finalStatus}`);
-  }
-
-  const smartAccountAddress = (returnMeta && extractAddressFromMeta(returnMeta)) || predicted;
-  if (!smartAccountAddress) {
-    throw new Error('multisig deploy succeeded but could not read account address');
-  }
+    salt.toString('hex'),
+  );
 
   return {
     smartAccountAddress,
-    alreadyDeployed: false,
-    factoryAddress: config.factoryAddress,
+    alreadyDeployed,
+    factoryAddress: getActiveNetworkConfig().factoryAddress,
     signers: canonicalSigners,
     threshold,
     nonceHex,

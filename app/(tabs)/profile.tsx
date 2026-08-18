@@ -297,19 +297,6 @@ const Profile = () => {
             />
           </Box>
 
-          {__DEV__ && (
-            <Box mb="l">
-              <Text variant="p7" color="textSecondary" mb="s" style={{ marginLeft: 4 }}>
-                Dev tools
-              </Text>
-              <SettingItem
-                icon="construct-outline"
-                label="Multisig states (preview)"
-                onPress={() => router.push('/dev/multisig-states')}
-              />
-            </Box>
-          )}
-
           <LogoutItem onPress={() => setLogoutVisible(true)} bottomInset={insets.bottom} />
         </Box>
       </ScrollView>

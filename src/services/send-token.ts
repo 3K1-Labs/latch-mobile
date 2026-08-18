@@ -1,13 +1,12 @@
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
+import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
   HORIZON_URL,
   PASSKEY_RP_ID,
   STELLAR_AUTH_PREFIX,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
-  STELLAR_VERIFIER_ADDRESS,
 } from '@/src/constants/config';
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import {
@@ -28,6 +27,10 @@ import {
   TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
+
+import { createLogger } from '@/src/lib/logger';
+
+const log = createLogger('send-token');
 
 // Compute the Soroban auth payload hash for a given auth entry.
 // signatureExpirationLedger MUST be set on the entry before calling this.
@@ -75,17 +78,48 @@ function countAuthContexts(inv: xdr.SorobanAuthorizedInvocation): number {
   return n;
 }
 
-// One context_rule_id (0 = default rule) per auth context. Used for BOTH the
-// signed auth digest and the AuthPayload's context_rule_ids — they must match.
-function buildContextRuleIds(entry: xdr.SorobanAuthorizationEntry): xdr.ScVal {
+// One context_rule_id per auth context. Used for BOTH the signed auth digest
+// and the AuthPayload's context_rule_ids — they must match.
+//
+// The rule is chosen by the signer, not matched by the account: __check_auth
+// validates each context against the rule id named here, and a Default rule
+// matches any context. Rule 0 is therefore right for ordinary spending and for
+// the owner's own admin calls. It is WRONG for anything authorised by a
+// narrower rule — a guardian signing under the recovery rule must name that
+// rule's id, since the guardians are not signers on rule 0.
+function buildContextRuleIds(
+  entry: xdr.SorobanAuthorizationEntry,
+  ruleId: number,
+): xdr.ScVal {
   const count = countAuthContexts(entry.rootInvocation());
-  return xdr.ScVal.scvVec(Array.from({ length: count }, () => xdr.ScVal.scvU32(0)));
+  return xdr.ScVal.scvVec(Array.from({ length: count }, () => xdr.ScVal.scvU32(ruleId)));
 }
 
+/**
+ * sha256(payloadHash || context_rule_ids) — what signers actually sign, and
+ * what a Delegated signer's require_auth_for_args receives as its argument.
+ */
+export function authDigestFor(
+  entry: xdr.SorobanAuthorizationEntry,
+  contextRuleId: number,
+): Buffer {
+  const payloadHash = hashAuthPayload(entry);
+  const ruleIdsXdr = new Uint8Array(buildContextRuleIds(entry, contextRuleId).toXDR());
+  const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
+  combined.set(payloadHash);
+  combined.set(ruleIdsXdr, payloadHash.length);
+  return Buffer.from(sha256(combined));
+}
+
+// `verifierAddress` is passed in rather than read from config: it must be the
+// verifier the ACCOUNT registered this key under, which
+// resolveRegisteredEd25519Verifier reads from the chain. See the note there.
 export function signSmartAccountAuthEntry(
   entry: xdr.SorobanAuthorizationEntry,
   keypair: Keypair,
   validUntilLedger: number,
+  verifierAddress: string,
+  contextRuleId = 0,
 ): void {
   const creds = entry.credentials();
   if (creds.switch().name !== 'sorobanCredentialsAddress') return;
@@ -97,7 +131,7 @@ export function signSmartAccountAuthEntry(
 
   // authDigest = sha256(payloadHash || toXDR(context_rule_ids)). One id per
   // auth context (see buildContextRuleIds) — a length mismatch fails #3014.
-  const ruleIdsScVal = buildContextRuleIds(entry);
+  const ruleIdsScVal = buildContextRuleIds(entry, contextRuleId);
   const ruleIdsXdr = new Uint8Array(ruleIdsScVal.toXDR());
   const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
   combined.set(payloadHash);
@@ -110,7 +144,7 @@ export function signSmartAccountAuthEntry(
 
   const signerKey = xdr.ScVal.scvVec([
     xdr.ScVal.scvSymbol('External'),
-    new Address(STELLAR_VERIFIER_ADDRESS).toScVal(),
+    new Address(verifierAddress).toScVal(),
     xdr.ScVal.scvBytes(Buffer.from(Uint8Array.from(pkBytes))),
   ]);
 
@@ -168,7 +202,7 @@ export interface SendTokenResult {
 /**
  * Sends tokens from a Latch smart account (C-address) to any Stellar address.
  *
- * Fee model: the bundler (EXPO_PUBLIC_BUNDLER_SECRET) is the outer transaction
+ * Fee model: the bundler is the outer transaction
  * source and pays all Soroban resource fees. The user's keypair only signs the
  * Soroban auth entry to authorise the smart account transfer — it never touches
  * fee payment. Move bundler signing server-side before production.
@@ -185,14 +219,11 @@ export interface SendTokenResult {
 export async function sendTokenFromSmartAccount(params: SendTokenParams): Promise<SendTokenResult> {
   const { smartAccountAddress, keypair, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
   const amountInBaseUnits = toBaseUnits(amount);
 
-  // 1. Load bundler account as fee payer / tx source
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  // 1. Load the bundler account as the simulation source. Only its address is
+  //    needed here; latch-api re-sources and re-sequences the final envelope.
+  const account = await loadAccount(await bundlerAddress());
 
   // 2. Build the SAC transfer transaction
   const contract = new Contract(sacContractId);
@@ -221,12 +252,17 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
   const simResult = parseSimResult(simRaw);
   const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
 
+  const verifier = await resolveRegisteredEd25519Verifier(
+    smartAccountAddress,
+    Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
+  );
+
   for (const entry of simResult.result?.auth ?? []) {
     const creds = entry.credentials();
     if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
     const credAddr = Address.fromScAddress(creds.address().address()).toString();
     if (credAddr === smartAccountAddress) {
-      signSmartAccountAuthEntry(entry, keypair, validUntilLedger);
+      signSmartAccountAuthEntry(entry, keypair, validUntilLedger, verifier);
     }
   }
 
@@ -238,47 +274,33 @@ export async function sendTokenFromSmartAccount(params: SendTokenParams): Promis
   const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(txWithSignedAuth),
   });
-  console.log(simRaw2);
   if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
   const simResult2 = parseSimResult(simRaw2);
 
   //    keeps the signed auth already in txWithSignedAuth (existingAuth.length > 0).
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
 
-  // 8. Bundler signs outer transaction (fee payer)
-  prepared.sign(bundlerKeypair);
-
-  // 9. Submit
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    console.log(sent.errorResultXdr, JSON.stringify(sent));
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  // 10. Poll for confirmation (up to 60 s)
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    console.log(poll.errorResultXdr, poll);
-
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // 8. latch-api signs the outer transaction with the bundler key and submits.
+  //    It rebuilds the envelope around this one's host function and auth
+  //    entries rather than signing what we send, then polls to confirmation.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }
 
 // ─── Passkey send ─────────────────────────────────────────────────────────────
 
 // Read the WebAuthn verifier address from the factory's on-chain instance storage.
-// Uses getLedgerEntries (no simulation, no source account needed) to read
-// FactoryConfig.webauthn_verifier directly from the factory's persistent storage.
+// Uses getLedgerEntries (no simulation, no source account needed) to read a
+// verifier address directly out of the factory's persistent FactoryConfig.
 // The factory stores separate verifier addresses per signer type; using the wrong
-// one (e.g. the Ed25519 verifier) produces a signer-mismatch error (#3002).
-export async function fetchWebAuthnVerifier(): Promise<string> {
+// one (e.g. the Ed25519 verifier for a passkey) produces a signer-mismatch error
+// (#3002).
+//
+// Read from the chain rather than from EXPO_PUBLIC_VERIFIER_ADDRESS. That
+// variable is a second, unenforced copy of a value the factory already
+// publishes, so it silently goes stale whenever the contracts are redeployed —
+// and a stale verifier fails every signature with #3002.
+async function fetchFactoryVerifier(field: 'ed25519_verifier' | 'webauthn_verifier'): Promise<string> {
   const factoryAddress = STELLAR_FACTORY_ADDRESS;
   if (!factoryAddress) throw new Error('Factory address is not configured for the active network');
 
@@ -309,18 +331,24 @@ export async function fetchWebAuthnVerifier(): Promise<string> {
     if (!isConfig) continue;
 
     const config = scValToNative(pair.val()) as Record<string, string>;
-    const verifier = config.webauthn_verifier;
-    if (!verifier) throw new Error('webauthn_verifier missing in FactoryConfig');
+    const verifier = config[field];
+    if (!verifier) throw new Error(`${field} missing in FactoryConfig`);
 
     if (__DEV__) {
-      console.log('[PASSKEY DIAG] factory webAuthn verifier:', verifier);
-      console.log('[PASSKEY DIAG] STELLAR_VERIFIER_ADDRESS (Ed25519):', STELLAR_VERIFIER_ADDRESS);
-      console.log('[PASSKEY DIAG] addresses match:', verifier === STELLAR_VERIFIER_ADDRESS);
+      log.debug(`factory ${field}:`, verifier);
     }
     return verifier;
   }
 
   throw new Error('Config not found in factory instance storage');
+}
+
+export function fetchWebAuthnVerifier(): Promise<string> {
+  return fetchFactoryVerifier('webauthn_verifier');
+}
+
+export function fetchEd25519Verifier(): Promise<string> {
+  return fetchFactoryVerifier('ed25519_verifier');
 }
 
 // Resolve the verifier address this device's passkey is registered under ON-CHAIN.
@@ -354,18 +382,53 @@ export async function resolveRegisteredWebAuthnVerifier(
     );
     if (match?.verifierAddress) {
       if (__DEV__ && match.foreignVerifier) {
-        console.log(
-          '[PASSKEY DIAG] device signer is registered under a non-current verifier:',
-          match.verifierAddress,
-        );
+        log.debug('device signer is on a non-current verifier:', match.verifierAddress);
       }
       return match.verifierAddress;
     }
   } catch (e) {
-    if (__DEV__) console.log('[PASSKEY DIAG] could not read on-chain signer verifier:', e);
+    if (__DEV__) log.debug('could not read on-chain signer verifier:', e);
   }
 
   return fetchWebAuthnVerifier();
+}
+
+// The Ed25519 counterpart of resolveRegisteredWebAuthnVerifier, and it exists
+// for the same reason: __check_auth matches on the exact
+// `External(verifier, key_data)` tuple, so an account registered under an older
+// verifier must be presented with that older verifier, not the current one.
+//
+// Falls back to the factory's current ed25519_verifier when the key isn't found
+// on the account — a newly deployed account is the common case.
+export async function resolveRegisteredEd25519Verifier(
+  smartAccountAddress: string,
+  publicKeyHex: string,
+): Promise<string> {
+  const factoryAddress = STELLAR_FACTORY_ADDRESS;
+  if (!factoryAddress) return fetchEd25519Verifier();
+
+  try {
+    const rule = await fetchDefaultContextRule(
+      { rpcUrl: STELLAR_RPC_URL, networkPassphrase: STELLAR_NETWORK_PASSPHRASE, factoryAddress },
+      smartAccountAddress,
+    );
+    const match = rule.signers.find(
+      (s) =>
+        s.kind === 'ed25519' &&
+        s.keyDataHex.toLowerCase() === publicKeyHex.toLowerCase() &&
+        s.verifierAddress,
+    );
+    if (match?.verifierAddress) {
+      if (__DEV__ && match.foreignVerifier) {
+        log.debug('device signer is on a non-current verifier:', match.verifierAddress);
+      }
+      return match.verifierAddress;
+    }
+  } catch (e) {
+    if (__DEV__) log.debug('could not read on-chain signer verifier:', e);
+  }
+
+  return fetchEd25519Verifier();
 }
 
 export async function signPasskeyAuthEntry(
@@ -373,6 +436,7 @@ export async function signPasskeyAuthEntry(
   listIndex: number,
   validUntilLedger: number,
   webAuthnVerifier: string,
+  contextRuleId = 0,
 ): Promise<void> {
   const creds = entry.credentials();
   if (creds.switch().name !== 'sorobanCredentialsAddress') return;
@@ -384,7 +448,7 @@ export async function signPasskeyAuthEntry(
   // auth_digest = sha256(payloadHash || toXDR(Vec[u32(0)])) — this is what do_check_auth
   // passes to verifier.verify(). The WebAuthn verifier checks that
   // clientDataJSON.challenge == base64url(auth_digest), so we must sign authDigest, not payloadHash.
-  const ruleIdsScVal = buildContextRuleIds(entry);
+  const ruleIdsScVal = buildContextRuleIds(entry, contextRuleId);
   const ruleIdsXdr = new Uint8Array(ruleIdsScVal.toXDR());
   const combined = new Uint8Array(payloadHash.length + ruleIdsXdr.length);
   combined.set(payloadHash);
@@ -392,9 +456,8 @@ export async function signPasskeyAuthEntry(
   const authDigest = new Uint8Array(sha256(combined));
 
   if (__DEV__) {
-    console.log('[PASSKEY DIAG] payloadHash:', Buffer.from(payloadHash).toString('hex'));
-    console.log('[PASSKEY DIAG] authDigest:', Buffer.from(authDigest).toString('hex'));
-    console.log('[PASSKEY DIAG] webAuthnVerifier:', webAuthnVerifier);
+    // payloadHash and authDigest are the exact bytes the user's key signs.
+    log.debug('signing auth entry against verifier', webAuthnVerifier);
   }
 
   const { sig, keyDataHex } = await signWithStoredPasskeyAtIndex(
@@ -447,13 +510,9 @@ export async function sendTokenFromPasskeyAccount(
 ): Promise<SendTokenResult> {
   const { smartAccountAddress, listIndex, sacContractId, destinationAddress, amount } = params;
 
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!bundlerSecret) throw new Error('Bundler secret is not configured for the active network');
-  const bundlerKeypair = Keypair.fromSecret(bundlerSecret);
-
   const amountInBaseUnits = toBaseUnits(amount);
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-  const account = await loadAccount(bundlerKeypair.publicKey());
+  const account = await loadAccount(await bundlerAddress());
 
   const contract = new Contract(sacContractId);
   const tx = new TransactionBuilder(account, {
@@ -493,27 +552,12 @@ export async function sendTokenFromPasskeyAccount(
   const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(txWithSignedAuth),
   });
-  console.log(simRaw2);
   if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
   const simResult2 = parseSimResult(simRaw2);
 
   const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-  prepared.sign(bundlerKeypair);
 
-  const sent = await sorobanCall(STELLAR_RPC_URL, 'sendTransaction', {
-    transaction: txToBase64(prepared),
-  });
-  if (sent.status === 'ERROR') {
-    throw new Error(`Send failed: ${sent.errorResultXdr ?? JSON.stringify(sent)}`);
-  }
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const poll = await sorobanCall(STELLAR_RPC_URL, 'getTransaction', { hash: sent.hash });
-    if (poll.status === 'NOT_FOUND') continue;
-    if (poll.status === 'SUCCESS') return { hash: sent.hash };
-    throw new Error(`Transaction failed with status: ${poll.status}`);
-  }
-
-  throw new Error('Transaction not confirmed within 60 s');
+  // Outer signing and submission happen server-side — see the note above.
+  const { hash } = await submitViaBundler(prepared);
+  return { hash };
 }

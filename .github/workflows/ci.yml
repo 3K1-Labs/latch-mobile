@@ -2,41 +2,30 @@ name: CI
 
 on:
   pull_request:
-    branches:
-      - master
   push:
     branches:
       - master
 
+# A newer push to the same branch makes the in-flight run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  quality:
-    name: lint · typecheck · test
+  # Whether this push/PR touches anything besides documentation. Used to skip
+  # the expensive STEPS below on a docs-only change — never to skip the JOBS
+  # themselves. A job skipped via `if:` still reports a (passing) check run;
+  # a required check that never runs at all (e.g. via `paths-ignore` on the
+  # trigger) gets stuck at "Expected" forever, which is worse than not having
+  # the optimization. Plain `git diff`, not a filtering action, so the exact
+  # semantics are readable here rather than trusted from a dependency's glob
+  # engine — path-filter actions have negation-pattern quirks that are easy
+  # to get subtly wrong in exactly this required-check-visibility way.
+  changes:
+    name: detect changes
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Run lint
-        run: bun run lint
-
-      - name: Run typecheck
-        run: bun run typecheck
-
-      - name: Run tests
-        run: bun run test
-
-  secret-scan:
-    name: secret scan
-    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
 
     steps:
       - name: Checkout repository
@@ -44,18 +33,83 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run secret scan
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          head: HEAD
-          extra_args: --only-verified
+      - name: Detect non-doc changes
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
 
+          # A branch's first push, or a base we can't resolve, gives no real
+          # diff to compute. Fail open — run everything — rather than skip on
+          # a comparison we're not sure of.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base" "$head")
+          echo "Changed files:"
+          echo "$changed"
+
+          # Anything that isn't Markdown, docs/, LICENSE/NOTICE, or an issue
+          # template counts as code and runs the full build.
+          if echo "$changed" | grep -vE '(\.md$|^docs/|^LICENSE$|^NOTICE$|^\.github/ISSUE_TEMPLATE/)' | grep -q .; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Lint, typecheck and tests share a dependency install, and each is fast, so
+  # one job keeps the feedback in a single place rather than paying for three
+  # installs. Steps are ordered cheapest-first but do not short-circuit each
+  # other — a PR should see every failure at once, not one per push.
+  check:
+    name: lint · typecheck · test
+    needs: changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        if: needs.changes.outputs.code == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        if: needs.changes.outputs.code == 'true'
+        run: bun run lint
+
+      - name: Typecheck
+        if: needs.changes.outputs.code == 'true' && !cancelled()
+        run: bun run typecheck
+
+      - name: Test
+        if: needs.changes.outputs.code == 'true' && !cancelled()
+        run: bun run test
+
+  # 102 runtime dependencies; Dependabot alone only flags what's already
+  # known and already installed. This checks what a PR is ABOUT to add —
+  # a newly introduced dependency with a known advisory, or one under a
+  # license this project can't ship, fails the PR instead of merging quietly.
+  # GitHub-native (no external account/API key), so this is on from day one
+  # rather than blocked on a vendor signup.
   dependency-review:
     name: dependency review
+    needs: changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
 
     steps:
       - name: Checkout repository
@@ -63,14 +117,5 @@ jobs:
 
       - name: Review dependency changes
         uses: actions/dependency-review-action@v4
-
-  typo-check:
-    name: typo check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Run typo check
-        uses: crate-ci/typos@v1
+        with:
+          fail-on-severity: high

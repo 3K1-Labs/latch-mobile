@@ -22,6 +22,8 @@ const Section = ({ title, children }: SectionProps) => (
   </Box>
 );
 
+// JSX with interpolated line breaks yields an array of strings, not one
+// string — React.ReactNode is what <Text> actually accepts.
 const Body = ({ children }: { children: React.ReactNode }) => (
   <Text variant="p7" color="textSecondary" lineHeight={22}>
     {children}

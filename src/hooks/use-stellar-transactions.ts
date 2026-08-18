@@ -29,7 +29,6 @@
 // // Soroban fees when they surface on the activity feed in the future.
 // let BUNDLER_G_ADDRESS: string | null = null;
 // try {
-//   const s = process.env.EXPO_PUBLIC_BUNDLER_SECRET;
 //   if (s) BUNDLER_G_ADDRESS = Keypair.fromSecret(s).publicKey();
 // } catch {}
 
@@ -241,12 +240,12 @@
 // // Re-export the bundler address for any future caller — currently unused by
 // // the new flow but kept per the Phase 3 plan in case classification needs it.
 // export { BUNDLER_G_ADDRESS };
-import { Address, Asset, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, Asset, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { bundlerAddress } from '../api/transaction-relay';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import {
   HORIZON_URL,
-  STELLAR_BUNDLER_SECRET,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from '../constants/config';
@@ -256,11 +255,13 @@ import { rememberSacTransfers, sacPaymentKey } from '../lib/sac-transfer-cache';
 import { useWalletStore } from '../store/wallet';
 import { useSnapshotSeed } from './use-snapshot-seed';
 
-// Computed per call (not module load) so it follows switchActiveNetwork() —
-// the bundler G-address differs between testnet and mainnet.
-function getBundlerGAddress(): string | null {
+// Resolved per call (not module load) so it follows switchActiveNetwork() —
+// the bundler G-address differs between testnet and mainnet. Fetched from
+// latch-api, which owns the keypair; history is best-effort, so a failure
+// here degrades to "no bundler-sourced payments" rather than an error.
+async function getBundlerGAddress(): Promise<string | null> {
   try {
-    return STELLAR_BUNDLER_SECRET ? Keypair.fromSecret(STELLAR_BUNDLER_SECRET).publicKey() : null;
+    return await bundlerAddress();
   } catch {
     return null;
   }
@@ -516,7 +517,7 @@ async function fetchGAddressOps(gAddress: string, cAddress: string): Promise<Ste
 // (Latch-to-Latch transfers go through the same bundler on both sides).
 
 async function fetchBundlerOps(cAddress: string): Promise<StellarPayment[]> {
-  const bundlerGAddress = getBundlerGAddress();
+  const bundlerGAddress = await getBundlerGAddress();
   if (!bundlerGAddress) return [];
 
   const resp = await horizonGet(

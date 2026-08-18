@@ -23,10 +23,14 @@ import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSecureScreen } from '@/src/hooks/use-secure-screen';
 
 const { width } = Dimensions.get('window');
 
 const VerifyPhrase = () => {
+  // A recovery phrase or PIN on screen must not end up in the photo library.
+  useSecureScreen();
+
   const theme = useTheme<Theme>();
   const statusBarStyle = useStatusBarStyle();
   const router = useRouter();

@@ -23,7 +23,6 @@ import {
   verifySignedChallenge,
 } from '@/src/lib/pairing-payload';
 import {
-  STELLAR_BUNDLER_SECRET,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -224,9 +223,8 @@ async function runAdminTx(
   const rpcUrl = STELLAR_RPC_URL;
   const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
   const factoryAddress = STELLAR_FACTORY_ADDRESS;
-  const bundlerSecret = STELLAR_BUNDLER_SECRET;
-  if (!factoryAddress || !bundlerSecret) {
-    throw new Error('Factory/bundler secret is not configured for the active network');
+  if (!factoryAddress) {
+    throw new Error('Factory address is not configured for the active network');
   }
 
   const mnemonic = await SecureStore.getItemAsync(SECURE_KEYS.MNEMONIC);
@@ -245,7 +243,7 @@ async function runAdminTx(
   );
 
   const result = await completePairing(
-    { rpcUrl, networkPassphrase, factoryAddress, bundlerSecret },
+    { rpcUrl, networkPassphrase, factoryAddress },
     wallet.keypair,
     {
       smartAccountAddress: activeAccount.smartAccountAddress!,

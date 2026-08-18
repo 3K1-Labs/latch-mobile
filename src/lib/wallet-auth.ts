@@ -23,8 +23,9 @@ import { findDeployedNetwork } from './account-network';
 import { signWithPasskey } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
 import { getPasskeyStorageKeys, SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
+import { API_BASE_URL } from '@/src/constants/api-host';
 
-const API_ROOT = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+const API_ROOT = API_BASE_URL;
 const API_BASE = `${API_ROOT}/v1`;
 
 // ─── Transport ────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ function xhrPost(path: string, body: object): Promise<{ status: number; body: an
 
 // ─── Encodings ────────────────────────────────────────────────────────────────
 
-function bytesToB64(bytes: Uint8Array): string {
+export function bytesToB64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64');
 }
 
@@ -63,7 +64,7 @@ function b64URLToBytes(s: string): Uint8Array {
 
 // Convert a 64-byte compact P-256 signature (r || s) to ASN.1 DER, the
 // format the wallet-backend's ecdsa.VerifyASN1 expects.
-function compactSigToDER(compact: Uint8Array): Uint8Array {
+export function compactSigToDER(compact: Uint8Array): Uint8Array {
   const r = compact.slice(0, 32);
   const s = compact.slice(32, 64);
   const rDER = asn1Int(r);

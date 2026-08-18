@@ -20,7 +20,8 @@ import { Buffer } from 'buffer';
 import { p256 } from '@noble/curves/nist.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-import { signWithStoredPasskey, PasskeySignature, b64uEncode } from './passkey-webauthn';
+import { b64uEncode } from './base64url';
+import type { PasskeySignature } from './passkey-webauthn';
 
 export type PairingSignerKind = 'ed25519' | 'webauthn' | 'delegated';
 
@@ -84,6 +85,11 @@ export async function signChallengePasskey(
   keyDataHex: string,
   rpId: string,
 ): Promise<SignedPairingChallenge> {
+  // Imported at call time, not at module load. The signing side reaches the
+  // device's SecureStore and the wallet store, which drags React Native in
+  // behind it; the verification side below is pure. Deferring this keeps the
+  // module importable — and therefore testable — outside the app.
+  const { signWithStoredPasskey } = await import('./passkey-webauthn');
   const sig: PasskeySignature = await signWithStoredPasskey(challenge, rpId);
   return {
     kind: 'webauthn',

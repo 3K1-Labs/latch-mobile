@@ -1,108 +1,177 @@
 // @ts-check Type-check this file
 const { z } = require('zod');
 
-const runtimeEnv = z
-  .object({
-    // EXPO_PUBLIC_API_BASE_URL: z.string().url(),
-    // EXPO_PUBLIC_LOGIN_EMAIL: z.string(),
-    // EXPO_PUBLIC_LOGIN_PASSWORD: z.string(),
-    // EXPO_PUBLIC_DOJAH_KEY: z.string(),
-    // EXPO_PUBLIC_DOJAH_APP_ID: z.string(),
-    // EXPO_PUBLIC_DOJAH_WIDGET_ID: z.string(),
-    EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY: z.string(),
-    EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME: z.string(),
-    EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: z.string().url(),
-    EXPO_PUBLIC_APP_ENV: z.string(),
-    // EXPO_PUBLIC_META_APPLICATION_ID: z.string(),
-    // EXPO_PUBLIC_META_CLIENT_TOKEN: z.string(),
-    EXPO_PUBLIC_APP_PROFILE: z.string().default('staging'),
-    // EXPO_PUBLIC_CLOUDFLARE_WORKER_URL: z.string().url(),
-    EXPO_PUBLIC_HORIZON_TESTNET_URL: z.string(),
+/**
+ * Environment schema.
+ *
+ * Required vs optional is drawn around *running the app on testnet*: a fresh
+ * clone with the testnet values from `.env.example` must build. Everything
+ * beyond that — mainnet counterparts, third-party API keys, OTA config — is
+ * optional and fails at the point of use with a message naming the variable,
+ * rather than blocking the build for a contributor who will never touch it.
+ *
+ * Note the whole schema was previously wrapped in `.partial()`, which made
+ * every field optional and turned this file into a no-op: a missing variable
+ * became `undefined` and surfaced much later as a confusing runtime error.
+ */
+/**
+ * A URL that React Native can actually issue a request against.
+ *
+ * `z.string().url()` is not enough: `new URL('localhost:8080')` parses happily,
+ * treating `localhost:` as the scheme, so a schemeless value passes validation
+ * and then fails at runtime with RN's opaque "No suitable URL request handler
+ * found". Requiring http/https up front turns that into a build error naming
+ * the variable.
+ */
+const httpUrl = () =>
+  z
+    .string()
+    .url()
+    .refine((v) => /^https?:\/\//i.test(v), {
+      message: 'must start with http:// or https://',
+    });
 
-    ///////
-    EXPO_PUBLIC_NETWORK: z.string(),
-    EXPO_PUBLIC_RPC_URL: z.string(),
-    EXPO_PUBLIC_NETWORK_PASSPHRASE: z.string(),
-    EXPO_PUBLIC_VERIFIER_ADDRESS: z.string(),
-    EXPO_PUBLIC_COUNTER_ADDRESS: z.string(),
-    EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: z.string(),
-    EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
-    EXPO_PUBLIC_BUNDLER_SECRET: z.string(),
-    // Mainnet counterparts — selected at runtime by ACTIVE_NETWORK in
-    // src/constants/config.ts, not by build-time branching.
-    EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: z.string(),
-    EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: z.string(),
-    EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: z.string(),
-    EXPO_PUBLIC_BUNDLER_SECRET_MAINNET: z.string(),
-    EXPO_PUBLIC_SOROSWAP_API_URL: z.string().default('https://api.soroswap.finance'),
-    EXPO_PUBLIC_SOROSWAP_API_KEY: z.string().optional(),
-    EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: z.string().optional(),
-    EXPO_PUBLIC_SENTRY_DSN: z.string().optional(),
-    EXPO_PUBLIC_MOONPAY_API_KEY: z.string().optional(),
-    // Which Stellar network the deposit relayer (latch-relayer) is deployed
-    // against. Its pool address only exists on that one network.
-    EXPO_PUBLIC_RELAYER_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
-    SENTRY_AUTH_TOKEN: z.string(),
-  })
-  .partial();
+const requiredEnv = {
+  // ─── Core ───────────────────────────────────────────────────────────────────
+  EXPO_PUBLIC_APP_ENV: z.string(),
+  EXPO_PUBLIC_API_BASE_URL: httpUrl(),
 
-const buildtimeEnv = runtimeEnv.partial().and(
+  // ─── Stellar / Soroban (testnet — the default network for a fresh clone) ────
+  EXPO_PUBLIC_NETWORK: z.string(),
+  EXPO_PUBLIC_NETWORK_PASSPHRASE: z.string(),
+  EXPO_PUBLIC_HORIZON_TESTNET_URL: httpUrl(),
+  EXPO_PUBLIC_SOROBAN_RPC_URL: httpUrl(),
+  EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
+
+  // Relying party ID for passkey signing. Must match the backend's
+  // WEBAUTHN_ALLOWED_ORIGINS entry exactly, scheme included, or passkey
+  // sign-in and deployment both fail signature verification.
+  EXPO_PUBLIC_PASSKEY_RP_ID: z.string(),
+};
+
+const optionalEnv = {
+  EXPO_PUBLIC_APP_PROFILE: z.string().default('staging'),
+
+  // ─── Mainnet counterparts ───────────────────────────────────────────────────
+  // Selected at runtime by ACTIVE_NETWORK (src/constants/config.ts). Absent
+  // values surface as a named error when switching to mainnet, which is the
+  // right failure for a contributor working on testnet only.
+  EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: httpUrl().optional(),
+  EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: z.string().optional(),
+
+  // ─── Policy contracts ───────────────────────────────────────────────────────
+  // Policies enforce rules on an account (admin quorum, recovery); the
+  // VERIFIER_* addresses validate signatures. Optional because an account
+  // works without them installed — they are opt-in per account.
+  EXPO_PUBLIC_ADMIN_GUARD_POLICY: z.string().optional(),
+  EXPO_PUBLIC_RECOVERY_POLICY: z.string().optional(),
+
+  // ─── Contracts used by demo / admin paths ───────────────────────────────────
+  EXPO_PUBLIC_COUNTER_ADDRESS: z.string().optional(),
+  EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: z.string().optional(),
+
+  // ─── Wallet backend ─────────────────────────────────────────────────────────
+  EXPO_PUBLIC_WALLET_BACKEND_URL: z.string().optional(),
+  EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: z.string().optional(),
+  EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: z.string().optional(),
+  EXPO_PUBLIC_RELAYER_NETWORKS: z.string().optional(),
+  // Which network the deposit relayer (latch-relayer) is deployed against —
+  // its pool address only exists on that one network.
+  EXPO_PUBLIC_RELAYER_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
+
+  // ─── Swap / liquidity ───────────────────────────────────────────────────────
+  EXPO_PUBLIC_SOROSWAP_API_URL: z.string().default('https://api.soroswap.finance'),
+  EXPO_PUBLIC_SOROSWAP_API_KEY: z.string().optional(),
+  EXPO_PUBLIC_SWAP_USE_MOCK: z.string().optional(),
+  EXPO_PUBLIC_AQUARIUS_API_URL: z.string().optional(),
+  EXPO_PUBLIC_AQUARIUS_API_URL_MAINNET: z.string().optional(),
+  EXPO_PUBLIC_AQUARIUS_ROUTER: z.string().optional(),
+  EXPO_PUBLIC_AQUARIUS_ROUTER_MAINNET: z.string().optional(),
+
+  // ─── Third-party ────────────────────────────────────────────────────────────
+  EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: z.string().optional(),
+  EXPO_PUBLIC_MOONPAY_API_KEY: z.string().optional(),
+  EXPO_PUBLIC_SENTRY_DSN: z.string().optional(),
+};
+
+const runtimeEnv = z.object({ ...requiredEnv, ...optionalEnv });
+
+// Build-time only (never inlined into the bundle).
+const envSchema = runtimeEnv.and(
   z.object({
     APP_NAME: z.string().default('Latch'),
     SENTRY_AUTH_TOKEN: z.string().optional(),
   }),
 );
 
-const envSchema =
-  process.env.NODE_ENV === 'production'
-    ? // @ts-expect-error
-      /** @type {typeof buildtimeEnv} */ (runtimeEnv)
-    : buildtimeEnv;
-
 /**
- * `EXPO_PUBLIC` values need to be referenced directly e.g process.env.EXPO_PUBLIC_ID (not dynamically)
- * for the cli/transpiler to be able to inline this value, every other env is discarded in the build output
- * so only `EXPO_PUBLIC_*` are available to use at runtime while the rest are build time variables.
+ * `EXPO_PUBLIC` values must be referenced directly (e.g.
+ * `process.env.EXPO_PUBLIC_API_BASE_URL`), never dynamically, for the
+ * transpiler to inline them. Every key in the schema above needs a line here
+ * or it will be `undefined` at runtime regardless of what `.env` contains.
  *
  * @type {Record<keyof z.TypeOf<typeof runtimeEnv>, string | undefined>}
  */
 const envObject = {
-  // EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
-  //   EXPO_PUBLIC_LOGIN_EMAIL: process.env.EXPO_PUBLIC_LOGIN_EMAIL,
-  //   EXPO_PUBLIC_LOGIN_PASSWORD: process.env.EXPO_PUBLIC_LOGIN_PASSWORD,
-  //   EXPO_PUBLIC_DOJAH_KEY: process.env.EXPO_PUBLIC_DOJAH_KEY,
-  //   EXPO_PUBLIC_DOJAH_APP_ID: process.env.EXPO_PUBLIC_DOJAH_APP_ID,
-  //   EXPO_PUBLIC_DOJAH_WIDGET_ID: process.env.EXPO_PUBLIC_DOJAH_WIDGET_ID,
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_ANON_KEY,
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME:
-    process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_BUCKET_NAME,
-  EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL: process.env.EXPO_PUBLIC_HOT_UPDATER_SUPABASE_URL,
   EXPO_PUBLIC_APP_ENV: process.env.EXPO_PUBLIC_APP_ENV,
-  //   EXPO_PUBLIC_META_APPLICATION_ID: process.env.EXPO_PUBLIC_META_APPLICATION_ID,
-  //   EXPO_PUBLIC_META_CLIENT_TOKEN: process.env.EXPO_PUBLIC_META_CLIENT_TOKEN,
   EXPO_PUBLIC_APP_PROFILE: process.env.EXPO_PUBLIC_APP_PROFILE,
-  //   EXPO_PUBLIC_CLOUDFLARE_WORKER_URL: process.env.EXPO_PUBLIC_CLOUDFLARE_WORKER_URL,
-  EXPO_PUBLIC_HORIZON_TESTNET_URL: process.env.EXPO_PUBLIC_HORIZON_TESTNET_URL,
-  //
+  EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
+
   EXPO_PUBLIC_NETWORK: process.env.EXPO_PUBLIC_NETWORK,
-  EXPO_PUBLIC_RPC_URL: process.env.EXPO_PUBLIC_RPC_URL,
   EXPO_PUBLIC_NETWORK_PASSPHRASE: process.env.EXPO_PUBLIC_NETWORK_PASSPHRASE,
-  EXPO_PUBLIC_VERIFIER_ADDRESS: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS,
+  EXPO_PUBLIC_HORIZON_TESTNET_URL: process.env.EXPO_PUBLIC_HORIZON_TESTNET_URL,
+  EXPO_PUBLIC_SOROBAN_RPC_URL: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL,
+  EXPO_PUBLIC_FACTORY_ADDRESS: process.env.EXPO_PUBLIC_FACTORY_ADDRESS,
+  EXPO_PUBLIC_PASSKEY_RP_ID: process.env.EXPO_PUBLIC_PASSKEY_RP_ID,
+
+  EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET,
+  EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET,
+
+  EXPO_PUBLIC_ADMIN_GUARD_POLICY: process.env.EXPO_PUBLIC_ADMIN_GUARD_POLICY,
+  EXPO_PUBLIC_RECOVERY_POLICY: process.env.EXPO_PUBLIC_RECOVERY_POLICY,
+
   EXPO_PUBLIC_COUNTER_ADDRESS: process.env.EXPO_PUBLIC_COUNTER_ADDRESS,
   EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: process.env.EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH,
-  EXPO_PUBLIC_FACTORY_ADDRESS: process.env.EXPO_PUBLIC_FACTORY_ADDRESS,
-  EXPO_PUBLIC_BUNDLER_SECRET: process.env.EXPO_PUBLIC_BUNDLER_SECRET,
-  EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET,
-  EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_VERIFIER_ADDRESS_MAINNET,
-  EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET,
-  EXPO_PUBLIC_BUNDLER_SECRET_MAINNET: process.env.EXPO_PUBLIC_BUNDLER_SECRET_MAINNET,
+
+  EXPO_PUBLIC_WALLET_BACKEND_URL: process.env.EXPO_PUBLIC_WALLET_BACKEND_URL,
+  EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES,
+  EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: process.env.EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED,
+  EXPO_PUBLIC_RELAYER_NETWORKS: process.env.EXPO_PUBLIC_RELAYER_NETWORKS,
+  EXPO_PUBLIC_RELAYER_NETWORK: process.env.EXPO_PUBLIC_RELAYER_NETWORK,
+
   EXPO_PUBLIC_SOROSWAP_API_URL: process.env.EXPO_PUBLIC_SOROSWAP_API_URL,
   EXPO_PUBLIC_SOROSWAP_API_KEY: process.env.EXPO_PUBLIC_SOROSWAP_API_KEY,
+  EXPO_PUBLIC_SWAP_USE_MOCK: process.env.EXPO_PUBLIC_SWAP_USE_MOCK,
+  EXPO_PUBLIC_AQUARIUS_API_URL: process.env.EXPO_PUBLIC_AQUARIUS_API_URL,
+  EXPO_PUBLIC_AQUARIUS_API_URL_MAINNET: process.env.EXPO_PUBLIC_AQUARIUS_API_URL_MAINNET,
+  EXPO_PUBLIC_AQUARIUS_ROUTER: process.env.EXPO_PUBLIC_AQUARIUS_ROUTER,
+  EXPO_PUBLIC_AQUARIUS_ROUTER_MAINNET: process.env.EXPO_PUBLIC_AQUARIUS_ROUTER_MAINNET,
+
   EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: process.env.EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID,
-  EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
   EXPO_PUBLIC_MOONPAY_API_KEY: process.env.EXPO_PUBLIC_MOONPAY_API_KEY,
-  EXPO_PUBLIC_RELAYER_NETWORK: process.env.EXPO_PUBLIC_RELAYER_NETWORK,
-  SENTRY_AUTH_TOKEN: process.env.SENTRY_AUTH_TOKEN,
+  EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
 };
 
-module.exports = envSchema.parse({ ...process.env, ...envObject });
+// Trim every value before validating. `KEY= value` in a .env file yields a
+// leading space, which survives into the bundle and breaks URL parsing and
+// address comparison in ways that are painful to trace back to whitespace.
+const trimmed = Object.fromEntries(
+  Object.entries({ ...process.env, ...envObject }).map(([k, v]) => [
+    k,
+    typeof v === 'string' ? v.trim() : v,
+  ]),
+);
+
+const parsed = envSchema.safeParse(trimmed);
+
+if (!parsed.success) {
+  const missing = parsed.error.issues
+    .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)
+    .join('\n');
+  throw new Error(
+    `Invalid environment configuration:\n${missing}\n\n` +
+      `Copy .env.example to .env and fill in the required values.`,
+  );
+}
+
+module.exports = parsed.data;
