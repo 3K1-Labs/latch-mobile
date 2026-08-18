@@ -3,7 +3,7 @@ import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { useWalletStore } from '@/src/store/wallet';
 import { Ionicons } from '@expo/vector-icons';
 import { validateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useTheme } from '@shopify/restyle';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';

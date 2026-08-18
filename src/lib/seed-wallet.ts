@@ -1,7 +1,7 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { generateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { Keypair } from '@stellar/stellar-sdk';
 
 export interface StellarWallet {

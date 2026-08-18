@@ -9,8 +9,10 @@
  * The bundler keypair (fee-payer / outer tx signer) lives only on the backend.
  */
 
-import { LATCH_BACKEND_URL, STELLAR_AUTH_PREFIX } from '../constants/config';
+import { STELLAR_AUTH_PREFIX } from '../constants/config';
 import { Keypair } from '@stellar/stellar-sdk';
+
+const LATCH_BACKEND_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

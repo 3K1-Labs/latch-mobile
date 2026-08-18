@@ -198,7 +198,7 @@ const DEPOSIT_RELAYER_NETWORKS = (
   'testnet'
 )
   .split(',')
-  .map((n) => n.trim().toLowerCase())
+  .map((n: string) => n.trim().toLowerCase())
   .filter(Boolean) as ('testnet' | 'mainnet')[];
 
 /** True when a deposit relayer is deployed for the network the app is on. */
