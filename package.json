@@ -91,7 +91,7 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.6",
     "react-native-crypto": "^2.2.1",
-    "react-native-gesture-handler": "~2.30.0",
+    "react-native-gesture-handler": "~3.1.0",
     "react-native-get-random-values": "~2.0.0",
     "react-native-keyboard-controller": "1.20.7",
     "react-native-maps": "1.27.2",
