@@ -74,11 +74,14 @@ import {
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from '@/src/constants/config';
+import { checkGuardianCombo } from '@/src/lib/guardian-combo';
 import { createLogger } from '@/src/lib/logger';
 import { getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
+import { explainSorobanError } from '@/src/services/soroban-error';
 import {
   authDigestFor,
+  buildContextRuleIds,
   loadAccount,
   resolveRegisteredEd25519Verifier,
   resolveRegisteredWebAuthnVerifier,
@@ -236,6 +239,16 @@ export function toGuardian(input: string): Guardian {
   throw new Error('not an address or a guardian code');
 }
 
+// checkGuardianCombo lives in src/lib/guardian-combo.ts, not here — it's pure
+// (no chain read, no signing) but this file's module graph pulls in several
+// Expo native modules a plain unit test can't load. Re-exported so every
+// existing caller of `from '@/src/services/social-recovery'` is unaffected.
+export {
+  checkGuardianCombo,
+  type GuardianComboCheck,
+  type GuardianComboFailure,
+} from '@/src/lib/guardian-combo';
+
 export interface PendingRecovery {
   /** The account function the quorum intends to call. */
   fnName: string;
@@ -243,6 +256,21 @@ export interface PendingRecovery {
   readyAt: number;
   /** Last ledger at which it may be used. */
   expiresAt: number;
+  /**
+   * The call the policy recorded, decoded. Finalize must present arguments
+   * byte-identical to these, so it rebuilds them from here rather than from
+   * whatever the screen has in hand — anything else is a ProposalMismatch (#8)
+   * an hour after the fact.
+   */
+  proposed: ProposedSigner | null;
+}
+
+/** The `add_signer(target_rule_id, External(verifier, key))` a proposal pins. */
+export interface ProposedSigner {
+  targetRuleId: number;
+  verifierAddress: string;
+  /** Hex key_data: 32 bytes for ed25519, longer for a passkey. */
+  keyDataHex: string;
 }
 
 /** One guardian rule, with its configuration and any proposal against it. */
@@ -543,6 +571,7 @@ export async function fetchRecoveryStatus(
             fnName: String(pendingRaw.fn_name),
             readyAt: Number(pendingRaw.ready_at),
             expiresAt: Number(pendingRaw.expires_at),
+            proposed: decodeProposedSigner(pendingRaw.args),
           }
         : null,
     });
@@ -561,6 +590,28 @@ export async function fetchRecoveryStatus(
  * credential id appended. Anything else is a signer this app does not create,
  * and is skipped rather than shown as a guardian the owner cannot identify.
  */
+/**
+ * `[u32 target_rule_id, External(verifier, key_data)]` as the policy stored it.
+ *
+ * Returns null for any other shape — a proposal for some other call is not an
+ * error here, it just is not something finalize can rebuild.
+ */
+function decodeProposedSigner(args: unknown): ProposedSigner | null {
+  if (!Array.isArray(args) || args.length !== 2) return null;
+  const [ruleId, signer] = args;
+  if (typeof ruleId !== 'number' || !Array.isArray(signer)) return null;
+  if (signer[0] !== 'External') return null;
+
+  const keyData = signer[2];
+  if (!(keyData instanceof Uint8Array) && !Buffer.isBuffer(keyData)) return null;
+
+  return {
+    targetRuleId: ruleId,
+    verifierAddress: String(signer[1]),
+    keyDataHex: Buffer.from(keyData as Uint8Array).toString('hex'),
+  };
+}
+
 function decodeGuardians(signers: unknown[]): Guardian[] {
   const out: Guardian[] = [];
   for (const s of signers) {
@@ -677,7 +728,7 @@ async function submitAsAccount(
   const raw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(build()),
   });
-  if (raw.error) throw new Error(`simulation failed: ${raw.error}`);
+  if (raw.error) throw new Error(explainSorobanError(raw.error));
   const sim = parseSimResult(raw);
 
   const validUntil = (raw.latestLedger ?? 0) + 100;
@@ -728,13 +779,13 @@ async function submitAsAccount(
     transaction: txToBase64(signed),
   });
   if (raw2.error) {
-    // Error(Auth, InvalidAction) arrives here with no indication of which of
-    // the several things it could be went wrong, so say what was presented:
+    // Error(Auth, InvalidAction) is the outer wrapper on every authorization
+    // failure; the cause is in the event log. Keep what was presented too —
     // the rule the signature named, and whether anything was signed at all.
     throw new Error(
-      `authorization check failed (signed ${signedEntries} entr${
+      `${explainSorobanError(raw2.error)} (signed ${signedEntries} entr${
         signedEntries === 1 ? 'y' : 'ies'
-      } under context rule ${contextRuleId}): ${raw2.error}`,
+      } under context rule ${contextRuleId})`,
     );
   }
 
@@ -781,6 +832,14 @@ export async function setUpRecovery(input: SetUpRecoveryInput): Promise<string> 
   }
   if (delayLedgers < MIN_DELAY_LEDGERS) {
     throw new Error(`the veto window must be at least ${MIN_DELAY_LEDGERS} ledgers`);
+  }
+  // Belt and suspenders: the UI blocks this combination before it ever calls
+  // here, but this function isn't only reachable from the UI.
+  const combo = checkGuardianCombo(guardians);
+  if (!combo.ok) {
+    throw new Error(
+      'a smart account guardian can only be the sole guardian on this recovery — remove the others or remove it',
+    );
   }
   if (!RECOVERY_POLICY_ADDRESS) {
     throw new Error('no recovery policy is configured for this network');
@@ -895,12 +954,18 @@ export interface OwnedAccount {
  * Why this device cannot act as a guardian on an account. Distinguished so the
  * UI can say something true instead of a generic failure.
  *
- *   not-a-guardian    none of this wallet's identities appear on any rule
- *   delegated-only    it IS a guardian, as a smart account rather than a key,
- *                     and that path is not implemented (see below)
- *   no-seed           a passkey wallet has no derived keys to match against
+ *   not-a-guardian       none of this wallet's identities appear on any rule
+ *   delegated-in-quorum  it IS a guardian, as a smart account, but on a rule
+ *                        whose threshold is above 1. A delegated guardian's
+ *                        second auth entry (buildDelegatedGuardianEntry) only
+ *                        exists for the sole-guardian path; the app itself
+ *                        never lets a threshold>1 rule form with a delegated
+ *                        guardian on it (see checkGuardianCombo), so reaching
+ *                        this means an account set up before that check
+ *                        existed, or one assembled outside the app
+ *   no-seed              a passkey wallet has no derived keys to match against
  */
-export type GuardianMatchFailure = 'not-a-guardian' | 'no-seed';
+export type GuardianMatchFailure = 'not-a-guardian' | 'no-seed' | 'delegated-in-quorum';
 
 export type GuardianMatch =
   | { ok: true; local: LocalGuardian }
@@ -926,14 +991,23 @@ export interface GuardianIdentity {
  *              ever act as a guardian it genuinely is.
  *
  *   delegated  the rule stores a smart account address this wallet controls.
- *              Recognised here so the UI can say so, but NOT actionable yet:
- *              the contract authenticates it with
- *              `address.require_auth_for_args((auth_digest,))`, which needs a
- *              second auth entry addressed to the guardian account — one the
- *              simulation never returns, because the nested require_auth only
- *              runs once __check_auth executes in the enforcing pass. Producing
- *              it means synthesising the entry and signing it with the guardian
- *              account's own signers.
+ *              Actionable when this is the rule's ONLY guardian (threshold
+ *              1): the contract authenticates it with
+ *              `address.require_auth_for_args((auth_digest,))`, so a second
+ *              auth entry has to be built and signed with the guardian
+ *              account's own signers — buildDelegatedGuardianEntry does this,
+ *              and proposeRecovery/finalizeRecovery submit it directly.
+ *              Verified on testnet.
+ *
+ *              NOT matched when the rule's threshold is above 1 (returns
+ *              'delegated-in-quorum' instead): a quorum gathers every
+ *              guardian's signature into ONE shared auth entry
+ *              (recovery-cosign.ts / aggregateAndSubmit), and a delegated
+ *              guardian's authorisation is a second, separate entry that
+ *              mechanism has nowhere to put. The app itself never creates
+ *              such a rule (checkGuardianCombo refuses it at setup), so
+ *              reaching this means an older account, or one assembled
+ *              outside the app.
  */
 export async function findLocalGuardian(
   status: RecoveryStatus,
@@ -986,6 +1060,15 @@ export async function findLocalGuardian(
   // Preferred last: a direct key signs with one entry, a delegated guardian
   // needs a second nested one. Same result, more moving parts.
   if (delegatedMatch) {
+    // Threshold>1 merges every guardian's signature into one shared entry —
+    // there's no mechanism for a delegated guardian's second entry there.
+    // Say so specifically instead of returning a match that fails deep
+    // inside signing (checkGuardianCombo means the app itself never creates
+    // this state; reaching it means an older account or one assembled
+    // outside the app).
+    if (delegatedMatch.rule.threshold > 1) {
+      return { ok: false, reason: 'delegated-in-quorum' };
+    }
     return {
       ok: true,
       local: {
@@ -1029,6 +1112,37 @@ async function recoveryArgs(publicKeyHex: string, targetRuleId: number): Promise
 }
 
 /**
+ * The arguments a finalize must present.
+ *
+ * Taken from the proposal the policy recorded, not rebuilt from the screen's
+ * inputs. The policy compares the two for exact equality, and everything the
+ * caller would rebuild them from can drift in the hour or more between propose
+ * and finalize — the factory's current verifier most of all. Rebuilding only
+ * happens when no proposal is readable, where the call is going to fail on its
+ * own terms anyway and a guessed encoding is no worse.
+ */
+async function finalizeArgs(
+  rule: RecoveryRule,
+  newSignerPublicKeyHex: string,
+): Promise<xdr.ScVal[]> {
+  const proposed = rule.pending?.proposed;
+  if (!proposed) return recoveryArgs(newSignerPublicKeyHex, rule.targetRuleId);
+
+  if (proposed.keyDataHex.toLowerCase() !== newSignerPublicKeyHex.toLowerCase()) {
+    throw new Error(
+      'the guardians proposed a different device key than the one entered here — ' +
+        'finalize the key that was requested, or cancel and start again',
+    );
+  }
+
+  return recoveryAddSignerArgs(proposed.targetRuleId, {
+    kind: 'external',
+    verifierAddress: proposed.verifierAddress,
+    keyDataHex: proposed.keyDataHex,
+  });
+}
+
+/**
  * The operation for either guardian action.
  *
  * Shared by the direct path and the multi-guardian packet path so the two can
@@ -1041,10 +1155,14 @@ export async function recoveryActionOp(
   action: 'propose' | 'finalize',
   newSignerPublicKeyHex: string,
 ): Promise<xdr.Operation> {
-  const args = await recoveryArgs(newSignerPublicKeyHex, rule.targetRuleId);
   if (action === 'finalize') {
-    return new Contract(smartAccountAddress).call('add_signer', ...args);
+    return new Contract(smartAccountAddress).call(
+      'add_signer',
+      ...(await finalizeArgs(rule, newSignerPublicKeyHex)),
+    );
   }
+
+  const args = await recoveryArgs(newSignerPublicKeyHex, rule.targetRuleId);
   return recoveryProposeOp(
     smartAccountAddress,
     RECOVERY_POLICY_ADDRESS,
@@ -1208,8 +1326,38 @@ export async function finalizeRecovery(input: GuardianActionInput): Promise<stri
   const { smartAccountAddress, rule, guardian, newSignerPublicKeyHex } = input;
   assertGuardianCanAct(rule, newSignerPublicKeyHex);
 
-  const op = await recoveryActionOp(smartAccountAddress, rule, 'finalize', newSignerPublicKeyHex);
+  // Re-read rather than trust the rule in hand: a guardian screen is opened
+  // during the veto window and acted on after it, so its copy of the proposal
+  // can be an hour stale — and this call has to match the proposal exactly.
+  const { rule: fresh, currentLedger } = await freshRule(smartAccountAddress, rule);
+  const pending = fresh.pending;
+  if (!pending) {
+    throw new Error('there is no recovery request on this account any more');
+  }
+  const phase = pendingPhase(pending, currentLedger);
+  if (phase === 'veto') {
+    throw new Error(
+      `the waiting period has not finished — about ${humanLedgers(pending.readyAt - currentLedger)} left`,
+    );
+  }
+  if (phase === 'expired') {
+    throw new Error('that request has lapsed — it has to be started again');
+  }
+
+  const op = await recoveryActionOp(smartAccountAddress, fresh, 'finalize', newSignerPublicKeyHex);
   return submitAsGuardian(smartAccountAddress, op, guardian, rule.ruleId, input.mnemonic ?? null);
+}
+
+/** The same rule, re-read from chain. Falls back to the caller's copy. */
+async function freshRule(
+  smartAccountAddress: string,
+  rule: RecoveryRule,
+): Promise<{ rule: RecoveryRule; currentLedger: number }> {
+  const status = await fetchRecoveryStatus(smartAccountAddress);
+  return {
+    rule: status.rules.find((r) => r.ruleId === rule.ruleId) ?? rule,
+    currentLedger: status.currentLedger,
+  };
 }
 
 function assertGuardianCanAct(rule: RecoveryRule, newSignerPublicKeyHex: string): void {
@@ -1261,7 +1409,7 @@ async function submitAsGuardian(
   const raw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(build()),
   });
-  if (raw.error) throw new Error(`simulation failed: ${raw.error}`);
+  if (raw.error) throw new Error(explainSorobanError(raw.error));
   const sim = parseSimResult(raw);
 
   const validUntil = (raw.latestLedger ?? 0) + 100;
@@ -1303,7 +1451,10 @@ async function submitAsGuardian(
           xdr.ScVal.scvMap([
             new xdr.ScMapEntry({
               key: xdr.ScVal.scvSymbol('context_rule_ids'),
-              val: xdr.ScVal.scvVec([xdr.ScVal.scvU32(contextRuleId)]),
+              // One id per auth context, exactly as authDigestFor counts them —
+              // the payload and the digest have to agree or __check_auth fails
+              // #3014 the moment a call has more than one context.
+              val: buildContextRuleIds(entry, contextRuleId),
             }),
             new xdr.ScMapEntry({
               key: xdr.ScVal.scvSymbol('signers'),
@@ -1358,7 +1509,7 @@ async function submitAsGuardian(
   const raw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
     transaction: txToBase64(signed),
   });
-  if (raw2.error) throw new Error(`authorization check failed: ${raw2.error}`);
+  if (raw2.error) throw new Error(explainSorobanError(raw2.error));
 
   const prepared = rpc.assembleTransaction(signed, parseSimResult(raw2)).build();
   const { hash, status } = await submitViaBundler(prepared);

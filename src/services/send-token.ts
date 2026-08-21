@@ -87,7 +87,7 @@ function countAuthContexts(inv: xdr.SorobanAuthorizedInvocation): number {
 // the owner's own admin calls. It is WRONG for anything authorised by a
 // narrower rule — a guardian signing under the recovery rule must name that
 // rule's id, since the guardians are not signers on rule 0.
-function buildContextRuleIds(
+export function buildContextRuleIds(
   entry: xdr.SorobanAuthorizationEntry,
   ruleId: number,
 ): xdr.ScVal {

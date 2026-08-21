@@ -7,7 +7,7 @@ import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useTheme } from '@shopify/restyle';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -24,9 +24,9 @@ import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
+import { useSecureScreen } from '@/src/hooks/use-secure-screen';
 import { Theme } from '@/src/theme/theme';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSecureScreen } from '@/src/hooks/use-secure-screen';
 
 const { width } = Dimensions.get('window');
 
@@ -142,85 +142,85 @@ const ImportPhrase = () => {
         style={{ flex: 1 }}
         bottomOffset={16}
       >
-          {/* Header */}
-          <Box flexDirection="row" justifyContent="space-between" mb="m">
-            <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-            </TouchableOpacity>
+        {/* Header */}
+        <Box flexDirection="row" justifyContent="space-between" mb="m">
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
 
-            <Image
-              source={require('@/src/assets/images/logoLoading.png')}
-              style={{ width: 35, height: 35 }}
-              resizeMode="contain"
-            />
-            <Box width={40} />
-          </Box>
+          <Image
+            source={require('@/src/assets/images/logoLoading.png')}
+            style={{ width: 35, height: 35 }}
+            resizeMode="contain"
+          />
+          <Box width={40} />
+        </Box>
 
-          <Box alignItems="center" mb="l">
-            <Text variant="h7" fontSize={32} textAlign="center">
-              Import Your Recovery Phrase
-            </Text>
-            <Text variant="p5" color="textSecondary" mt="xs" textAlign="center" width={'85%'}>
-              Enter your 12-word recovery phrase in the correct order
-            </Text>
-          </Box>
+        <Box alignItems="center" mb="l">
+          <Text variant="h7" fontSize={32} textAlign="center">
+            Import Your Recovery Phrase
+          </Text>
+          <Text variant="p5" color="textSecondary" mt="xs" textAlign="center" width={'85%'}>
+            Enter your 12-word recovery phrase in the correct order
+          </Text>
+        </Box>
 
-          {/* Grid of inputs */}
-          <Box gap="s">
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.s }}>
-              {words.map((word, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.item,
-                    {
-                      width: itemWidth,
-                      backgroundColor:
-                        statusBarStyle !== 'light' ? theme.colors.text50 : theme.colors.gray900,
-                      borderRadius: 12,
-                      borderColor: error ? theme.colors.danger900 : theme.colors.gray800,
-                    },
-                  ]}
+        {/* Grid of inputs */}
+        <Box gap="s">
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.s }}>
+            {words.map((word, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.item,
+                  {
+                    width: itemWidth,
+                    backgroundColor:
+                      statusBarStyle !== 'light' ? theme.colors.text50 : theme.colors.gray900,
+                    borderRadius: 12,
+                    borderColor: error ? theme.colors.danger900 : theme.colors.gray800,
+                  },
+                ]}
+              >
+                <Text
+                  variant="caption"
+                  fontFamily={'SFproSemibold'}
+                  color="textSecondary"
+                  style={{ marginRight: 8 }}
                 >
-                  <Text
-                    variant="caption"
-                    fontFamily={'SFproSemibold'}
-                    color="textSecondary"
-                    style={{ marginRight: 8 }}
-                  >
-                    {index + 1}
-                  </Text>
-                  <TextInput
-                    ref={(el) => {
-                      inputsRef.current[index] = el;
-                    }}
-                    value={word}
-                    onChangeText={(t) => handleChange(t, index)}
-                    onFocus={() => handleFocus(index)}
-                    placeholder={``}
-                    placeholderTextColor={theme.colors.gray600}
-                    style={{ color: theme.colors.textPrimary, flex: 1, padding: 0 }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    returnKeyType={index === words.length - 1 ? 'done' : 'next'}
-                    onSubmitEditing={() => {
-                      if (index === words.length - 1) {
-                        handleImport();
-                      } else {
-                        inputsRef.current[index + 1]?.focus();
-                      }
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
+                  {index + 1}
+                </Text>
+                <TextInput
+                  ref={(el) => {
+                    inputsRef.current[index] = el;
+                  }}
+                  value={word}
+                  onChangeText={(t) => handleChange(t, index)}
+                  onFocus={() => handleFocus(index)}
+                  placeholder={``}
+                  placeholderTextColor={theme.colors.gray600}
+                  style={{ color: theme.colors.textPrimary, flex: 1, padding: 0 }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType={index === words.length - 1 ? 'done' : 'next'}
+                  onSubmitEditing={() => {
+                    if (index === words.length - 1) {
+                      handleImport();
+                    } else {
+                      inputsRef.current[index + 1]?.focus();
+                    }
+                  }}
+                />
+              </View>
+            ))}
+          </View>
 
-            {error && (
-              <Text variant="body" color="danger900" mt="s" textAlign="center">
-                {error}
-              </Text>
-            )}
-          </Box>
+          {error && (
+            <Text variant="body" color="danger900" mt="s" textAlign="center">
+              {error}
+            </Text>
+          )}
+        </Box>
       </KeyboardAwareScrollView>
 
       {/* Import Button fixed at bottom */}

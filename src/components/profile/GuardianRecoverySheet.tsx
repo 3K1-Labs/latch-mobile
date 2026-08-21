@@ -61,7 +61,9 @@ import {
   createRecoveryPacket,
   submitRecoveryPacket,
 } from '@/src/services/recovery-cosign';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { shareOrCopy } from '@/src/utils/share-or-copy';
+import { useGuardianRoles, type GuardianRole } from '@/src/store/guardian-roles';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -84,6 +86,11 @@ const MATCH_FAILURE_COPY: Record<GuardianMatchFailure, { text1: string; text2: s
     text1: 'This wallet cannot act as a guardian',
     text2: 'It has no recovery phrase and no passkey to sign with.',
   },
+  'delegated-in-quorum': {
+    text1: "You can't act as a guardian here",
+    text2:
+      'This group has more than one guardian, and a smart account guardian only works alone. Ask the account owner to fix the group.',
+  },
 };
 
 interface Props {
@@ -98,6 +105,10 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const { mnemonic, accounts, activeAccountIndex: activeIndex } = useWalletStore();
+  const guardianRoles = useGuardianRoles((s) => s.roles);
+  const rehydrateGuardianRoles = useGuardianRoles((s) => s.rehydrate);
+  const upsertGuardianRole = useGuardianRoles((s) => s.upsert);
+  const removeGuardianRole = useGuardianRoles((s) => s.remove);
 
   // Identity this device can prove: its seed keys (absent on a passkey wallet)
   // and every smart account it controls, for delegated guardians.
@@ -125,8 +136,46 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
   const [pendingPacket, setPendingPacket] = useState<CosignPacket | null>(null);
   const [inboxInput, setInboxInput] = useState('');
   const [inboxBusy, setInboxBusy] = useState(false);
+  // A finalized recovery consumes its proposal on chain, so `rule.pending` goes
+  // back to null — indistinguishable from "never requested" without this flag.
+  // Without it, the screen after a successful finalize looks identical to the
+  // one before anything happened.
+  const [justCompleted, setJustCompleted] = useState(false);
 
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  /**
+   * Quietly re-check every saved role against chain. Only two outcomes move a
+   * role: a decisive "not a guardian" confirmation (→ removed), or a decisive
+   * match (→ active with current counts). Anything else — a network error, an
+   * undeployed account, this device genuinely having no identity to test with
+   * — leaves the role untouched, because none of those are evidence either way.
+   */
+  const refreshGuardianRoles = async () => {
+    for (const role of guardianRoles) {
+      if (role.status === 'removed') continue;
+      try {
+        const status = await fetchRecoveryStatus(role.account);
+        const match = await findLocalGuardian(status, identity);
+        if (match.ok) {
+          upsertGuardianRole({
+            account: role.account,
+            status: 'active',
+            guardianCount: match.local.rule.guardians.length,
+            threshold: match.local.rule.threshold,
+          });
+        } else if (match.reason === 'not-a-guardian') {
+          upsertGuardianRole({ account: role.account, status: 'removed' });
+        }
+        // 'delegated-in-quorum' and 'no-seed' fall through untouched, on
+        // purpose: this device genuinely is still a guardian on that rule
+        // (or the read just failed) — it's the combination that's unusable,
+        // not the role, so it shouldn't be marked removed.
+      } catch {
+        // Could not read that account right now — leave it as it was.
+      }
+    }
+  };
 
   useEffect(() => {
     if (visible) {
@@ -141,6 +190,10 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
       if (initialPayload) void handleInbox(initialPayload);
       // Only a passkey wallet needs a code; a seed wallet shares its G-address.
       void localPasskeyGuardianCode(activeIndex).then(setMyGuardianCode);
+      // Load "accounts you guard", then quietly confirm each against chain —
+      // a role recorded as pending may have gone live since, or an owner may
+      // have removed this device since the last check.
+      void rehydrateGuardianRoles().then(refreshGuardianRoles);
       Animated.spring(translateY, {
         toValue: 0,
         useNativeDriver: true,
@@ -181,12 +234,23 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
       const match = await findLocalGuardian(status, identity);
       if (!match.ok) {
         Toast.show({ type: 'error', ...MATCH_FAILURE_COPY[match.reason] });
+        if (match.reason === 'not-a-guardian') {
+          upsertGuardianRole({ account: address, status: 'removed' });
+        }
         return;
       }
       setAccount(address);
       setLocal(match.local);
+      prefillProposedKey(match.local);
       setCurrentLedger(status.currentLedger);
+      setJustCompleted(false);
       setStep('act');
+      upsertGuardianRole({
+        account: address,
+        status: 'active',
+        guardianCount: match.local.rule.guardians.length,
+        threshold: match.local.rule.threshold,
+      });
     } catch (e) {
       Toast.show({
         type: 'error',
@@ -225,6 +289,12 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
           ? `You will be a guardian for ${details.account.slice(0, 8)}…`
           : undefined,
       });
+      // Nothing on chain confirms this yet — the owner still has to add it —
+      // but this is the only moment this device will ever hear about the
+      // invite, so it has to be recorded now or it is lost.
+      if (details.account) {
+        upsertGuardianRole({ account: details.account, status: 'pending' });
+      }
     } catch (e) {
       Toast.show({
         type: 'error',
@@ -253,6 +323,14 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
       const approved = await approveRecoveryPacket(packet.id, identity);
       setAccount(packet.smartAccountAddress);
       setPendingPacket(approved);
+      // Approving only ever succeeds for a real, live guardian on this rule
+      // (approveRecoveryPacket re-derives that from chain), so this is as
+      // decisive as the lookUp confirmation path.
+      upsertGuardianRole({
+        account: packet.smartAccountAddress,
+        status: 'active',
+        threshold: approved.threshold,
+      });
 
       if (approved.signatures.length >= approved.threshold) {
         const { hash } = await submitRecoveryPacket(approved.id, identity);
@@ -333,12 +411,25 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
     }
   };
 
+  /**
+   * Show the key the guardians actually proposed, rather than asking for it
+   * again. The policy compares the finalize call to the proposal byte for byte,
+   * so a re-typed address that differs at all fails an hour of waiting later —
+   * and the proposal has carried the exact key on chain the whole time.
+   */
+  const prefillProposedKey = (match: LocalGuardian) => {
+    const hex = match.rule.pending?.proposed?.keyDataHex;
+    if (!hex || hex.length !== 64) return;
+    setNewKeyInput(StrKey.encodeEd25519PublicKey(Buffer.from(hex, 'hex')));
+  };
+
   /** Re-read after acting, so the panel reflects the chain and not a guess. */
   const refresh = async () => {
     if (!account) return;
     const status = await fetchRecoveryStatus(account);
     const match = await findLocalGuardian(status, identity);
     setLocal(match.ok ? match.local : null);
+    if (match.ok) prefillProposedKey(match.local);
     setCurrentLedger(status.currentLedger);
   };
 
@@ -376,6 +467,7 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
     }
 
     if (action === 'propose') {
+      setJustCompleted(false);
       await proposeRecovery({
         smartAccountAddress: account,
         mnemonic,
@@ -397,6 +489,8 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
         newSignerPublicKeyHex: newSignerHex,
       });
       Toast.show({ type: 'success', text1: 'Recovery complete' });
+      setJustCompleted(true);
+      setNewKeyInput('');
     }
     await refresh();
   };
@@ -434,10 +528,25 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
     try {
       await runGuardianAction('finalize');
     } catch (e) {
+      // #3007 means the account already has this key as a signer — almost
+      // always a leftover duplicate from an earlier request that actually
+      // succeeded but looked, from here, like it hadn't. The device already
+      // has access; only the owner (from the new device, which already
+      // controls the account) can clear the stuck proposal.
+      const message = e instanceof Error ? e.message : undefined;
+      if (message?.includes('#3007')) {
+        Toast.show({
+          type: 'error',
+          text1: 'That device already has access',
+          text2:
+            'This looks like a duplicate of a request that already went through. Ask them to cancel it from Settings › Social Recovery on their new device.',
+        });
+        return;
+      }
       Toast.show({
         type: 'error',
         text1: 'Could not complete recovery',
-        text2: e instanceof Error ? e.message : undefined,
+        text2: message,
       });
     } finally {
       setBusy(false);
@@ -451,6 +560,85 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
       contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
       keyboardShouldPersistTaps="handled"
     >
+      {/* Otherwise a device that became a guardian has no way to be reminded
+          of it — accepting an invite is peer-to-peer, so nothing announces
+          the role and nothing pushes a notification when it goes live. This
+          is the only place that role is ever shown again. */}
+      {guardianRoles.length > 0 && (
+        <Box mb="l">
+          <Text variant="p7" color="textPrimary" fontWeight="700" mb="s">
+            Accounts you guard
+          </Text>
+          <Box style={{ gap: 8 }}>
+            {guardianRoles.map((role: GuardianRole) => {
+              const row = (
+                <Box
+                  flexDirection="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  borderRadius={12}
+                  p="m"
+                  style={{ backgroundColor: theme.colors.cardbg }}
+                >
+                  <Box flex={1} mr="s">
+                    <Text variant="p7" color="textPrimary" numberOfLines={1}>
+                      {role.account.slice(0, 10)}…{role.account.slice(-6)}
+                    </Text>
+                    {role.status === 'active' && role.threshold && role.guardianCount && (
+                      <Text variant="p8" color="textSecondary" mt="xs">
+                        {role.threshold} of {role.guardianCount} guardians
+                      </Text>
+                    )}
+                    {role.status === 'pending' && (
+                      <Text variant="p8" color="textSecondary" mt="xs">
+                        Waiting on them to finish adding you
+                      </Text>
+                    )}
+                    {role.status === 'removed' && (
+                      <Text variant="p8" color="textSecondary" mt="xs">
+                        No longer active — tap to remove from this list
+                      </Text>
+                    )}
+                  </Box>
+                  <Text
+                    variant="p8"
+                    fontWeight="700"
+                    color={
+                      role.status === 'active'
+                        ? 'success700'
+                        : role.status === 'pending'
+                          ? 'primary700'
+                          : 'inputError'
+                    }
+                  >
+                    {role.status === 'active'
+                      ? 'Active'
+                      : role.status === 'pending'
+                        ? 'Pending'
+                        : 'Not active'}
+                  </Text>
+                </Box>
+              );
+              // A confirmed-gone role has nothing left to look up — tapping it
+              // dismisses it instead. Every other status still opens lookUp,
+              // both to jump straight into 'act' and to force a fresh check.
+              return (
+                <TouchableOpacity
+                  key={role.account}
+                  onPress={() =>
+                    role.status === 'removed'
+                      ? removeGuardianRole(role.account)
+                      : lookUp(role.account)
+                  }
+                >
+                  {row}
+                </TouchableOpacity>
+              );
+            })}
+          </Box>
+        </Box>
+      )}
+
       <Text variant="p6" color="textSecondary" mb="m">
         Anything sent to you as a guardian goes here — an invitation to become
         one, or a request to approve someone&apos;s recovery.
@@ -584,9 +772,19 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
           <Text variant="p8" color="textSecondary" mb="xs">
             You are a guardian for
           </Text>
-          <Text variant="p7" color="textPrimary" numberOfLines={1}>
-            {account.slice(0, 10)}…{account.slice(-6)}
-          </Text>
+          <Box flexDirection="row" alignItems="center">
+            <Box flex={1} mr="s">
+              <Text variant="p7" color="textPrimary" numberOfLines={1}>
+                {account.slice(0, 10)}…{account.slice(-6)}
+              </Text>
+            </Box>
+            <TouchableOpacity
+              onPress={() => copyToClipboard(account, 'Address')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="copy-outline" size={18} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </Box>
         </Box>
 
         {phase === 'veto' && pending && (
@@ -611,12 +809,24 @@ const GuardianRecoverySheet = ({ visible, onClose, initialPayload }: Props) => {
           </Box>
         )}
 
+        {phase === null && justCompleted && (
+          <Box borderRadius={12} p="m" mb="l" style={{ backgroundColor: theme.colors.cardbg }}>
+            <Text variant="p6" color="textPrimary" fontWeight="700" mb="s">
+              Recovery complete
+            </Text>
+            <Text variant="p7" color="textSecondary">
+              Their new device now has access to the wallet.
+            </Text>
+          </Box>
+        )}
+
         <Text variant="p7" color="textPrimary" fontWeight="700" mb="s">
           Their new device&apos;s address
         </Text>
         <Text variant="p8" color="textSecondary" mb="m">
-          Ask them to install Latch on the new device and send you the address it
-          shows. It starts with G.
+          {pending?.proposed
+            ? 'This is the device the request was made for, read back from the request itself. It has to stay exactly as it is.'
+            : 'Ask them to install Latch on the new device and send you the address it shows. It starts with G.'}
         </Text>
         <Box mb="l">
           <Input

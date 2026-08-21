@@ -46,6 +46,7 @@ import { isSocialRecoveryAvailable } from '@/src/constants/config';
 import {
   authorizerFor,
   cancelRecovery,
+  checkGuardianCombo,
   fetchRecoveryStatus,
   guardianKindFor,
   humanLedgers,
@@ -99,6 +100,19 @@ const GUARDIAN_ICON: Record<GuardianKind, keyof typeof Ionicons.glyphMap> = {
   delegated: 'wallet-outline',
 };
 
+// A smart account guardian authorises with its own nested auth entry, which
+// only has a home in the sole-guardian submit path — see checkGuardianCombo.
+const GUARDIAN_COMBO_TOAST = {
+  text1: 'A smart account guardian must be alone',
+  text2:
+    'It authorises itself instead of adding to a shared signature, so it can only be your one and only guardian. Remove the others, or pick a different guardian.',
+};
+
+const GUARDIAN_COMBO_BANNER = {
+  title: 'This guardian combination won’t work',
+  body: 'A smart account guardian only works when it is your one and only guardian. Remove the others, or remove the smart account guardian, to continue.',
+};
+
 /** Whichever value actually identifies a guardian on chain. */
 function guardianIdentity(g: Guardian): string {
   return g.publicKeyHex ?? g.keyDataHex ?? g.address;
@@ -138,6 +152,11 @@ const SocialRecoverySheet = ({ visible, onClose }: Props) => {
   const [delayLedgers, setDelayLedgers] = useState(DELAY_OPTIONS[2].ledgers);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState('');
+
+  // A safety net beyond the two add functions blocking this combination up
+  // front — covers guardians[] arriving any other way, e.g. loadGuardianDraft
+  // restoring a draft saved before this check existed.
+  const guardianCombo = checkGuardianCombo(guardians);
 
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -214,7 +233,13 @@ const SocialRecoverySheet = ({ visible, onClose }: Props) => {
       Toast.show({ type: 'error', text1: 'That guardian is already on the list' });
       return;
     }
-    setGuardians((prev) => [...prev, toGuardian(address)]);
+    const guardian = toGuardian(address);
+    const combo = checkGuardianCombo([...guardians, guardian]);
+    if (!combo.ok) {
+      Toast.show({ type: 'error', ...GUARDIAN_COMBO_TOAST });
+      return;
+    }
+    setGuardians((prev) => [...prev, guardian]);
     setGuardianInput('');
   };
 
@@ -228,6 +253,11 @@ const SocialRecoverySheet = ({ visible, onClose }: Props) => {
       const guardian = await verifyGuardianResponse(replyInput);
       if (guardians.some((g) => guardianIdentity(g) === guardianIdentity(guardian))) {
         Toast.show({ type: 'error', text1: 'That guardian is already on the list' });
+        return;
+      }
+      const combo = checkGuardianCombo([...guardians, guardian]);
+      if (!combo.ok) {
+        Toast.show({ type: 'error', ...GUARDIAN_COMBO_TOAST });
         return;
       }
       setGuardians((prev) => [...prev, guardian]);
@@ -577,12 +607,27 @@ const SocialRecoverySheet = ({ visible, onClose }: Props) => {
         </Box>
       ))}
 
-      {guardians.length > 0 && (
-        <Text variant="p8" color="textSecondary" mt="m">
-          {quorumFor(guardians.length)} of {guardians.length} will need to agree before a
-          recovery can start.
-        </Text>
-      )}
+      {guardians.length > 0 &&
+        (guardianCombo.ok ? (
+          <Text variant="p8" color="textSecondary" mt="m">
+            {quorumFor(guardians.length)} of {guardians.length} will need to agree before a
+            recovery can start.
+          </Text>
+        ) : (
+          <Box
+            borderRadius={12}
+            p="m"
+            mt="m"
+            style={{ backgroundColor: theme.colors.danger900 + '1A' }}
+          >
+            <Text variant="p7" color="danger900" fontWeight="700" mb="xs">
+              {GUARDIAN_COMBO_BANNER.title}
+            </Text>
+            <Text variant="p8" color="textSecondary">
+              {GUARDIAN_COMBO_BANNER.body}
+            </Text>
+          </Box>
+        ))}
 
       <Text variant="p5" color="textPrimary" fontWeight="700" mt="l" mb="s">
         Waiting period
@@ -629,7 +674,7 @@ const SocialRecoverySheet = ({ visible, onClose }: Props) => {
         <Button
           label="Turn on social recovery"
           loading={busy}
-          disabled={guardians.length === 0 || busy}
+          disabled={guardians.length === 0 || busy || !guardianCombo.ok}
           onPress={submitSetUp}
         />
       </Box>

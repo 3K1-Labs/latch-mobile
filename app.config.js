@@ -55,7 +55,8 @@ export default {
     android: {
       versionCode,
       usescleartexttraffic: true, // Allow outbound HTTP to local dev servers; testnet RPCs should be HTTPS and won't be affected.
-      package: appName === 'Latch' ? 'app.getlatch.app' : 'qa.getlatch.app',
+      // package: appName === 'Latch' ? 'app.getlatch.app' : 'qa.getlatch.app',
+      package: 'app.getlatch.app',
       adaptiveIcon: {
         backgroundColor: '#000000',
         foregroundImage: './assets/images/android-icon-foreground.png',
@@ -147,16 +148,16 @@ export default {
       ],
       ...(sentry
         ? [
-            [
-              '@sentry/react-native/expo',
-              {
-                url: 'https://sentry.io/',
-                authToken: sentry,
-                project: 'latch-mobile',
-                organization: 'latch',
-              },
-            ],
-          ]
+          [
+            '@sentry/react-native/expo',
+            {
+              url: 'https://sentry.io/',
+              authToken: sentry,
+              project: 'latch-mobile',
+              organization: 'latch',
+            },
+          ],
+        ]
         : []),
     ],
     updates: {

@@ -29,7 +29,7 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 
@@ -202,6 +202,14 @@ export default function RecoverWithGuardians() {
       );
       setAccount(address);
       setStep('waiting');
+      // Continue used to only save state and switch screens — sending the
+      // request was a SEPARATE button above this one. Someone who just fills
+      // in the address and taps the obvious primary action never sent
+      // anything, and the waiting screen gave no sign that nothing had gone
+      // out: it just looks like waiting, indistinguishable from working.
+      // Firing the share here, once, on the actual address rather than
+      // whatever `account` state has settled to, closes that gap.
+      await shareMyAddress(address);
     } catch (e) {
       Toast.show({
         type: 'error',
@@ -213,9 +221,68 @@ export default function RecoverWithGuardians() {
     }
   };
 
-  const shareMyAddress = async () => {
+  /**
+   * Abandon the in-progress attempt and start clean.
+   *
+   * Without this, the saved session (SECURE_KEYS.GUARDIAN_RECOVERY_SESSION)
+   * had exactly one way out: a successful recovery. It survives closing the
+   * app, and it survived logout too — clearAll() never deleted it — so
+   * whoever hit this screen again always resumed the SAME account and key,
+   * with no way to reach the 'account' step and try a different one. A fresh
+   * key on cancel, not just a fresh account slot: reusing the old one across
+   * two different recovery attempts is exactly the kind of "which key is
+   * this, actually" confusion that costs someone their new device.
+   */
+  const startOver = () => {
+    Alert.alert(
+      'Cancel this recovery?',
+      account
+        ? 'This abandons the request for that account. If a guardian already started it, their approval still goes through if they complete it — this device just stops waiting on it.'
+        : 'This generates a new device key. Use this if you want to recover a different account.',
+      [
+        { text: 'Keep waiting', style: 'cancel' },
+        {
+          text: 'Start over',
+          style: 'destructive',
+          onPress: async () => {
+            // This device's key may already have been installed on chain — by a
+            // guardian who finished between the last poll and this tap, or by a
+            // duplicate request nobody realised had already gone through.
+            // Wiping it here would be silent, permanent, and unrecoverable: it
+            // was generated only for this attempt and backed up nowhere else.
+            // One more read confirms which case this actually is.
+            if (wallet && account) {
+              try {
+                const progress = await checkRecoveryProgress(account, wallet.publicKeyHex);
+                if (progress.keyInstalled) {
+                  await finish(wallet, account);
+                  return;
+                }
+              } catch {
+                // Unreadable — fall through to the normal abandon-and-reset path
+                // rather than blocking on a network blip.
+              }
+            }
+
+            const fresh = generateStellarWallet();
+            await SecureStore.setItemAsync(
+              SECURE_KEYS.GUARDIAN_RECOVERY_SESSION,
+              JSON.stringify({ mnemonic: fresh.mnemonic }),
+            );
+            setWallet(fresh);
+            setAccount('');
+            setAccountInput('');
+            setStatus('Waiting for your guardians…');
+            setStep('account');
+          },
+        },
+      ],
+    );
+  };
+
+  const shareMyAddress = async (targetOverride?: string) => {
     if (!wallet) return;
-    const target = (account || accountInput).trim();
+    const target = (targetOverride ?? (account || accountInput)).trim();
 
     if (!StrKey.isValidContract(target)) {
       await shareOrCopy({
@@ -322,12 +389,13 @@ export default function RecoverWithGuardians() {
             <Text variant="p8" color="textSecondary" textAlign="center">
               Recovering {account.slice(0, 8)}…{account.slice(-6)}
             </Text>
-            <Box mt="xl" width="100%">
+            <Box mt="xl" width="100%" gap="s">
               <Button
                 label="Send the request again"
                 variant="outline"
                 onPress={() => shareMyAddress()}
               />
+              <Button label="Cancel and start over" variant="ghost" onPress={startOver} />
             </Box>
           </Box>
         )}

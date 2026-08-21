@@ -92,8 +92,10 @@ const SetPin = () => {
                 }
               }
 
-              if (from === 'recovery') {
-                // Credentials already restored from backup — skip deploy, go straight to app.
+              if (from === 'recovery' || from === 'recover-guardians') {
+                // Account already exists on chain — 'recovery' restored credentials from
+                // backup, 'recover-guardians' added this device's key via a guardian
+                // quorum. Either way there is nothing to deploy, so skip straight to app.
                 router.replace('/(tabs)');
                 return;
               }

@@ -836,6 +836,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       SecureStore.deleteItemAsync(SECURE_KEYS.CREDENTIAL_ID),
       SecureStore.deleteItemAsync(SECURE_KEYS.KEY_DATA_HEX),
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
+      SecureStore.deleteItemAsync(SECURE_KEYS.GUARDIAN_RECOVERY_SESSION),
       AsyncStorage.removeItem(ASYNC_KEYS.AVATARS),
       AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING),
       clearSacTransferCache(),
