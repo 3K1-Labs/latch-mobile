@@ -98,12 +98,35 @@ const optionalEnv = {
 const runtimeEnv = z.object({ ...requiredEnv, ...optionalEnv });
 
 // Build-time only (never inlined into the bundle).
-const envSchema = runtimeEnv.and(
-  z.object({
-    APP_NAME: z.string().default('Latch'),
-    SENTRY_AUTH_TOKEN: z.string().optional(),
-  }),
-);
+const buildtimeEnv = z.object({
+  APP_NAME: z.string().default('Latch'),
+  SENTRY_AUTH_TOKEN: z.string().optional(),
+});
+
+const envSchema = runtimeEnv.and(buildtimeEnv);
+
+/**
+ * Expo resolves `app.config.js` in a subprocess that deliberately skips `.env`:
+ * eas-cli spawns `expo config` with EXPO_NO_DOTENV=1, and it does so before it
+ * knows which EAS environment to read server-side variables from, so nothing
+ * can supply them at that point. Throwing there fails `eas update` on a machine
+ * whose `.env` is complete, so that pass validates whatever is present and
+ * leaves the rest undefined — `app.config.js` reads only APP_NAME,
+ * SENTRY_AUTH_TOKEN and EXPO_PUBLIC_PASSKEY_RP_ID, each with its own fallback.
+ *
+ * Bundling (`export`, `start`, `run:*`) still fails naming the variable, which
+ * is where a missing value would actually reach a shipped bundle.
+ */
+const configResolutionSchema = z
+  .object({
+    ...Object.fromEntries(
+      Object.entries(requiredEnv).map(([key, schema]) => [key, schema.optional()]),
+    ),
+    ...optionalEnv,
+  })
+  .and(buildtimeEnv);
+
+const isConfigResolutionPass = process.argv[2] === 'config';
 
 /**
  * `EXPO_PUBLIC` values must be referenced directly (e.g.
@@ -166,8 +189,11 @@ const trimmed = Object.fromEntries(
 
 const parsed = envSchema.safeParse(trimmed);
 
-if (!parsed.success) {
-  const missing = parsed.error.issues
+const result =
+  parsed.success || !isConfigResolutionPass ? parsed : configResolutionSchema.safeParse(trimmed);
+
+if (!result.success) {
+  const missing = result.error.issues
     .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)
     .join('\n');
   throw new Error(
@@ -176,4 +202,4 @@ if (!parsed.success) {
   );
 }
 
-module.exports = parsed.data;
+module.exports = result.data;

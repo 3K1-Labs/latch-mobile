@@ -8,6 +8,13 @@ const buildNumber = String(epochTimeInSeconds);
 const buildVersion = packageJson.version;
 const appName = env.APP_NAME;
 const sentry = env.SENTRY_AUTH_TOKEN;
+// Must match PASSKEY_RP_ID in src/constants/config.ts — the associated domain
+// is how iOS proves this app is authorized to create/use passkeys scoped to
+// that relying party (ASAuthorizationPlatformPublicKeyCredentialProvider).
+// Requires a `.well-known/apple-app-site-association` file with a
+// `webcredentials` entry for this app served from that domain (backend/infra
+// change, outside this repo).
+const passkeyRpId = env.EXPO_PUBLIC_PASSKEY_RP_ID || 'latch.finance';
 
 export default {
   expo: {
@@ -28,8 +35,9 @@ export default {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: appName === 'Latch' ? 'co.getlatch.latchapp' : 'qa.getlatch.app',
+      bundleIdentifier: 'co.getlatch.latchapp',
       appleTeamId: 'P5QF5H77W5',
+      associatedDomains: [`webcredentials:${passkeyRpId}`],
       ...(process.env.GOOGLE_SERVICES_IOS || existsSync('./GoogleService-Info.plist')
         ? { googleServicesFile: process.env.GOOGLE_SERVICES_IOS ?? './GoogleService-Info.plist' }
         : {}),
@@ -148,16 +156,16 @@ export default {
       ],
       ...(sentry
         ? [
-          [
-            '@sentry/react-native/expo',
-            {
-              url: 'https://sentry.io/',
-              authToken: sentry,
-              project: 'latch-mobile',
-              organization: 'latch',
-            },
-          ],
-        ]
+            [
+              '@sentry/react-native/expo',
+              {
+                url: 'https://sentry.io/',
+                authToken: sentry,
+                project: 'latch-mobile',
+                organization: 'latch',
+              },
+            ],
+          ]
         : []),
     ],
     updates: {

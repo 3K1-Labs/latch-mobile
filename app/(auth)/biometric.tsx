@@ -2,7 +2,13 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { createPasskeyCredential, storePasskeyCredential } from '@/src/lib/passkey-webauthn';
+import {
+  createPasskeyCredential,
+  storePasskeyCredential,
+  storePlatformPasskeyCredentialAtIndex,
+} from '@/src/lib/passkey-webauthn';
+import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
+import { PASSKEY_RP_ID } from '@/src/constants/config';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +36,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function hashPin(pin: string): string {
   return QuickCrypto.createHash('sha256').update(pin).digest('hex') as unknown as string;
+}
+
+/**
+ * Provision the primary passkey credential (account list index 0).
+ *
+ * Prefers a real platform passkey — synced via Google Password Manager
+ * (Android) or iCloud Keychain (iOS), whichever the OS's own passkey sheet
+ * offers — over today's SecureStore-only key. Falls back to the local key on
+ * any failure (unsupported OS version, user cancels the system sheet, no
+ * credential provider available), so setup never dead-ends.
+ */
+async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void> {
+  if (isPlatformPasskeySupported()) {
+    try {
+      const credential = await createPlatformPasskeyCredential({
+        rpId: PASSKEY_RP_ID,
+        rpName: 'Latch',
+        userId: new Uint8Array(QuickCrypto.randomBytes(16)),
+        userName: 'latch-wallet',
+        userDisplayName: 'Latch Wallet',
+        challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
+      });
+      await storePlatformPasskeyCredentialAtIndex(credential, 0);
+      return;
+    } catch (err) {
+      if (__DEV__) console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
+    }
+  }
+
+  const credential = createPasskeyCredential();
+  await storePasskeyCredential(credential, requireBiometric);
 }
 
 const MAX_ATTEMPTS = 5;
@@ -267,8 +304,7 @@ const Biometrics = () => {
     try {
       const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
       if (!existingCredId) {
-        const credential = createPasskeyCredential();
-        await storePasskeyCredential(credential, false);
+        await provisionPrimaryPasskey(false);
       }
       router.replace(
         from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
@@ -314,8 +350,7 @@ const Biometrics = () => {
       // and the user is not left in a broken state on next launch.
       const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
       if (!existingCredId) {
-        const credential = createPasskeyCredential();
-        await storePasskeyCredential(credential);
+        await provisionPrimaryPasskey(true);
       }
       await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
 
