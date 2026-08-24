@@ -306,7 +306,7 @@ const SendToken = () => {
       setIsKeyMismatch(false);
       setStatus('initial');
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Re-deploy failed');
+      setErrorMessage(friendlyTxError(err));
     } finally {
       setIsRedeploying(false);
     }

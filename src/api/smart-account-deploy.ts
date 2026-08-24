@@ -21,7 +21,7 @@ import { Buffer } from 'buffer';
 
 import { getNetworkId, PASSKEY_RP_ID } from '@/src/constants/config';
 import type { AccountSigner } from '@/src/lib/account-signers';
-import { signWithPasskey } from '@/src/lib/passkey-webauthn';
+import { signWithStoredPasskeyAtIndex } from '@/src/lib/passkey-webauthn';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
 import { bytesToB64, compactSigToDER } from '@/src/lib/wallet-auth';
 import { getPasskeyStorageKeys, SECURE_KEYS } from '@/src/store/wallet';
@@ -49,9 +49,10 @@ export class DeployApiError extends Error {
 // ─── transport ────────────────────────────────────────────────────────────────
 
 function xhrPost(path: string, body: object): Promise<{ status: number; body: any }> {
+  const url = `${API_BASE}${path}`;
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
-    req.open('POST', `${API_BASE}${path}`, true);
+    req.open('POST', url, true);
     req.setRequestHeader('Content-Type', 'application/json');
     req.setRequestHeader('Accept', 'application/json');
     // Deployment simulates, submits, and then polls the ledger for
@@ -64,10 +65,35 @@ function xhrPost(path: string, body: object): Promise<{ status: number; body: an
         resolve({ status: req.status, body: null });
       }
     };
-    req.onerror = () => reject(new Error('Network error'));
-    req.ontimeout = () => reject(new Error('Deployment request timed out'));
+    // XHR's onerror carries no detail (no status code, no message) — it fires
+    // identically for DNS failure, TLS failure, and connection refused. Name
+    // the URL so a misresolved API_BASE_URL (e.g. a stale bundle still
+    // pointing at localhost) is distinguishable from a real outage.
+    req.onerror = () => reject(new Error(`Network error contacting ${url}`));
+    req.ontimeout = () => reject(new Error(`Deployment request timed out contacting ${url}`));
     req.send(JSON.stringify(body));
   });
+}
+
+/**
+ * Retry a full challenge→sign→submit cycle exactly once if the proof came
+ * back rejected as expired.
+ *
+ * The nonce is single-use and short-lived, but the WebAuthn signing step can
+ * now be a real OS ceremony (system passkey sheet, provider hand-off) rather
+ * than an instant local biometric read — a user who pauses on that sheet can
+ * outlive the server's TTL through no fault of their own. Re-running `attempt`
+ * requests a fresh nonce and re-signs it (a second Face ID/passkey prompt),
+ * rather than surfacing a failure for something a plain retry fixes.
+ */
+async function withExpiredProofRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  try {
+    return await attempt();
+  } catch (err) {
+    const isExpiredProof = err instanceof DeployApiError && /expired|invalid.*proof/i.test(err.message);
+    if (!isExpiredProof) throw err;
+    return attempt();
+  }
 }
 
 function unwrapDeploy(res: { status: number; body: any }): BackendDeployResult {
@@ -131,43 +157,38 @@ async function signNonceWithSeedWallet(
   throw new Error('no account in this wallet matches the key being deployed');
 }
 
-/** Locate a passkey's private key in SecureStore by its credential ID. */
-async function findPasskeyPrivateKey(credentialId: string): Promise<string> {
+/** Locate which account list index owns a given passkey credential ID. */
+async function findPasskeyListIndex(credentialId: string): Promise<number> {
   for (let index = 0; index < MAX_ACCOUNT_INDEX_PROBE; index++) {
     const keys = getPasskeyStorageKeys(index);
     const storedCredentialId = await SecureStore.getItemAsync(keys.credentialId);
-    // Slot 0 predates per-slot credential IDs, so accept it on a bare match.
+    if (storedCredentialId === credentialId) return index;
+    // Slot 0 predates per-slot credential IDs, so accept it on a bare match
+    // against whichever key material is present there.
     if (index === 0 && !storedCredentialId) {
-      const privateKeyHex = await SecureStore.getItemAsync(keys.privateKey);
-      if (privateKeyHex) return privateKeyHex;
-      continue;
-    }
-    if (storedCredentialId === credentialId) {
-      const privateKeyHex = await SecureStore.getItemAsync(keys.privateKey);
-      if (privateKeyHex) return privateKeyHex;
+      const hasKeyData = await SecureStore.getItemAsync(keys.keyDataHex);
+      if (hasKeyData) return index;
     }
   }
-  throw new Error('passkey private key not found in SecureStore');
+  throw new Error('passkey credential not found in SecureStore');
 }
 
 /**
  * Produce a WebAuthn assertion over the nonce. Raises the OS Face ID / Touch ID
- * prompt, because the private key is stored behind biometric access control.
+ * prompt for a local key, or the OS passkey ceremony (Google Password Manager /
+ * iCloud Keychain) for a platform key — signWithStoredPasskeyAtIndex routes
+ * between the two based on how this credential was provisioned.
  */
 async function signNonceWithPasskey(
   credentialId: string,
   nonceBytes: Uint8Array,
 ): Promise<{ signature: string; authenticatorData: string; clientDataJSON: string }> {
-  const privateKeyHex = await findPasskeyPrivateKey(credentialId);
-  const { authenticatorData, clientDataJSON, signature } = await signWithPasskey(
-    privateKeyHex,
-    nonceBytes,
-    PASSKEY_RP_ID,
-  );
+  const listIndex = await findPasskeyListIndex(credentialId);
+  const { sig } = await signWithStoredPasskeyAtIndex(listIndex, nonceBytes, PASSKEY_RP_ID);
   return {
-    signature: bytesToB64(compactSigToDER(signature)),
-    authenticatorData: bytesToB64(authenticatorData),
-    clientDataJSON: bytesToB64(clientDataJSON),
+    signature: bytesToB64(compactSigToDER(sig.signature)),
+    authenticatorData: bytesToB64(sig.authenticatorData),
+    clientDataJSON: bytesToB64(sig.clientDataJSON),
   };
 }
 
@@ -177,16 +198,18 @@ async function signNonceWithPasskey(
 export async function deploySeedWalletAccount(
   publicKeyHex: string,
 ): Promise<BackendDeployResult> {
-  const nonceHex = await requestChallenge('ed25519', publicKeyHex);
-  const signature = await signNonceWithSeedWallet(publicKeyHex, hexToBytes(nonceHex));
+  return withExpiredProofRetry(async () => {
+    const nonceHex = await requestChallenge('ed25519', publicKeyHex);
+    const signature = await signNonceWithSeedWallet(publicKeyHex, hexToBytes(nonceHex));
 
-  return unwrapDeploy(
-    await xhrPost('/ed25519', {
-      public_key_hex: publicKeyHex,
-      network: getNetworkId(),
-      proof: { nonce: nonceHex, signature },
-    }),
-  );
+    return unwrapDeploy(
+      await xhrPost('/ed25519', {
+        public_key_hex: publicKeyHex,
+        network: getNetworkId(),
+        proof: { nonce: nonceHex, signature },
+      }),
+    );
+  });
 }
 
 /** Deploy the smart account for a passkey (P-256 / WebAuthn) credential. */
@@ -194,21 +217,23 @@ export async function deployPasskeyAccount(
   credentialId: string,
   keyDataHex: string,
 ): Promise<BackendDeployResult> {
-  const nonceHex = await requestChallenge('webauthn', keyDataHex);
-  const proof = await signNonceWithPasskey(credentialId, hexToBytes(nonceHex));
+  return withExpiredProofRetry(async () => {
+    const nonceHex = await requestChallenge('webauthn', keyDataHex);
+    const proof = await signNonceWithPasskey(credentialId, hexToBytes(nonceHex));
 
-  return unwrapDeploy(
-    await xhrPost('/webauthn', {
-      key_data_hex: keyDataHex,
-      network: getNetworkId(),
-      proof: {
-        nonce: nonceHex,
-        signature: proof.signature,
-        authenticator_data: proof.authenticatorData,
-        client_data_json: proof.clientDataJSON,
-      },
-    }),
-  );
+    return unwrapDeploy(
+      await xhrPost('/webauthn', {
+        key_data_hex: keyDataHex,
+        network: getNetworkId(),
+        proof: {
+          nonce: nonceHex,
+          signature: proof.signature,
+          authenticator_data: proof.authenticatorData,
+          client_data_json: proof.clientDataJSON,
+        },
+      }),
+    );
+  });
 }
 
 /**
@@ -228,33 +253,35 @@ export async function deployMultisigAccount(
 ): Promise<BackendDeployResult> {
   const prover = await resolveLocalProver(signers);
 
-  const nonceHex = await requestChallenge(prover.keyType, prover.keyRef);
-  const nonceBytes = hexToBytes(nonceHex);
+  return withExpiredProofRetry(async () => {
+    const nonceHex = await requestChallenge(prover.keyType, prover.keyRef);
+    const nonceBytes = hexToBytes(nonceHex);
 
-  let proof: Record<string, string>;
-  if (prover.keyType === 'ed25519') {
-    proof = { nonce: nonceHex, signature: await signNonceWithSeedWallet(prover.keyRef, nonceBytes) };
-  } else {
-    const p = await signNonceWithPasskey(prover.credentialId, nonceBytes);
-    proof = {
-      nonce: nonceHex,
-      signature: p.signature,
-      authenticator_data: p.authenticatorData,
-      client_data_json: p.clientDataJSON,
-    };
-  }
+    let proof: Record<string, string>;
+    if (prover.keyType === 'ed25519') {
+      proof = { nonce: nonceHex, signature: await signNonceWithSeedWallet(prover.keyRef, nonceBytes) };
+    } else {
+      const p = await signNonceWithPasskey(prover.credentialId, nonceBytes);
+      proof = {
+        nonce: nonceHex,
+        signature: p.signature,
+        authenticator_data: p.authenticatorData,
+        client_data_json: p.clientDataJSON,
+      };
+    }
 
-  return unwrapDeploy(
-    await xhrPost('/multisig', {
-      signers: signers.map(toWireSigner),
-      threshold,
-      salt_hex: saltHex,
-      network: getNetworkId(),
-      proof_key_type: prover.keyType,
-      proof_key_ref: prover.keyRef,
-      proof,
-    }),
-  );
+    return unwrapDeploy(
+      await xhrPost('/multisig', {
+        signers: signers.map(toWireSigner),
+        threshold,
+        salt_hex: saltHex,
+        network: getNetworkId(),
+        proof_key_type: prover.keyType,
+        proof_key_ref: prover.keyRef,
+        proof,
+      }),
+    );
+  });
 }
 
 type LocalProver =

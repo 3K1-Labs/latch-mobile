@@ -21,7 +21,14 @@ module.exports = {
         '<rootDir>/src/api/**/*.test.ts',
       ],
       transform: {
-        '^.+\\.[jt]sx?$': ['babel-jest', { presets: ['babel-preset-expo'] }],
+        // dynamic-import-node rewrites `await import(...)` to a promise-wrapped
+        // `require`: Metro/RN execute native dynamic import fine, but Jest's CJS
+        // runtime throws ("without --experimental-vm-modules") on the untransformed
+        // form. Needed for passkey-webauthn.ts's `await import('./platform-passkey')`.
+        '^.+\\.[jt]sx?$': [
+          'babel-jest',
+          { presets: ['babel-preset-expo'], plugins: ['dynamic-import-node'] },
+        ],
       },
       // @noble, @scure and the Stellar SDK ship ESM that Jest cannot load
       // untransformed.

@@ -29,6 +29,7 @@ import AppToast from '@/src/components/toast/AppToast';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import {
+  PASSKEY_RP_ID,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -38,7 +39,12 @@ import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signe
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
-import { createPasskeyCredential, storePasskeyCredentialAtIndex } from '@/src/lib/passkey-webauthn';
+import {
+  createPasskeyCredential,
+  storePasskeyCredentialAtIndex,
+  storePlatformPasskeyCredentialAtIndex,
+} from '@/src/lib/passkey-webauthn';
+import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
   getPasskeyStorageKeys,
@@ -64,6 +70,7 @@ import {
   View,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import LoadingBlur from '../shared/LoadingBlur';
@@ -495,15 +502,51 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
           SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
         );
         const useBiometric = requiresBiometric !== 'false';
-        const credential = createPasskeyCredential();
-        await storePasskeyCredentialAtIndex(credential, currentLength, useBiometric);
-        newAccount = await addPasskeyAccount(credential.credentialId, credential.publicKeyHex);
+
+        // Prefer a real platform passkey (synced via Google Password Manager /
+        // iCloud Keychain) for this additional account, same as onboarding;
+        // fall back to a local SecureStore-only key on any failure.
+        let credentialId: string;
+        let publicKeyHex: string;
+        let keyDataHex: string;
+        if (isPlatformPasskeySupported()) {
+          try {
+            const platformCredential = await createPlatformPasskeyCredential({
+              rpId: PASSKEY_RP_ID,
+              rpName: 'Latch',
+              userId: new Uint8Array(QuickCrypto.randomBytes(16)),
+              userName: 'latch-wallet',
+              userDisplayName: name || 'Latch Wallet',
+              challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
+            });
+            await storePlatformPasskeyCredentialAtIndex(platformCredential, currentLength);
+            credentialId = platformCredential.credentialId;
+            publicKeyHex = platformCredential.publicKeyHex;
+            keyDataHex = platformCredential.keyDataHex;
+          } catch (err) {
+            if (__DEV__) {
+              console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
+            }
+            const localCredential = createPasskeyCredential();
+            await storePasskeyCredentialAtIndex(localCredential, currentLength, useBiometric);
+            credentialId = localCredential.credentialId;
+            publicKeyHex = localCredential.publicKeyHex;
+            keyDataHex = localCredential.publicKeyHex + localCredential.credentialId;
+          }
+        } else {
+          const localCredential = createPasskeyCredential();
+          await storePasskeyCredentialAtIndex(localCredential, currentLength, useBiometric);
+          credentialId = localCredential.credentialId;
+          publicKeyHex = localCredential.publicKeyHex;
+          keyDataHex = localCredential.publicKeyHex + localCredential.credentialId;
+        }
+
+        newAccount = await addPasskeyAccount(credentialId, publicKeyHex);
 
         await renameAccount(currentLength, name);
         if (image) await setAccountImage(currentLength, image);
 
-        const keyDataHex = credential.publicKeyHex + credential.credentialId;
-        const result = await deploySmartAccountPasskey(credential.credentialId, keyDataHex, true);
+        const result = await deploySmartAccountPasskey(credentialId, keyDataHex, true);
         if (result.error) throw new Error(result.error);
         await updateAccountSmartAddress(newAccount.index, result.smartAccountAddress);
       }

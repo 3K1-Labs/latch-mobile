@@ -109,6 +109,9 @@ export async function storePasskeyCredential(
     SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
     requireBiometric ? 'true' : 'false',
   );
+  // Explicit — a slot previously holding a platform passkey (e.g. after a
+  // wipe-and-recreate) must not be left reporting 'platform' for a local key.
+  await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_KIND, 'local');
 
   if (requireBiometric) {
     await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY, credential.privateKeyHex, {
@@ -139,6 +142,9 @@ export async function storePasskeyCredentialAtIndex(
   await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
   await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
   await SecureStore.setItemAsync(keys.requiresBiometric, requireBiometric ? 'true' : 'false');
+  // Explicit — a slot previously holding a platform passkey (e.g. after a
+  // wipe-and-recreate) must not be left reporting 'platform' for a local key.
+  await SecureStore.setItemAsync(keys.kind, 'local');
 
   if (requireBiometric) {
     await SecureStore.setItemAsync(keys.privateKey, credential.privateKeyHex, {
@@ -150,6 +156,23 @@ export async function storePasskeyCredentialAtIndex(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
   }
+}
+
+/**
+ * Store a real platform passkey (react-native-passkey) at a specific list
+ * index. Unlike storePasskeyCredentialAtIndex, there is no private key to
+ * persist — it never leaves the Secure Enclave/Keystore — and no separate
+ * biometric flag, since user verification happens inside the OS ceremony
+ * itself on every create/sign call.
+ */
+export async function storePlatformPasskeyCredentialAtIndex(
+  credential: { credentialId: string; keyDataHex: string },
+  listIndex: number,
+): Promise<void> {
+  const keys = getPasskeyStorageKeys(listIndex);
+  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
+  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
+  await SecureStore.setItemAsync(keys.kind, 'platform');
 }
 
 // ─── Signing ──────────────────────────────────────────────────────────────────
@@ -266,6 +289,12 @@ export async function getStoredPrivateKeyHex(
   promptMsg = 'Authenticate to receive this wallet’s key',
 ): Promise<string | null> {
   const keys = getPasskeyStorageKeys(listIndex);
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    throw new Error(
+      "PASSKEY_IS_PLATFORM: This device's passkey is a synced platform passkey (Google Password Manager / iCloud Keychain) — its private key never leaves the OS and cannot be read or exported.",
+    );
+  }
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';
   return SecureStore.getItemAsync(
@@ -281,6 +310,27 @@ export async function signWithStoredPasskeyAtIndex(
   promptMsg = 'Authenticate to sign this transaction',
 ): Promise<{ sig: PasskeySignature; keyDataHex: string }> {
   const keys = getPasskeyStorageKeys(listIndex);
+
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    const [credentialId, keyDataHex] = await Promise.all([
+      SecureStore.getItemAsync(keys.credentialId),
+      SecureStore.getItemAsync(keys.keyDataHex),
+    ]);
+    if (!keyDataHex) {
+      throw new Error('Key data missing. Please complete passkey setup first.');
+    }
+    // Dynamic import: keeps react-native-passkey's native module out of every
+    // consumer of this file (e.g. pairing-payload.ts imports it in a pure,
+    // testable context) unless a platform passkey is actually being signed with.
+    const { signWithPlatformPasskey } = await import('./platform-passkey');
+    const sig = await signWithPlatformPasskey({
+      rpId,
+      challenge: authDigest,
+      allowCredentialIdHex: credentialId ?? undefined,
+    });
+    return { sig, keyDataHex };
+  }
 
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';
@@ -444,6 +494,17 @@ export function buildWebAuthnAuthPayload(
  */
 export async function redeployWithCurrentKey(listIndex: number): Promise<string> {
   const keys = getPasskeyStorageKeys(listIndex);
+
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    // There is no local private key to re-derive a public key from, and a
+    // platform passkey's keyDataHex can't silently drift the way a
+    // SecureStore-only key can (see storePasskeyCredentialAtIndex) — so this
+    // repair path does not apply.
+    throw new Error(
+      "PASSKEY_IS_PLATFORM: This account's passkey is a synced platform passkey and has no local private key to redeploy with.",
+    );
+  }
 
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';
