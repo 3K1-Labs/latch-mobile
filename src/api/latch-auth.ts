@@ -8,8 +8,8 @@
 
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
-import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
 import { getNetworkId } from '../constants/config';
+import { decryptBackupAsync, encryptBackupAsync, type EncryptedBackup } from '../lib/backup-crypto';
 import {
   ensureWalletSession,
   getWalletSessionWithoutSignIn,
@@ -176,10 +176,9 @@ export async function registerEmail(email: string): Promise<void> {
  */
 export async function checkEmailHasBackup(email: string): Promise<boolean> {
   try {
-    const data = await latchFetch(
-      `/auth/email-status?email=${encodeURIComponent(email)}`,
-      { method: 'GET' },
-    );
+    const data = await latchFetch(`/auth/email-status?email=${encodeURIComponent(email)}`, {
+      method: 'GET',
+    });
     return data?.has_backup === true;
   } catch {
     return false;
@@ -235,77 +234,79 @@ export async function uploadBackup(): Promise<void> {
   const password = await SecureStore.getItemAsync(SECURE_KEYS.RECOVERY_PASSWORD_SESSION);
   if (!password) throw new Error('No recovery password set');
 
-  const [passkeyPrivateKey, credentialId, keyDataHex, smartAccount, mnemonic, accountsJson] =
-    await Promise.all([
-      SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
-      SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID),
-      SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX),
-      SecureStore.getItemAsync(SECURE_KEYS.SMART_ACCOUNT),
-      SecureStore.getItemAsync(SECURE_KEYS.MNEMONIC),
-      SecureStore.getItemAsync(SECURE_KEYS.ACCOUNTS),
-    ]);
+  try {
+    const [passkeyPrivateKey, credentialId, keyDataHex, smartAccount, mnemonic, accountsJson] =
+      await Promise.all([
+        SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
+        SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID),
+        SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX),
+        SecureStore.getItemAsync(SECURE_KEYS.SMART_ACCOUNT),
+        SecureStore.getItemAsync(SECURE_KEYS.MNEMONIC),
+        SecureStore.getItemAsync(SECURE_KEYS.ACCOUNTS),
+      ]);
 
-  // The backend tracks recovery against a single wallet per user. With multi-
-  // account support, SECURE_KEYS.SMART_ACCOUNT follows the *active* account, so
-  // we resolve the index-0 (primary) account explicitly and register that one.
-  let primarySmartAccount: string | null = null;
-  if (accountsJson) {
-    try {
-      const parsed = JSON.parse(accountsJson) as WalletAccount[];
-      primarySmartAccount = parsed[0]?.smartAccountAddress ?? null;
-    } catch {
-      // fall through — primarySmartAccount stays null
+    // The backend tracks recovery against a single wallet per user. With multi-
+    // account support, SECURE_KEYS.SMART_ACCOUNT follows the *active* account, so
+    // we resolve the index-0 (primary) account explicitly and register that one.
+    let primarySmartAccount: string | null = null;
+    if (accountsJson) {
+      try {
+        const parsed = JSON.parse(accountsJson) as WalletAccount[];
+        primarySmartAccount = parsed[0]?.smartAccountAddress ?? null;
+      } catch {
+        // fall through — primarySmartAccount stays null
+      }
     }
-  }
-  const registeredSmartAccount = primarySmartAccount ?? smartAccount ?? '';
+    const registeredSmartAccount = primarySmartAccount ?? smartAccount ?? '';
 
-  const blob: Record<string, string> = { version: '2' };
-  if (passkeyPrivateKey) blob.passkey_private_key = passkeyPrivateKey;
-  if (credentialId) blob.credential_id = credentialId;
-  if (keyDataHex) blob.key_data_hex = keyDataHex;
-  if (registeredSmartAccount) blob.smart_account = registeredSmartAccount;
-  if (mnemonic) blob.mnemonic = mnemonic;
-  if (accountsJson) blob.accounts = accountsJson;
+    const blob: Record<string, string> = { version: '2' };
+    if (passkeyPrivateKey) blob.passkey_private_key = passkeyPrivateKey;
+    if (credentialId) blob.credential_id = credentialId;
+    if (keyDataHex) blob.key_data_hex = keyDataHex;
+    if (registeredSmartAccount) blob.smart_account = registeredSmartAccount;
+    if (mnemonic) blob.mnemonic = mnemonic;
+    if (accountsJson) blob.accounts = accountsJson;
 
-  // Back up indexed passkey keys for any additional passkey accounts (list index 1+).
-  if (accountsJson) {
-    const accounts = JSON.parse(accountsJson) as WalletAccount[];
-    const indexedReads = accounts
-      .map((account, listIndex) => ({ account, listIndex }))
-      .filter(({ account, listIndex }) => account.index < 0 && listIndex > 0)
-      .map(async ({ listIndex }) => {
-        const keys = getPasskeyStorageKeys(listIndex);
-        const [pk, cid, kdh] = await Promise.all([
-          SecureStore.getItemAsync(keys.privateKey),
-          SecureStore.getItemAsync(keys.credentialId),
-          SecureStore.getItemAsync(keys.keyDataHex),
-        ]);
-        return { listIndex, pk, cid, kdh };
-      });
+    // Back up indexed passkey keys for any additional passkey accounts (list index 1+).
+    if (accountsJson) {
+      const accounts = JSON.parse(accountsJson) as WalletAccount[];
+      const indexedReads = accounts
+        .map((account, listIndex) => ({ account, listIndex }))
+        .filter(({ account, listIndex }) => account.index < 0 && listIndex > 0)
+        .map(async ({ listIndex }) => {
+          const keys = getPasskeyStorageKeys(listIndex);
+          const [pk, cid, kdh] = await Promise.all([
+            SecureStore.getItemAsync(keys.privateKey),
+            SecureStore.getItemAsync(keys.credentialId),
+            SecureStore.getItemAsync(keys.keyDataHex),
+          ]);
+          return { listIndex, pk, cid, kdh };
+        });
 
-    for (const { listIndex, pk, cid, kdh } of await Promise.all(indexedReads)) {
-      if (pk) blob[`passkey_private_key_${listIndex}`] = pk;
-      if (cid) blob[`credential_id_${listIndex}`] = cid;
-      if (kdh) blob[`key_data_hex_${listIndex}`] = kdh;
+      for (const { listIndex, pk, cid, kdh } of await Promise.all(indexedReads)) {
+        if (pk) blob[`passkey_private_key_${listIndex}`] = pk;
+        if (cid) blob[`credential_id_${listIndex}`] = cid;
+        if (kdh) blob[`key_data_hex_${listIndex}`] = kdh;
+      }
     }
+
+    const encryptedBlob = await encryptBackupAsync(JSON.stringify(blob), password);
+
+    await latchFetch(
+      '/backup',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          encrypted_blob: encryptedBlob,
+          smart_account_address: registeredSmartAccount,
+        }),
+      },
+      accessToken,
+    );
+  } finally {
+    // Session key is no longer needed — delete immediately in finally block to ensure it is wiped.
+    await SecureStore.deleteItemAsync(SECURE_KEYS.RECOVERY_PASSWORD_SESSION).catch(() => {});
   }
-
-  const encryptedBlob = encryptBackup(JSON.stringify(blob), password);
-
-  await latchFetch(
-    '/backup',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        encrypted_blob: encryptedBlob,
-        smart_account_address: registeredSmartAccount,
-      }),
-    },
-    accessToken,
-  );
-
-  // Session key is no longer needed — delete immediately after successful upload.
-  await SecureStore.deleteItemAsync(SECURE_KEYS.RECOVERY_PASSWORD_SESSION);
 }
 
 // ─── Recovery ─────────────────────────────────────────────────────────────────
@@ -383,7 +384,7 @@ export async function fetchAndRestoreBackup(
 
   let plaintext: string;
   try {
-    plaintext = decryptBackup(encryptedBlob, password);
+    plaintext = await decryptBackupAsync(encryptedBlob, password);
   } catch {
     throw new Error('Incorrect recovery password');
   }
