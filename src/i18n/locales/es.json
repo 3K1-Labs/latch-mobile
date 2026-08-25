@@ -37,7 +37,42 @@
   "home": {
     "title": "Inicio",
     "totalBalance": "Saldo Total",
-    "yourAssets": "Tus Activos"
+    "yourAssets": "Tus Activos",
+    "manage": "Administrar",
+    "recentActivity": "Actividad Reciente",
+    "viewAll": "Ver Todo",
+    "noTransactions": "No se encontraron transacciones",
+    "fund": "Fondear",
+    "send": "Enviar",
+    "receive": "Recibir",
+    "swap": "Intercambiar",
+    "assetsMigration": {
+      "title": "Activos en cuenta clásica",
+      "description": "Toca para migrarlos a tu cuenta inteligente"
+    }
+  },
+  "history": {
+    "title": "Historial",
+    "searchPlaceholder": "Buscar transacciones ...",
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "unknown": "Desconocido",
+    "filters": {
+      "all": "Todo",
+      "sent": "Enviado",
+      "received": "Recibido",
+      "swap": "Intercambio",
+      "pending": "Pendiente"
+    },
+    "errors": {
+      "couldNotLoad": "No se pudieron cargar las transacciones.",
+      "retry": "Reintentar"
+    },
+    "empty": {
+      "title": "Aún no hay transacciones",
+      "description": "Tu historial de transacciones aparecerá aquí.",
+      "noResults": "No hay resultados que coincidan con tu búsqueda."
+    }
   },
   "common": {
     "ok": "Aceptar",

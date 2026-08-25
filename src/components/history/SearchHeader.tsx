@@ -1,13 +1,12 @@
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 
 import Box from '../shared/Box';
 import Input from '../shared/Input';
 import Text from '../shared/Text';
-
-const FILTERS = ['All', 'Pending', 'Sent', 'Received', 'Swap'];
 
 const SearchHeader = ({
   search,
@@ -23,76 +22,88 @@ const SearchHeader = ({
   setActiveFilter: (f: string) => void;
   theme: Theme;
   pendingCount?: number;
-}) => (
-  <Box paddingHorizontal="m" mt="s">
-    <Box flexDirection="row" alignItems="center" mb="m">
-      <Box flex={1}>
-        <Input
-          placeholder="Search for transactions ..."
-          value={search}
-          onChangeText={setSearch}
-          rightElement={
-            <Ionicons name="search-outline" size={20} color={theme.colors.textSecondary} />
-          }
-        />
-      </Box>
-      <TouchableOpacity
-        style={styles.filterButton}
-        onPress={() => router.push('/filter-sheet')}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="filter-outline" size={20} color={theme.colors.textSecondary} />
-      </TouchableOpacity>
-    </Box>
+}) => {
+  const { t } = useTranslation();
+  
+  const FILTERS = [
+    { key: 'All', label: t('history.filters.all') },
+    { key: 'Pending', label: t('history.filters.pending') },
+    { key: 'Sent', label: t('history.filters.sent') },
+    { key: 'Received', label: t('history.filters.received') },
+    { key: 'Swap', label: t('history.filters.swap') },
+  ];
 
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.filterContainer}
-    >
-      {FILTERS.map((filter) => {
-        const isPending = filter === 'Pending';
-        const showBadge = isPending && pendingCount > 0;
-        return (
-          <TouchableOpacity
-            key={filter}
-            onPress={() => setActiveFilter(filter)}
-            style={[
-              styles.filterChip,
-              activeFilter === filter && {
-                borderColor: theme.colors.primary700,
-                backgroundColor: 'transparent',
-              },
-            ]}
-          >
-            <Box flexDirection="row" alignItems="center">
-              <Text
-                variant="p8"
-                color={activeFilter === filter ? 'primary700' : 'textSecondary'}
-              >
-                {filter}
-              </Text>
-              {showBadge && (
-                <Box
-                  ml="xs"
-                  backgroundColor="primary700"
-                  borderRadius={8}
-                  paddingHorizontal="xs"
-                  minWidth={18}
-                  alignItems="center"
+  return (
+    <Box paddingHorizontal="m" mt="s">
+      <Box flexDirection="row" alignItems="center" mb="m">
+        <Box flex={1}>
+          <Input
+            placeholder={t('history.searchPlaceholder')}
+            value={search}
+            onChangeText={setSearch}
+            rightElement={
+              <Ionicons name="search-outline" size={20} color={theme.colors.textSecondary} />
+            }
+          />
+        </Box>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => router.push('/filter-sheet')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="filter-outline" size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      </Box>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterContainer}
+      >
+        {FILTERS.map((filter) => {
+          const isPending = filter.key === 'Pending';
+          const showBadge = isPending && pendingCount > 0;
+          return (
+            <TouchableOpacity
+              key={filter.key}
+              onPress={() => setActiveFilter(filter.key)}
+              style={[
+                styles.filterChip,
+                activeFilter === filter.key && {
+                  borderColor: theme.colors.primary700,
+                  backgroundColor: 'transparent',
+                },
+              ]}
+            >
+              <Box flexDirection="row" alignItems="center">
+                <Text
+                  variant="p8"
+                  color={activeFilter === filter.key ? 'primary700' : 'textSecondary'}
                 >
-                  <Text variant="p8" color="black" style={{ fontWeight: '700' }}>
-                    {pendingCount}
-                  </Text>
-                </Box>
-              )}
-            </Box>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
-  </Box>
-);
+                  {filter.label}
+                </Text>
+                {showBadge && (
+                  <Box
+                    ml="xs"
+                    backgroundColor="primary700"
+                    borderRadius={8}
+                    paddingHorizontal="xs"
+                    minWidth={18}
+                    alignItems="center"
+                  >
+                    <Text variant="p8" color="black" style={{ fontWeight: '700' }}>
+                      {pendingCount}
+                    </Text>
+                  </Box>
+                )}
+              </Box>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </Box>
+  );
+};
 
 const styles = StyleSheet.create({
   filterButton: {

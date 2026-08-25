@@ -37,7 +37,42 @@
   "home": {
     "title": "Home",
     "totalBalance": "Total Balance",
-    "yourAssets": "Your Assets"
+    "yourAssets": "Your Assets",
+    "manage": "Manage",
+    "recentActivity": "Recent Activity",
+    "viewAll": "View All",
+    "noTransactions": "No transactions found",
+    "fund": "Fund",
+    "send": "Send",
+    "receive": "Receive",
+    "swap": "Swap",
+    "assetsMigration": {
+      "title": "Assets on classic account",
+      "description": "Tap to migrate them to your smart account"
+    }
+  },
+  "history": {
+    "title": "History",
+    "searchPlaceholder": "Search for transactions ...",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "unknown": "Unknown",
+    "filters": {
+      "all": "All",
+      "sent": "Sent",
+      "received": "Received",
+      "swap": "Swap",
+      "pending": "Pending"
+    },
+    "errors": {
+      "couldNotLoad": "Could not load transactions.",
+      "retry": "Retry"
+    },
+    "empty": {
+      "title": "No transactions yet",
+      "description": "Your transaction history will appear here.",
+      "noResults": "No results match your search."
+    }
   },
   "common": {
     "ok": "OK",

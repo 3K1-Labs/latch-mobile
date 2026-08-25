@@ -13,35 +13,36 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  ActivityIndicator,
-  Dimensions,
-  RefreshControl,
-  SectionList,
-  StyleSheet,
-  TouchableOpacity,
+    ActivityIndicator,
+    Dimensions,
+    RefreshControl,
+    SectionList,
+    StyleSheet,
+    TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const height = Dimensions.get('window').height;
 
-function dateSectionLabel(dateStr?: string): string {
-  if (!dateStr) return 'Unknown';
+function dateSectionLabel(dateStr: string | undefined, t: any): string {
+  if (!dateStr) return t('history.unknown');
   const d = new Date(dateStr);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
 
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  if (d.toDateString() === today.toDateString()) return t('history.today');
+  if (d.toDateString() === yesterday.toDateString()) return t('history.yesterday');
   return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function groupByDate(txs: StellarPayment[]): { title: string; data: StellarPayment[] }[] {
+function groupByDate(txs: StellarPayment[], t: any): { title: string; data: StellarPayment[] }[] {
   const map = new Map<string, StellarPayment[]>();
   for (const tx of txs) {
-    const label = dateSectionLabel(tx.createdAt);
+    const label = dateSectionLabel(tx.createdAt, t);
     const group = map.get(label) ?? [];
     group.push(tx);
     map.set(label, group);
@@ -50,6 +51,7 @@ function groupByDate(txs: StellarPayment[]): { title: string; data: StellarPayme
 }
 
 const History = () => {
+  const { t } = useTranslation();
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -109,7 +111,7 @@ const History = () => {
     return result;
   }, [transactions, activeFilter, search, smartAccountAddress]);
 
-  const sections = useMemo(() => groupByDate(filtered), [filtered]);
+  const sections = useMemo(() => groupByDate(filtered, t), [filtered, t]);
 
   const handleRowPress = (tx: StellarPayment) => {
     const isSent = tx.from === smartAccountAddress;
@@ -167,7 +169,7 @@ const History = () => {
           <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
         </TouchableOpacity>
         <Text variant="h10" color="textPrimary" fontFamily="SFproSemibold">
-          History
+          {t('history.title')}
         </Text>
       </Box>
 
@@ -193,11 +195,11 @@ const History = () => {
           mb="s"
         >
           <Text variant="p7" color="textSecondary">
-            Could not load transactions.
+            {t('history.errors.couldNotLoad')}
           </Text>
           <TouchableOpacity onPress={refetch as any}>
             <Text variant="p7" color="primary700">
-              Retry
+              {t('history.errors.retry')}
             </Text>
           </TouchableOpacity>
         </Box>
@@ -247,12 +249,12 @@ const History = () => {
                   <Ionicons name="receipt-outline" size={28} color={theme.colors.textSecondary} />
                 </Box>
                 <Text variant="h10" color="textPrimary" fontWeight="700" textAlign="center" mb="xs">
-                  No transactions yet
+                  {t('history.empty.title')}
                 </Text>
                 <Text variant="p7" color="textSecondary" textAlign="center">
                   {search
-                    ? 'No results match your search.'
-                    : 'Your transaction history will appear here.'}
+                    ? t('history.empty.noResults')
+                    : t('history.empty.description')}
                 </Text>
               </Box>
             }
