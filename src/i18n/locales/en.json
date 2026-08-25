@@ -34,6 +34,11 @@
       "cancel": "Cancel"
     }
   },
+  "home": {
+    "title": "Home",
+    "totalBalance": "Total Balance",
+    "yourAssets": "Your Assets"
+  },
   "common": {
     "ok": "OK",
     "cancel": "Cancel",

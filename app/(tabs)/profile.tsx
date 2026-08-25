@@ -287,7 +287,7 @@ const Profile = () => {
               value={currentLanguage?.nativeName || 'English'}
               onPress={() => {
                 closeDrawer();
-                setTimeout(() => setLanguageVisible(true), 300);
+                setTimeout(() => setLanguageVisible(true), 200);
               }}
             />
           </Box>

@@ -34,6 +34,11 @@
       "cancel": "Cancelar"
     }
   },
+  "home": {
+    "title": "Inicio",
+    "totalBalance": "Saldo Total",
+    "yourAssets": "Tus Activos"
+  },
   "common": {
     "ok": "Aceptar",
     "cancel": "Cancelar",

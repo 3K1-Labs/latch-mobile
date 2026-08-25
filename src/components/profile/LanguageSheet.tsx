@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TouchableOpacity } from 'react-native';
 
@@ -21,6 +21,13 @@ const LanguageSheet = ({ visible, onClose }: LanguageSheetProps) => {
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>(getCurrentLanguage());
   const [isChanging, setIsChanging] = useState(false);
 
+  // Update selected language when sheet opens to show current selection
+  useEffect(() => {
+    if (visible) {
+      setSelectedLanguage(getCurrentLanguage());
+    }
+  }, [visible]);
+
   const handleLanguageSelect = async (languageCode: LanguageCode) => {
     if (languageCode === selectedLanguage || isChanging) return;
 
@@ -40,7 +47,7 @@ const LanguageSheet = ({ visible, onClose }: LanguageSheetProps) => {
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoints={['50%']} scrollable>
+    <BottomSheet visible={visible} onClose={onClose} snapPoints={['50%']} scrollable enablePanDownToClose>
       <Box flex={1} paddingHorizontal="m">
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="l">
           <Text variant="h7" color="textPrimary">
