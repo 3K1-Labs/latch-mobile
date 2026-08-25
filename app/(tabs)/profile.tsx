@@ -285,7 +285,10 @@ const Profile = () => {
               icon="language-outline"
               label={t('profile.settings.language')}
               value={currentLanguage?.nativeName || 'English'}
-              onPress={() => setLanguageVisible(true)}
+              onPress={() => {
+                closeDrawer();
+                setTimeout(() => setLanguageVisible(true), 300);
+              }}
             />
           </Box>
 
