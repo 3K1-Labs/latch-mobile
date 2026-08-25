@@ -29,7 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BIOMETRIC_ENABLED_KEY } from '../(auth)/biometric';
@@ -38,6 +38,7 @@ const Profile = () => {
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { t } = useTranslation();
   const { clearAll, accounts, activeAccountIndex, avatars } = useWalletStore();
   const { closeDrawer } = useDrawer();
   // const { isDark, toggleTheme } = useAppTheme();
@@ -58,9 +59,13 @@ const Profile = () => {
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [backupVisible, setBackupVisible] = useState(false);
   const [sharedWalletVisible, setSharedWalletVisible] = useState(false);
+  const [languageVisible, setLanguageVisible] = useState(false);
 
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
+
+  // Get current language display name
+  const currentLanguage = SUPPORTED_LANGUAGES.find((l) => l.code === getCurrentLanguage());
 
   // One-shot nudge: if onboarding's backup upload failed, prompt for it here
   // instead of losing the failure silently — see BACKUP_PENDING and
@@ -161,35 +166,36 @@ const Profile = () => {
           onClose={() => setSharedWalletVisible(false)}
           onNeedsBackup={() => setBackupVisible(true)}
         />
+        <LanguageSheet visible={languageVisible} onClose={() => setLanguageVisible(false)} />
 
         <Box paddingHorizontal="m">
           {/* Account Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Account
+              {t('profile.sections.account')}
             </Text>
             <SettingItem
               icon="person-outline"
-              label="My Profile"
+              label={t('profile.settings.myProfile')}
               onPress={() => setAccountInfoVisible(true)}
               image={require('@/src/assets/icon/user.png')}
             />
             <SettingItem
               icon="people-outline"
-              label="My Accounts"
+              label={t('profile.settings.myAccounts')}
               onPress={() => setSwitcherVisible(true)}
               image={require('@/src/assets/icon/users.png')}
             />
             <SettingItem
               icon="people-circle-outline"
               image={require('@/src/assets/icon/wallet-customer-group.png')}
-              label="Multisig Wallets"
+              label={t('profile.settings.multisigWallets')}
               onPress={() => setSharedWalletVisible(true)}
             />
             {activeAccount.isMultisig && (
               <SettingItem
                 icon="checkmark-done-outline"
-                label="Approve a Request"
+                label={t('profile.settings.approveRequest')}
                 onPress={() => {
                   if (activeAccount.isMultisig) {
                     closeDrawer();
@@ -200,13 +206,13 @@ const Profile = () => {
             )}
             <SettingItem
               icon="book-outline"
-              label="Address Book"
+              label={t('profile.settings.addressBook')}
               onPress={() => setAddressBookVisible(true)}
             />
             {!isPasskeyAccount && (
               <SettingItem
                 icon="key-outline"
-                label="Recovery Phrase"
+                label={t('profile.settings.recoveryPhrase')}
                 onPress={() => setRecoveryVisible(true)}
                 image={require('@/src/assets/icon/key.png')}
               />
@@ -216,7 +222,7 @@ const Profile = () => {
           {/* Security Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Security
+              {t('profile.sections.security')}
             </Text>
             {/* <SettingItem
               icon="finger-print-outline"
@@ -228,18 +234,18 @@ const Profile = () => {
             /> */}
             <SettingItem
               icon="cloud-upload-outline"
-              label="Wallet Backup"
+              label={t('profile.settings.walletBackup')}
               onPress={() => setBackupVisible(true)}
             />
             <SettingItem
               icon="keypad-outline"
-              label="Signers"
+              label={t('profile.settings.signers')}
               onPress={() => setSignersVisible(true)}
               image={require('@/src/assets/icon/monitor-ipad-mobile.png')}
             />
             <SettingItem
               icon="document-text-outline"
-              label="Permissions"
+              label={t('profile.settings.permissions')}
               onPress={() => setPermissionsVisible(true)}
               image={require('@/src/assets/icon/mobile-shield-protection.png')}
             />
@@ -253,7 +259,7 @@ const Profile = () => {
           {/* Preferences Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Preferences
+              {t('profile.sections.preferences')}
             </Text>
             {/* <SettingItem
               icon={isDark ? 'moon-outline' : 'sunny-outline'}
@@ -263,36 +269,42 @@ const Profile = () => {
             /> */}
             <SettingItem
               icon="globe-outline"
-              label="Network"
-              value={ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network'}
+              label={t('profile.settings.network')}
+              value={ACTIVE_NETWORK.network === 'TESTNET' ? t('profile.settings.networkTestnet') : t('profile.settings.networkPublic')}
               onPress={() => setNetworkVisible(true)}
             />
             <SettingItem
               icon="notifications-outline"
-              label="Notifications"
+              label={t('profile.settings.notifications')}
               onPress={() => setNotificationsVisible(true)}
+            />
+            <SettingItem
+              icon="language-outline"
+              label={t('profile.settings.language')}
+              value={currentLanguage?.nativeName || 'English'}
+              onPress={() => setLanguageVisible(true)}
             />
           </Box>
 
           {/* Support Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="s" style={{ marginLeft: 4 }}>
-              Support
+              {t('profile.sections.support')}
             </Text>
             <SettingItem
               icon="help-circle-outline"
-              label="Help & Support"
+              label={t('profile.settings.helpSupport')}
               onPress={() => setHelpSupportVisible(true)}
             />
             <SettingItem
               icon="information-circle-outline"
-              label="About Latch"
+              label={t('profile.settings.aboutLatch')}
               value="v1.0.0"
               onPress={() => setAboutVisible(true)}
             />
             <SettingItem
               icon="document-text-outline"
-              label="Privacy Policy"
+              label={t('profile.settings.privacyPolicy')}
               onPress={() => setPrivacyVisible(true)}
             />
           </Box>

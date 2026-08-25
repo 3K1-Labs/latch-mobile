@@ -1,0 +1,55 @@
+{
+  "profile": {
+    "title": "Perfil",
+    "sections": {
+      "account": "Cuenta",
+      "security": "Seguridad",
+      "preferences": "Preferencias",
+      "support": "Soporte"
+    },
+    "settings": {
+      "myProfile": "Mi Perfil",
+      "myAccounts": "Mis Cuentas",
+      "multisigWallets": "Carteras Multifirma",
+      "approveRequest": "Aprobar una Solicitud",
+      "addressBook": "Libreta de Direcciones",
+      "recoveryPhrase": "Frase de Recuperación",
+      "walletBackup": "Respaldo de Cartera",
+      "signers": "Firmantes",
+      "permissions": "Permisos",
+      "network": "Red",
+      "networkTestnet": "Red de Prueba",
+      "networkPublic": "Red Pública",
+      "notifications": "Notificaciones",
+      "language": "Idioma",
+      "helpSupport": "Ayuda y Soporte",
+      "aboutLatch": "Acerca de Latch",
+      "privacyPolicy": "Política de Privacidad",
+      "logout": "Cerrar Sesión"
+    },
+    "logout": {
+      "title": "Cerrar Sesión",
+      "message": "¿Estás seguro de que quieres cerrar sesión? Necesitarás tu frase de recuperación para volver a iniciar sesión.",
+      "confirm": "Cerrar Sesión",
+      "cancel": "Cancelar"
+    }
+  },
+  "common": {
+    "ok": "Aceptar",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "done": "Hecho",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "skip": "Omitir",
+    "close": "Cerrar",
+    "confirm": "Confirmar",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "warning": "Advertencia",
+    "info": "Información"
+  }
+}

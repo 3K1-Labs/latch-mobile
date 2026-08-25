@@ -1,0 +1,55 @@
+{
+  "profile": {
+    "title": "Profile",
+    "sections": {
+      "account": "Account",
+      "security": "Security",
+      "preferences": "Preferences",
+      "support": "Support"
+    },
+    "settings": {
+      "myProfile": "My Profile",
+      "myAccounts": "My Accounts",
+      "multisigWallets": "Multisig Wallets",
+      "approveRequest": "Approve a Request",
+      "addressBook": "Address Book",
+      "recoveryPhrase": "Recovery Phrase",
+      "walletBackup": "Wallet Backup",
+      "signers": "Signers",
+      "permissions": "Permissions",
+      "network": "Network",
+      "networkTestnet": "Testnet",
+      "networkPublic": "Public Network",
+      "notifications": "Notifications",
+      "language": "Language",
+      "helpSupport": "Help & Support",
+      "aboutLatch": "About Latch",
+      "privacyPolicy": "Privacy Policy",
+      "logout": "Logout"
+    },
+    "logout": {
+      "title": "Logout",
+      "message": "Are you sure you want to logout? You'll need your recovery phrase to sign back in.",
+      "confirm": "Logout",
+      "cancel": "Cancel"
+    }
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "done": "Done",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip",
+    "close": "Close",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Info"
+  }
+}
