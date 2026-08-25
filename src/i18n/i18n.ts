@@ -1,7 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Localization from 'expo-localization';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import en from './locales/en.json';
 import es from './locales/es.json';
@@ -54,7 +54,7 @@ export async function initI18n(): Promise<void> {
     resources,
     lng: language,
     fallbackLng: 'en',
-    compatibilityJSON: 'v3', // React Native compatibility
+    compatibilityJSON: 'v4', // React Native compatibility
     interpolation: {
       escapeValue: false, // React already escapes
     },

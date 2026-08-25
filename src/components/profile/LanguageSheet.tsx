@@ -77,7 +77,7 @@ const LanguageSheet = ({ visible, onClose }: LanguageSheetProps) => {
                     <Text variant="p7" color="textPrimary" mb="xs">
                       {language.nativeName}
                     </Text>
-                    <Text variant="p9" color="textSecondary">
+                    <Text variant="caption" color="textSecondary">
                       {language.name}
                     </Text>
                   </Box>
@@ -101,7 +101,7 @@ const LanguageSheet = ({ visible, onClose }: LanguageSheetProps) => {
         </Box>
 
         <Box paddingVertical="m" marginTop="m">
-          <Text variant="p9" color="textSecondary" textAlign="center">
+          <Text variant="caption" color="textSecondary" textAlign="center">
             {/* Language changes apply immediately without restart */}
             The selected language will be applied immediately
           </Text>
