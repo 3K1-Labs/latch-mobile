@@ -2,6 +2,8 @@ import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import TokenIcon from '@/src/components/shared/TokenIcon';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
+import { usePrices } from '@/src/hooks/use-prices';
 import { Theme } from '@/src/theme/theme';
 import { useTheme } from '@shopify/restyle';
 import React from 'react';
@@ -16,6 +18,8 @@ interface TokenRowProps {
 
 function TokenRow({ token, onPress, theme }: TokenRowProps) {
   const iconUrl = useTokenIcon(token.code, token.issuer);
+  const { data: prices } = usePrices();
+  const { formatToken } = useDisplayFiat();
   const amount = parseFloat(token.amount);
   const formatted = amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -57,6 +61,9 @@ function TokenRow({ token, onPress, theme }: TokenRowProps) {
               {formatted} {token.code}
             </Text>
           </Box>
+          <Text variant="p8" color="textSecondary" mt="xs">
+            {formatToken(token.amount, prices?.[token.code]?.price, { approx: false }).text}
+          </Text>
         </Box>
       </Box>
     </TouchableOpacity>

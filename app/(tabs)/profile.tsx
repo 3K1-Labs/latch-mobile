@@ -8,6 +8,7 @@ import DrawerProfileHeader from '@/src/components/profile/DrawerProfileHeader';
 import HelpSupportSheet from '@/src/components/profile/HelpSupportSheet';
 import LogoutItem from '@/src/components/profile/LogoutItem';
 import LogoutPromptSheet from '@/src/components/profile/LogoutPromptSheet';
+import CurrencySheet from '@/src/components/profile/CurrencySheet';
 import NetworkSheet from '@/src/components/profile/NetworkSheet';
 import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
@@ -20,6 +21,7 @@ import SignersSheet from '@/src/components/profile/SignersSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { ACTIVE_NETWORK } from '@/src/constants/config';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useDrawer } from '@/src/context/drawer-context';
 import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -50,6 +52,8 @@ const Profile = () => {
   // const [policiesVisible, setPoliciesVisible] = useState(false);
   const [addressBookVisible, setAddressBookVisible] = useState(false);
   const [networkVisible, setNetworkVisible] = useState(false);
+  const [currencyVisible, setCurrencyVisible] = useState(false);
+  const { selectedCurrency } = useDisplayFiat();
   const [, forceNetworkLabelRefresh] = useState(0);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [helpSupportVisible, setHelpSupportVisible] = useState(false);
@@ -140,6 +144,7 @@ const Profile = () => {
           onClose={() => setNetworkVisible(false)}
           onNetworkChanged={() => forceNetworkLabelRefresh((n) => n + 1)}
         />
+        <CurrencySheet visible={currencyVisible} onClose={() => setCurrencyVisible(false)} />
         <NotificationSheet
           visible={notificationsVisible}
           onClose={() => setNotificationsVisible(false)}
@@ -266,6 +271,12 @@ const Profile = () => {
               label="Network"
               value={ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network'}
               onPress={() => setNetworkVisible(true)}
+            />
+            <SettingItem
+              icon="cash-outline"
+              label="Currency"
+              value={selectedCurrency}
+              onPress={() => setCurrencyVisible(true)}
             />
             <SettingItem
               icon="notifications-outline"

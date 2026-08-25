@@ -9,6 +9,7 @@ import { STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
 import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { ImplausibleQuoteError, useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon, useTokenList } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
@@ -41,13 +42,6 @@ import * as Yup from 'yup';
 
 const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 
-const formatUsd = (amountStr: string, price?: string) => {
-  const amount = parseFloat(amountStr || '0');
-  const p = parseFloat(price ?? '0');
-  if (!amount || !p) return '≈$0.00';
-  return `≈$${(amount * p).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-
 const Swap = () => {
   const theme = useTheme<Theme>();
   const isDark = theme.colors.mainBackground === '#000000';
@@ -58,6 +52,7 @@ const Swap = () => {
   const activeAccount = accounts[activeAccountIndex];
   const { tokens: trackedTokens } = useTrackedTokens();
   const { data: prices, refetch: refetchPrices } = usePrices();
+  const { formatToken, formatUsdValue } = useDisplayFiat();
   const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
     smartAccountAddress,
     activeAccount?.gAddress,
@@ -341,15 +336,15 @@ const Swap = () => {
     setPickerSide(null);
   };
 
-  const fromValue = formatUsd(formik.values.amount, prices?.[fromToken?.code ?? '']?.price);
+  const fromValue = formatToken(formik.values.amount, prices?.[fromToken?.code ?? '']?.price).text;
   const toAmount = quote?.amountOut ?? '0.00';
-  const toValue = formatUsd(quote?.amountOut ?? '0', prices?.[toToken?.code ?? '']?.price);
+  const toValue = formatToken(quote?.amountOut ?? '0', prices?.[toToken?.code ?? '']?.price).text;
 
   const fromUsdPrice = parseFloat(prices?.[fromToken?.code ?? '']?.price ?? '0');
   const rateLabel =
     quote && fromToken && toToken
       ? showUsdRate
-        ? `1 ${fromToken.code} ≈ $${fromUsdPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+        ? `1 ${fromToken.code} ≈ ${formatUsdValue(fromUsdPrice, { approx: true }).text.replace(/^≈/, '')}`
         : `1 ${fromToken.code} ≈ ${quote.rate.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${toToken.code}`
       : '—';
 
