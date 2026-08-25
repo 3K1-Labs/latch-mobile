@@ -89,7 +89,7 @@ export const BASE_RESERVE_MIN_COUNT = 2;
 
 // Relying party ID used when constructing WebAuthn authenticatorData for passkey signing.
 // Must be a stable domain string — the on-chain verifier checks signature math, not this value.
-const PASSKEY_RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'latch.finance';
+const PASSKEY_RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'michaelesenwa.me';
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
 // The API key is baked into the bundle (EXPO_PUBLIC_*). Testnet only — move the
@@ -238,5 +238,6 @@ export {
   STELLAR_AUTH_PREFIX,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL,
+  STELLAR_RPC_URL
 };
+

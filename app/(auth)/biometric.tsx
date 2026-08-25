@@ -13,6 +13,7 @@ import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -62,6 +63,7 @@ async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void>
       return;
     } catch (err) {
       if (__DEV__) console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
+      Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
     }
   }
 

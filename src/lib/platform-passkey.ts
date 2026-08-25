@@ -209,12 +209,17 @@ export interface SignWithPlatformPasskeyParams {
 
 /**
  * Run the real OS passkey authentication ceremony and return a
- * PasskeySignature in the exact shape encodeWebAuthnSigData/
- * buildWebAuthnAuthPayload already expect.
+ * PasskeySignature (in the exact shape encodeWebAuthnSigData/
+ * buildWebAuthnAuthPayload already expect) plus the hex credential ID the OS
+ * actually used. That ID matters when `allowCredentialIdHex` was omitted —
+ * e.g. signing in in to an existing account on a device that has never
+ * stored anything locally, where the OS locates the synced credential via
+ * Google Password Manager / iCloud Keychain and the caller needs to know
+ * which one it picked to match it against the account's on-chain signers.
  */
 export async function signWithPlatformPasskey(
   params: SignWithPlatformPasskeyParams,
-): Promise<PasskeySignature> {
+): Promise<PasskeySignature & { credentialIdHex: string }> {
   const result = await Passkey.get({
     challenge: b64uEncode(params.challenge),
     rpId: params.rpId,
@@ -233,6 +238,7 @@ export async function signWithPlatformPasskey(
     authenticatorData: b64uDecode(result.response.authenticatorData),
     clientDataJSON: b64uDecode(result.response.clientDataJSON),
     signature: Buffer.from(derSignatureToCompactHex(b64uDecode(result.response.signature)), 'hex'),
+    credentialIdHex: Buffer.from(b64uDecode(result.rawId ?? result.id)).toString('hex'),
   };
 }
 

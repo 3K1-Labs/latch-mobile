@@ -29,6 +29,7 @@ import { PASSKEY_RP_ID } from '@/src/constants/config';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
+import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -116,6 +117,7 @@ async function getOrCreatePasskeyCredentials(): Promise<{
       return { credentialId: credential.credentialId, keyDataHex: credential.keyDataHex };
     } catch (err) {
       if (__DEV__) console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
+      Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
     }
   }
 
