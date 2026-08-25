@@ -29,13 +29,14 @@ import { ImageBackground } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { memo, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  Dimensions,
-  FlatList,
-  Image,
-  RefreshControl,
-  ScrollView,
-  TouchableOpacity,
+    Dimensions,
+    FlatList,
+    Image,
+    RefreshControl,
+    ScrollView,
+    TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -155,6 +156,7 @@ function estimateXlmForFiat(fiatAmount?: string, xlmUsdPrice?: string): string |
 }
 
 const Home = () => {
+  const { t } = useTranslation();
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   // const statusBarStyle = useStatusBarStyle();
@@ -462,7 +464,7 @@ const Home = () => {
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
           >
             <Text variant="p7" color="textSecondary" fontWeight="600">
-              Total Balance
+              {t('home.totalBalance')}
             </Text>
             <Ionicons
               name={showBalance ? 'eye-outline' : 'eye-off-outline'}
@@ -538,15 +540,15 @@ const Home = () => {
         {/* Action Buttons */}
         <Box flexDirection="row" justifyContent="space-around" paddingHorizontal="m" mb="xl" mt="m">
           {[
-            { label: 'Fund', icon: require('@/src/assets/icon/plus-big.png') },
-            { label: 'Send', icon: require('@/src/assets/icon/ArrowUp.png'), route: '/send-token' },
+            { label: t('home.fund'), icon: require('@/src/assets/icon/plus-big.png') },
+            { label: t('home.send'), icon: require('@/src/assets/icon/ArrowUp.png'), route: '/send-token' },
             {
-              label: 'Receive',
+              label: t('home.receive'),
               icon: require('@/src/assets/icon/arrowDown.png'),
               route: '/receive-token',
             },
             {
-              label: 'Swap',
+              label: t('home.swap'),
               icon: require('@/src/assets/icon/RepeatGold.png'),
             },
           ].map((item, index) => (
@@ -554,10 +556,10 @@ const Home = () => {
               <TouchableOpacity
                 activeOpacity={0.7}
                 onPress={() => {
-                  if (item.label === 'Fund') {
+                  if (item.label === t('home.fund')) {
                     setFundVisible(true);
                     ensureDepositIntent();
-                  } else if (item.label === 'Swap') {
+                  } else if (item.label === t('home.swap')) {
                     // Swap is a tab, not a stacked screen — navigate() switches
                     // to it (matching the tab bar) instead of pushing a second
                     // copy on top of Home with no way back to the tab bar.
@@ -597,11 +599,11 @@ const Home = () => {
           <Box paddingHorizontal="m" mb="xl">
             <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
               <Text variant="h9" color="textPrimary" fontWeight="700">
-                Your Assets
+                {t('home.yourAssets')}
               </Text>
               <TouchableOpacity onPress={() => router.push('/add-token')}>
                 <Text variant="p7" color="primary700" fontWeight="700">
-                  Manage
+                  {t('home.manage')}
                 </Text>
               </TouchableOpacity>
             </Box>
@@ -690,10 +692,10 @@ const Home = () => {
                     fontWeight="700"
                     style={{ color: isDark ? '#FFD666' : '#874D00' }}
                   >
-                    Assets on classic account
+                    {t('home.assetsMigration.title')}
                   </Text>
                   <Text variant="p8" style={{ color: isDark ? '#B8860B' : '#AD6800' }} mt="xs">
-                    Tap to migrate them to your smart account
+                    {t('home.assetsMigration.description')}
                   </Text>
                 </Box>
                 <Ionicons name="chevron-forward" size={16} color={isDark ? '#B8860B' : '#AD6800'} />
@@ -706,11 +708,11 @@ const Home = () => {
         <Box paddingHorizontal="m">
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
             <Text variant="h9" color="textPrimary" fontWeight="700">
-              Recent Activity
+              {t('home.recentActivity')}
             </Text>
             <TouchableOpacity onPress={() => router.push('/(tabs)/history')}>
               <Text variant="p7" color="primary700" fontWeight="700">
-                View All
+                {t('home.viewAll')}
               </Text>
             </TouchableOpacity>
           </Box>
@@ -733,7 +735,7 @@ const Home = () => {
               borderRadius={16}
             >
               <Text color="textSecondary" variant="p7">
-                No transactions found
+                {t('home.noTransactions')}
               </Text>
             </Box>
           ) : (

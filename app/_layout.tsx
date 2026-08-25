@@ -24,6 +24,7 @@ import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
+import { initI18n } from '../src/i18n/i18n';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
 // Wire React Query's online/offline state to the device's actual connectivity.
@@ -96,9 +97,14 @@ export default function RootLayout() {
   // Gates rendering until the persisted network choice is applied, so no query
   // or screen reads a network-derived value while it's still the default.
   const [networkReady, setNetworkReady] = useState(false);
+  const [i18nReady, setI18nReady] = useState(false);
 
   useEffect(() => {
     hydrateActiveNetwork().finally(() => setNetworkReady(true));
+  }, []);
+
+  useEffect(() => {
+    initI18n().finally(() => setI18nReady(true));
   }, []);
 
   const [fontsLoaded] = useFonts({
@@ -115,14 +121,14 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded && networkReady) {
+    if (fontsLoaded && networkReady && i18nReady) {
       setTimeout(() => {
         SplashScreen.hideAsync().catch(() => {});
       }, 500);
     }
-  }, [fontsLoaded, networkReady]);
+  }, [fontsLoaded, networkReady, i18nReady]);
 
-  if (!fontsLoaded || !networkReady) {
+  if (!fontsLoaded || !networkReady || !i18nReady) {
     return null;
   }
 
