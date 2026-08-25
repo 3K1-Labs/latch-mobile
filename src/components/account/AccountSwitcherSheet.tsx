@@ -55,6 +55,7 @@ import {
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
@@ -527,6 +528,7 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
             if (__DEV__) {
               console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
             }
+            Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
             const localCredential = createPasskeyCredential();
             await storePasskeyCredentialAtIndex(localCredential, currentLength, useBiometric);
             credentialId = localCredential.credentialId;

@@ -13,7 +13,7 @@ import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 
-type OptionType = 'new-account' | 'seed-phrase' | 'existing-wallet' | 'recover';
+type OptionType = 'new-account' | 'seed-phrase' | 'existing-wallet' | 'recover' | 'passkey';
 
 const GetStarted = () => {
   const theme = useTheme<Theme>();
@@ -32,6 +32,11 @@ const GetStarted = () => {
       id: 'seed-phrase' as OptionType,
       title: 'Import With Seed Phrase',
       description: 'Restore your account using your 12-word recovery phrase',
+    },
+    {
+      id: 'passkey' as OptionType,
+      title: 'Sign In With Passkey',
+      description: 'Use your synced Google Password Manager or iCloud Keychain passkey',
     },
     // {
     //   id: 'existing-wallet' as OptionType,
@@ -64,6 +69,9 @@ const GetStarted = () => {
         break;
       case 'recover':
         router.push({ pathname: '/(onboarding)/collect-email', params: { mode: 'recovery' } });
+        break;
+      case 'passkey':
+        router.push('/(onboarding)/sign-in-passkey');
         break;
       default:
         router.push('/onboarding');

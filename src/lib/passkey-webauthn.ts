@@ -100,19 +100,13 @@ export async function storePasskeyCredential(
   credential: PasskeyCredential,
   requireBiometric = true,
 ): Promise<void> {
-  // Public material — never auth-gated
-  await SecureStore.setItemAsync(SECURE_KEYS.CREDENTIAL_ID, credential.credentialId);
-  await SecureStore.setItemAsync(SECURE_KEYS.KEY_DATA_HEX, credential.keyDataHex);
-
-  // Auth mode flag — read back by signWithStoredPasskey to pick the right read options
-  await SecureStore.setItemAsync(
-    SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
-    requireBiometric ? 'true' : 'false',
-  );
-  // Explicit — a slot previously holding a platform passkey (e.g. after a
-  // wipe-and-recreate) must not be left reporting 'platform' for a local key.
-  await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_KIND, 'local');
-
+  // Private key FIRST. If this whole sequence is interrupted (app reload,
+  // crash, navigation away) partway through, the worst case must be "no
+  // credential exists yet" (safe — the next attempt just creates fresh), never
+  // "public pointers exist but there's no private key to sign with" (a
+  // permanent dead end previously reachable by writing credentialId/keyDataHex
+  // first — see the PASSKEY_KIND write below, which is what made a
+  // half-written credential look valid to callers).
   if (requireBiometric) {
     await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY, credential.privateKeyHex, {
       requireAuthentication: true,
@@ -125,6 +119,22 @@ export async function storePasskeyCredential(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
   }
+
+  // Public material — never auth-gated
+  await SecureStore.setItemAsync(SECURE_KEYS.CREDENTIAL_ID, credential.credentialId);
+  await SecureStore.setItemAsync(SECURE_KEYS.KEY_DATA_HEX, credential.keyDataHex);
+
+  // Auth mode flag — read back by signWithStoredPasskey to pick the right read options
+  await SecureStore.setItemAsync(
+    SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
+    requireBiometric ? 'true' : 'false',
+  );
+  // Kind LAST — this is the flag that makes signWithStoredPasskeyAtIndex trust
+  // the local branch, so it must never be set before the private key it
+  // promises is actually there. Explicit 'local' value: a slot previously
+  // holding a platform passkey (e.g. after a wipe-and-recreate) must not be
+  // left reporting 'platform' for a local key.
+  await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_KIND, 'local');
 }
 
 /**
@@ -139,13 +149,9 @@ export async function storePasskeyCredentialAtIndex(
 ): Promise<void> {
   const keys = getPasskeyStorageKeys(listIndex);
 
-  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
-  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
-  await SecureStore.setItemAsync(keys.requiresBiometric, requireBiometric ? 'true' : 'false');
-  // Explicit — a slot previously holding a platform passkey (e.g. after a
-  // wipe-and-recreate) must not be left reporting 'platform' for a local key.
-  await SecureStore.setItemAsync(keys.kind, 'local');
-
+  // Private key first — see the comment in storePasskeyCredential for why the
+  // order matters: an interruption must never leave public pointers pointing
+  // at a private key that was never written.
   if (requireBiometric) {
     await SecureStore.setItemAsync(keys.privateKey, credential.privateKeyHex, {
       requireAuthentication: true,
@@ -156,6 +162,12 @@ export async function storePasskeyCredentialAtIndex(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
   }
+
+  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
+  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
+  await SecureStore.setItemAsync(keys.requiresBiometric, requireBiometric ? 'true' : 'false');
+  // Kind last — see storePasskeyCredential.
+  await SecureStore.setItemAsync(keys.kind, 'local');
 }
 
 /**
@@ -340,7 +352,22 @@ export async function signWithStoredPasskeyAtIndex(
     useBiometric ? { requireAuthentication: true, authenticationPrompt: promptMsg } : undefined,
   );
   if (!privateKeyHex) {
-    throw new Error('No passkey found. Please complete biometric setup first.');
+    // kind === 'local' promised a private key that isn't here — a corrupted
+    // slot from an interrupted storePasskeyCredential write, predating the
+    // write-order fix above (private key now written first, so this specific
+    // corruption can't recur for new credentials). Clear the stale public
+    // pointers rather than leaving a permanent dead end: the next attempt
+    // (e.g. re-visiting the biometric setup screen) sees nothing here and
+    // creates a fresh credential instead of getting stuck forever.
+    await Promise.all([
+      SecureStore.deleteItemAsync(keys.credentialId),
+      SecureStore.deleteItemAsync(keys.keyDataHex),
+      SecureStore.deleteItemAsync(keys.requiresBiometric),
+      SecureStore.deleteItemAsync(keys.kind),
+    ]);
+    throw new Error(
+      'PASSKEY_CREDENTIAL_MISSING: No passkey found. Please complete biometric setup again.',
+    );
   }
 
   const keyDataHex = await SecureStore.getItemAsync(keys.keyDataHex);

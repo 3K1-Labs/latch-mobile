@@ -172,4 +172,49 @@ describe('platform passkey routing in passkey-webauthn.ts', () => {
 
     await expect(redeployWithCurrentKey(0)).rejects.toThrow(/PASSKEY_IS_PLATFORM/);
   });
+
+  it('storePasskeyCredentialAtIndex writes the private key before the public pointers', async () => {
+    await storePasskeyCredentialAtIndex(
+      {
+        credentialId: 'ddeeff',
+        keyDataHex: '04' + '22'.repeat(64) + 'ddeeff',
+        privateKeyHex: '33'.repeat(32),
+        publicKeyHex: '04' + '22'.repeat(64),
+      },
+      0,
+      false,
+    );
+
+    // An interruption partway through this sequence must never leave public
+    // pointers (credentialId/keyDataHex/kind) set without the private key
+    // they promise — see signWithStoredPasskeyAtIndex's self-heal test below
+    // for what happens if that invariant is ever violated some other way.
+    const calls = (SecureStore.setItemAsync as jest.Mock).mock.calls.map(([key]) => key);
+    const privateKeyCallIndex = calls.indexOf('latch_passkey_private_key');
+    const kindCallIndex = calls.indexOf('latch_passkey_kind');
+    expect(privateKeyCallIndex).toBeGreaterThanOrEqual(0);
+    expect(kindCallIndex).toBeGreaterThan(privateKeyCallIndex);
+  });
+
+  it('signWithStoredPasskeyAtIndex self-heals a corrupted local credential (public pointers with no private key)', async () => {
+    // Simulate the exact corruption an interrupted storePasskeyCredential
+    // write used to be able to produce: public pointers + kind='local'
+    // present, but no private key ever written.
+    await SecureStore.setItemAsync('latch_credential_id', 'ddeeff');
+    await SecureStore.setItemAsync('latch_key_data_hex', '04' + '22'.repeat(64) + 'ddeeff');
+    await SecureStore.setItemAsync('latch_passkey_requires_biometric', 'false');
+    await SecureStore.setItemAsync('latch_passkey_kind', 'local');
+
+    const authDigest = new Uint8Array(32).fill(1);
+    await expect(signWithStoredPasskeyAtIndex(0, authDigest, 'latch.finance')).rejects.toThrow(
+      /PASSKEY_CREDENTIAL_MISSING/,
+    );
+
+    // The corrupted pointers are cleared so the next attempt sees "nothing
+    // here" and creates a fresh credential, instead of hitting this same
+    // dead end forever.
+    expect(await SecureStore.getItemAsync('latch_credential_id')).toBeNull();
+    expect(await SecureStore.getItemAsync('latch_key_data_hex')).toBeNull();
+    expect(await SecureStore.getItemAsync('latch_passkey_kind')).toBeNull();
+  });
 });
