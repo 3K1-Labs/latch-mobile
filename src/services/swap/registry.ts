@@ -1,11 +1,13 @@
 import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { aquariusProvider } from './providers/aquarius';
 import { mockSwapProvider } from './providers/mock';
+import { phoenixProvider } from './providers/phoenix';
 import { soroswapProvider } from './providers/soroswap';
 import type { SwapProvider, SwapProviderMeta } from './types';
 
-// Mainnet offers both routes; testnet only has Aquarius (Soroswap has no
-// testnet pools). The FIRST entry is the default and is labelled "Recommend"
+// Mainnet offers Aquarius, Soroswap, and Phoenix routes; testnet only has
+// Aquarius (the Soroban providers have no testnet pools). The FIRST entry is
+// the default and is labelled "Recommend"
 // in the UI.
 //
 // Aquarius leads on mainnet because the Soroswap aggregator produced badly
@@ -31,7 +33,7 @@ const TESTNET_PROVIDER = USE_MOCK ? mockSwapProvider : aquariusProvider;
 function getProviders(): SwapProvider[] {
   return ACTIVE_NETWORK.network === 'TESTNET'
     ? [TESTNET_PROVIDER]
-    : [aquariusProvider, soroswapProvider];
+    : [aquariusProvider, soroswapProvider, phoenixProvider];
 }
 
 export function listSwapProviders(): SwapProviderMeta[] {
