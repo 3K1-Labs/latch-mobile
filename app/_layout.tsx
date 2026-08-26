@@ -24,6 +24,7 @@ import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
+import { LocaleProvider } from '../src/hooks/use-locale';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
 // Wire React Query's online/offline state to the device's actual connectivity.
@@ -131,9 +132,11 @@ export default function RootLayout() {
       <KeyboardProvider>
         <IconRegistry icons={EvaIconsPack} />
         <AppThemeProvider>
-          <QueryClientProvider client={queryClient}>
-            <RootLayoutContent />
-          </QueryClientProvider>
+          <LocaleProvider>
+            <QueryClientProvider client={queryClient}>
+              <RootLayoutContent />
+            </QueryClientProvider>
+          </LocaleProvider>
         </AppThemeProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>
