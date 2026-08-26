@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Networks } from '@stellar/stellar-sdk';
 
 import { ACTIVE_NETWORK_STORAGE_KEY } from './network-storage-key';
+import { normalizePasskeyRpId } from '@/src/lib/passkey-rp-id';
 
 export { ACTIVE_NETWORK_STORAGE_KEY };
 
@@ -89,7 +90,10 @@ export const BASE_RESERVE_MIN_COUNT = 2;
 
 // Relying party ID used when constructing WebAuthn authenticatorData for passkey signing.
 // Must be a stable domain string — the on-chain verifier checks signature math, not this value.
-const PASSKEY_RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'michaelesenwa.me';
+// Normalised to a bare domain: see normalizePasskeyRpId for what a scheme here breaks.
+const PASSKEY_RP_ID = normalizePasskeyRpId(
+  process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'michaelesenwa.me',
+);
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
 // The API key is baked into the bundle (EXPO_PUBLIC_*). Testnet only — move the

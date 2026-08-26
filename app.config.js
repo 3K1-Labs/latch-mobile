@@ -14,7 +14,13 @@ const sentry = env.SENTRY_AUTH_TOKEN;
 // Requires a `.well-known/apple-app-site-association` file with a
 // `webcredentials` entry for this app served from that domain (backend/infra
 // change, outside this repo).
-const passkeyRpId = env.EXPO_PUBLIC_PASSKEY_RP_ID || 'latch.finance';
+// Normalised the same way as normalizePasskeyRpId in
+// src/constants/passkey-rp-id.ts — an RP ID configured as a URL would produce
+// `webcredentials:https://example.com`, which iOS cannot parse.
+const passkeyRpId = (env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://michaelesenwa.me')
+  .trim()
+  .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+  .replace(/\/.*$/, '');
 
 export default {
   expo: {

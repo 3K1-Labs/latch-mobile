@@ -11,12 +11,13 @@
  * or any other passkey provider the user has configured) — the app cannot
  * and should not try to force one over another; see the request shape below.
  *
- * The `create`/`get` request intentionally omits `authenticatorSelection`,
- * `excludeCredentials` transports, and any attachment-forcing call
- * (createPlatformKey/getPlatformKey) so the system passkey chooser is free
- * to offer every provider — forcing `platform` attachment or `internal`
- * transports is what broke Google Password Manager passkeys in the web
- * extension (see reference/latch-web-extension's passkey.ts).
+ * The `create`/`get` request asks for a discoverable credential and nothing
+ * more: no `authenticatorAttachment`, no `excludeCredentials` transports, and
+ * no attachment-forcing call (createPlatformKey/getPlatformKey), so the system
+ * passkey chooser is free to offer every provider — forcing `platform`
+ * attachment or `internal` transports is what broke Google Password Manager
+ * passkeys in the web extension (see reference/latch-web-extension's
+ * passkey.ts).
  *
  * Output shapes (keyDataHex, PasskeySignature) match passkey-webauthn.ts
  * exactly, so deploySmartAccount, encodeWebAuthnSigData, and the on-chain
@@ -24,8 +25,8 @@
  * produce the same signer material.
  */
 
-import { Passkey } from 'react-native-passkey';
 import { p256 } from '@noble/curves/nist.js';
+import { Passkey } from 'react-native-passkey';
 
 import { b64uDecode, b64uEncode } from './base64url';
 import { decodeCBOR } from './cbor';
@@ -52,8 +53,10 @@ function coseEC2PublicKeyToUncompressedHex(coseKeyBytes: Uint8Array): string {
   const crv = decoded.get(-1);
   const x = decoded.get(-2);
   const y = decoded.get(-3);
-  if (kty !== 2) throw new Error(`platform-passkey: unsupported COSE kty ${kty} (expected 2 = EC2)`);
-  if (crv !== 1) throw new Error(`platform-passkey: unsupported COSE crv ${crv} (expected 1 = P-256)`);
+  if (kty !== 2)
+    throw new Error(`platform-passkey: unsupported COSE kty ${kty} (expected 2 = EC2)`);
+  if (crv !== 1)
+    throw new Error(`platform-passkey: unsupported COSE crv ${crv} (expected 1 = P-256)`);
   if (!(x instanceof Uint8Array) || !(y instanceof Uint8Array)) {
     throw new Error('platform-passkey: COSE public key missing x/y coordinates');
   }
@@ -83,17 +86,22 @@ const AT_FLAG = 0x40; // bit 6 of the authData flags byte: "attested credential 
 
 /** Extract the COSE public key bytes embedded in authData's attested credential data. */
 function extractCosePublicKeyFromAuthData(authData: Uint8Array): Uint8Array {
-  if (authData.length < 37) throw new Error('platform-passkey: authData shorter than rpIdHash+flags+signCount');
+  if (authData.length < 37)
+    throw new Error('platform-passkey: authData shorter than rpIdHash+flags+signCount');
   const flags = authData[32];
   if ((flags & AT_FLAG) === 0) {
-    throw new Error('platform-passkey: authData has no attested credential data (registration required)');
+    throw new Error(
+      'platform-passkey: authData has no attested credential data (registration required)',
+    );
   }
   let offset = 37; // rpIdHash(32) + flags(1) + signCount(4)
   offset += 16; // aaguid
-  if (authData.length < offset + 2) throw new Error('platform-passkey: authData truncated before credIdLength');
+  if (authData.length < offset + 2)
+    throw new Error('platform-passkey: authData truncated before credIdLength');
   const credIdLen = (authData[offset] << 8) | authData[offset + 1];
   offset += 2 + credIdLen;
-  if (authData.length <= offset) throw new Error('platform-passkey: authData truncated before credentialPublicKey');
+  if (authData.length <= offset)
+    throw new Error('platform-passkey: authData truncated before credentialPublicKey');
   // credentialPublicKey is CBOR; trailing extension bytes (if any) are not
   // requested by createPlatformPasskeyCredential, so decoding through to the
   // end of the buffer is expected to consume it exactly.
@@ -116,11 +124,14 @@ function spkiToUncompressedHex(spki: Uint8Array): string {
   }
   for (let i = 0; i < P256_SPKI_PREFIX.length; i++) {
     if (spki[i] !== P256_SPKI_PREFIX[i]) {
-      throw new Error('platform-passkey: SPKI header does not match expected P-256/id-ecPublicKey prefix');
+      throw new Error(
+        'platform-passkey: SPKI header does not match expected P-256/id-ecPublicKey prefix',
+      );
     }
   }
   const point = spki.subarray(P256_SPKI_PREFIX.length);
-  if (point[0] !== 0x04) throw new Error('platform-passkey: SPKI point is not uncompressed (expected 0x04)');
+  if (point[0] !== 0x04)
+    throw new Error('platform-passkey: SPKI point is not uncompressed (expected 0x04)');
   return Buffer.from(point).toString('hex');
 }
 
@@ -173,6 +184,18 @@ export async function createPlatformPasskeyCredential(
       id: b64uEncode(params.userId),
       name: params.userName,
       displayName: params.userDisplayName,
+    },
+    // Request a discoverable (resident) credential so the OS stores it and syncs
+    // via Google Password Manager / iCloud Keychain (WebAuthn §5.4.4). This is
+    // what makes sign-in on a second device possible at all: that flow runs
+    // Passkey.get with no allowCredentials, so the provider has to be able to
+    // find the credential from the RP ID alone. requireResidentKey is the
+    // WebAuthn L1 spelling of the same request, still read by some Play
+    // Services versions; userVerification matches the get side.
+    authenticatorSelection: {
+      residentKey: 'required',
+      requireResidentKey: true,
+      userVerification: 'required',
     },
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256 (P-256 + SHA-256)
     attestation: 'none',

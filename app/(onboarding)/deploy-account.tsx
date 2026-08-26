@@ -19,17 +19,10 @@ import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import DeployTimeline, { type DeployStep, type StepStatus } from '@/src/components/deploy/DeployTimeline';
-import {
-  createPasskeyCredential,
-  storePasskeyCredential,
-  storePlatformPasskeyCredentialAtIndex,
-} from '@/src/lib/passkey-webauthn';
-import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
-import { PASSKEY_RP_ID } from '@/src/constants/config';
+import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -38,7 +31,6 @@ import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Image, StyleSheet } from 'react-native';
-import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Stage =
@@ -100,31 +92,13 @@ async function getOrCreatePasskeyCredentials(): Promise<{
   }
 
   // Prefer a real platform passkey (synced via Google Password Manager /
-  // iCloud Keychain) when the OS supports it, matching the biometric setup
-  // screen's provisioning choice — this path only runs as a fallback for
-  // credentials missing at deploy time (direct deep-link, retry after wipe).
-  if (isPlatformPasskeySupported()) {
-    try {
-      const credential = await createPlatformPasskeyCredential({
-        rpId: PASSKEY_RP_ID,
-        rpName: 'Latch',
-        userId: new Uint8Array(QuickCrypto.randomBytes(16)),
-        userName: 'latch-wallet',
-        userDisplayName: 'Latch Wallet',
-        challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
-      });
-      await storePlatformPasskeyCredentialAtIndex(credential, 0);
-      return { credentialId: credential.credentialId, keyDataHex: credential.keyDataHex };
-    } catch (err) {
-      if (__DEV__) console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
-      Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
-    }
-  }
+  // iCloud Keychain), same as the biometric setup screen — this path only runs
+  // as a fallback for credentials missing at deploy time (direct deep-link,
+  // retry after wipe). See provision-passkey.ts.
+  const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric: useBiometric });
+  notifyIfDeviceOnly(provisioned);
 
-  const credential = createPasskeyCredential();
-  await storePasskeyCredential(credential, useBiometric);
-
-  return { credentialId: credential.credentialId, keyDataHex: credential.keyDataHex };
+  return { credentialId: provisioned.credentialId, keyDataHex: provisioned.keyDataHex };
 }
 
 const DeployAccount = () => {
