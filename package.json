@@ -76,6 +76,7 @@
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.6",
     "expo-local-authentication": "~57.0.2",
+    "expo-localization": "^57.0.1",
     "expo-location": "~57.0.10",
     "expo-notifications": "~57.0.11",
     "expo-router": "~57.0.13",
@@ -89,6 +90,7 @@
     "expo-web-browser": "~57.0.2",
     "formik": "^2.4.9",
     "https-browserify": "^0.0.1",
+    "i18n-js": "^4.5.3",
     "jail-monkey": "^3.0.0",
     "lodash.debounce": "^4.0.8",
     "npm": "^11.12.1",
@@ -130,6 +132,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "^0.87.0",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
     "eslint": "^9.25.0",

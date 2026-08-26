@@ -6,6 +6,7 @@ import AddressBookSheet from '@/src/components/profile/AddressBookSheet';
 import BackupSheet from '@/src/components/profile/BackupSheet';
 import DrawerProfileHeader from '@/src/components/profile/DrawerProfileHeader';
 import HelpSupportSheet from '@/src/components/profile/HelpSupportSheet';
+import LanguageSheet from '@/src/components/profile/LanguageSheet';
 import LogoutItem from '@/src/components/profile/LogoutItem';
 import LogoutPromptSheet from '@/src/components/profile/LogoutPromptSheet';
 import NetworkSheet from '@/src/components/profile/NetworkSheet';
@@ -21,6 +22,7 @@ import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
+import { useLocale } from '@/src/hooks/use-locale';
 import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
@@ -40,6 +42,7 @@ const Profile = () => {
   const router = useRouter();
   const { clearAll, accounts, activeAccountIndex, avatars } = useWalletStore();
   const { closeDrawer } = useDrawer();
+  const { t, locale } = useLocale();
   // const { isDark, toggleTheme } = useAppTheme();
   const [accountInfoVisible, setAccountInfoVisible] = useState(false);
   // const [biometricsEnabled, setBiometricsEnabled] = useState(false);
@@ -58,6 +61,7 @@ const Profile = () => {
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [backupVisible, setBackupVisible] = useState(false);
   const [sharedWalletVisible, setSharedWalletVisible] = useState(false);
+  const [languageVisible, setLanguageVisible] = useState(false);
 
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
@@ -161,35 +165,36 @@ const Profile = () => {
           onClose={() => setSharedWalletVisible(false)}
           onNeedsBackup={() => setBackupVisible(true)}
         />
+        <LanguageSheet visible={languageVisible} onClose={() => setLanguageVisible(false)} />
 
         <Box paddingHorizontal="m">
           {/* Account Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Account
+              {t('profile.sections.account')}
             </Text>
             <SettingItem
               icon="person-outline"
-              label="My Profile"
+              label={t('profile.account.myProfile')}
               onPress={() => setAccountInfoVisible(true)}
               image={require('@/src/assets/icon/user.png')}
             />
             <SettingItem
               icon="people-outline"
-              label="My Accounts"
+              label={t('profile.account.myAccounts')}
               onPress={() => setSwitcherVisible(true)}
               image={require('@/src/assets/icon/users.png')}
             />
             <SettingItem
               icon="people-circle-outline"
               image={require('@/src/assets/icon/wallet-customer-group.png')}
-              label="Multisig Wallets"
+              label={t('profile.account.multisigWallets')}
               onPress={() => setSharedWalletVisible(true)}
             />
             {activeAccount.isMultisig && (
               <SettingItem
                 icon="checkmark-done-outline"
-                label="Approve a Request"
+                label={t('profile.account.approveRequest')}
                 onPress={() => {
                   if (activeAccount.isMultisig) {
                     closeDrawer();
@@ -200,13 +205,13 @@ const Profile = () => {
             )}
             <SettingItem
               icon="book-outline"
-              label="Address Book"
+              label={t('profile.account.addressBook')}
               onPress={() => setAddressBookVisible(true)}
             />
             {!isPasskeyAccount && (
               <SettingItem
                 icon="key-outline"
-                label="Recovery Phrase"
+                label={t('profile.account.recoveryPhrase')}
                 onPress={() => setRecoveryVisible(true)}
                 image={require('@/src/assets/icon/key.png')}
               />
@@ -216,7 +221,7 @@ const Profile = () => {
           {/* Security Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Security
+              {t('profile.sections.security')}
             </Text>
             {/* <SettingItem
               icon="finger-print-outline"
@@ -228,18 +233,18 @@ const Profile = () => {
             /> */}
             <SettingItem
               icon="cloud-upload-outline"
-              label="Wallet Backup"
+              label={t('profile.security.walletBackup')}
               onPress={() => setBackupVisible(true)}
             />
             <SettingItem
               icon="keypad-outline"
-              label="Signers"
+              label={t('profile.security.signers')}
               onPress={() => setSignersVisible(true)}
               image={require('@/src/assets/icon/monitor-ipad-mobile.png')}
             />
             <SettingItem
               icon="document-text-outline"
-              label="Permissions"
+              label={t('profile.security.permissions')}
               onPress={() => setPermissionsVisible(true)}
               image={require('@/src/assets/icon/mobile-shield-protection.png')}
             />
@@ -253,7 +258,7 @@ const Profile = () => {
           {/* Preferences Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="m" style={{ marginLeft: 4 }}>
-              Preferences
+              {t('profile.sections.preferences')}
             </Text>
             {/* <SettingItem
               icon={isDark ? 'moon-outline' : 'sunny-outline'}
@@ -263,36 +268,46 @@ const Profile = () => {
             /> */}
             <SettingItem
               icon="globe-outline"
-              label="Network"
-              value={ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network'}
+              label={t('profile.preferences.network')}
+              value={
+                ACTIVE_NETWORK.network === 'TESTNET'
+                  ? t('profile.network.testnet')
+                  : t('profile.network.mainnet')
+              }
               onPress={() => setNetworkVisible(true)}
             />
             <SettingItem
               icon="notifications-outline"
-              label="Notifications"
+              label={t('profile.preferences.notifications')}
               onPress={() => setNotificationsVisible(true)}
+            />
+            <SettingItem
+              icon="language-outline"
+              label={t('profile.preferences.language')}
+              value={t(`languageSheet.languages.${locale}`)}
+              onPress={() => setLanguageVisible(true)}
             />
           </Box>
 
           {/* Support Section */}
           <Box mb="l">
             <Text variant="p7" color="textSecondary" mb="s" style={{ marginLeft: 4 }}>
-              Support
+              {t('profile.sections.support')}
             </Text>
             <SettingItem
               icon="help-circle-outline"
-              label="Help & Support"
+              label={t('profile.support.helpSupport')}
               onPress={() => setHelpSupportVisible(true)}
             />
             <SettingItem
               icon="information-circle-outline"
-              label="About Latch"
+              label={t('profile.support.about')}
               value="v1.0.0"
               onPress={() => setAboutVisible(true)}
             />
             <SettingItem
               icon="document-text-outline"
-              label="Privacy Policy"
+              label={t('profile.support.privacyPolicy')}
               onPress={() => setPrivacyVisible(true)}
             />
           </Box>
