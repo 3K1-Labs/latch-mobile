@@ -2,18 +2,11 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import {
-  createPasskeyCredential,
-  storePasskeyCredential,
-  storePlatformPasskeyCredentialAtIndex,
-} from '@/src/lib/passkey-webauthn';
-import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
-import { PASSKEY_RP_ID } from '@/src/constants/config';
+import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -44,31 +37,12 @@ function hashPin(pin: string): string {
  *
  * Prefers a real platform passkey — synced via Google Password Manager
  * (Android) or iCloud Keychain (iOS), whichever the OS's own passkey sheet
- * offers — over today's SecureStore-only key. Falls back to the local key on
- * any failure (unsupported OS version, user cancels the system sheet, no
- * credential provider available), so setup never dead-ends.
+ * offers — over a SecureStore-only key, and tells the user when it had to
+ * settle for the latter. See provision-passkey.ts.
  */
 async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void> {
-  if (isPlatformPasskeySupported()) {
-    try {
-      const credential = await createPlatformPasskeyCredential({
-        rpId: PASSKEY_RP_ID,
-        rpName: 'Latch',
-        userId: new Uint8Array(QuickCrypto.randomBytes(16)),
-        userName: 'latch-wallet',
-        userDisplayName: 'Latch Wallet',
-        challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
-      });
-      await storePlatformPasskeyCredentialAtIndex(credential, 0);
-      return;
-    } catch (err) {
-      if (__DEV__) console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
-      Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
-    }
-  }
-
-  const credential = createPasskeyCredential();
-  await storePasskeyCredential(credential, requireBiometric);
+  const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric });
+  notifyIfDeviceOnly(provisioned);
 }
 
 const MAX_ATTEMPTS = 5;

@@ -39,12 +39,7 @@ import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signe
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
-import {
-  createPasskeyCredential,
-  storePasskeyCredentialAtIndex,
-  storePlatformPasskeyCredentialAtIndex,
-} from '@/src/lib/passkey-webauthn';
-import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
+import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
   getPasskeyStorageKeys,
@@ -505,43 +500,13 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
         const useBiometric = requiresBiometric !== 'false';
 
         // Prefer a real platform passkey (synced via Google Password Manager /
-        // iCloud Keychain) for this additional account, same as onboarding;
-        // fall back to a local SecureStore-only key on any failure.
-        let credentialId: string;
-        let publicKeyHex: string;
-        let keyDataHex: string;
-        if (isPlatformPasskeySupported()) {
-          try {
-            const platformCredential = await createPlatformPasskeyCredential({
-              rpId: PASSKEY_RP_ID,
-              rpName: 'Latch',
-              userId: new Uint8Array(QuickCrypto.randomBytes(16)),
-              userName: 'latch-wallet',
-              userDisplayName: name || 'Latch Wallet',
-              challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
-            });
-            await storePlatformPasskeyCredentialAtIndex(platformCredential, currentLength);
-            credentialId = platformCredential.credentialId;
-            publicKeyHex = platformCredential.publicKeyHex;
-            keyDataHex = platformCredential.keyDataHex;
-          } catch (err) {
-            if (__DEV__) {
-              console.log('[passkey] platform passkey unavailable, falling back to local key:', err);
-            }
-            Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
-            const localCredential = createPasskeyCredential();
-            await storePasskeyCredentialAtIndex(localCredential, currentLength, useBiometric);
-            credentialId = localCredential.credentialId;
-            publicKeyHex = localCredential.publicKeyHex;
-            keyDataHex = localCredential.publicKeyHex + localCredential.credentialId;
-          }
-        } else {
-          const localCredential = createPasskeyCredential();
-          await storePasskeyCredentialAtIndex(localCredential, currentLength, useBiometric);
-          credentialId = localCredential.credentialId;
-          publicKeyHex = localCredential.publicKeyHex;
-          keyDataHex = localCredential.publicKeyHex + localCredential.credentialId;
-        }
+        // iCloud Keychain) for this additional account, same as onboarding.
+        const provisioned = await provisionPasskeyAtIndex(currentLength, {
+          requireBiometric: useBiometric,
+          displayName: name,
+        });
+        notifyIfDeviceOnly(provisioned);
+        const { credentialId, publicKeyHex, keyDataHex } = provisioned;
 
         newAccount = await addPasskeyAccount(credentialId, publicKeyHex);
 

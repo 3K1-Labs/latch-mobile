@@ -225,9 +225,15 @@ export async function signWithPasskey(
   authenticatorData.set(flags, 32);
   authenticatorData.set(signCount, 33);
 
-  // clientDataJSON: type, challenge (= base64url(authDigest)), origin
+  // clientDataJSON: type, challenge (= base64url(authDigest)), origin.
+  //
+  // origin is the scheme-qualified form of the RP ID — what a browser and the
+  // OS passkey APIs both emit, and what the platform-passkey path (which hands
+  // back the OS's own clientDataJSON) will send for the same account. rpIdHash
+  // above stays the bare host: they are different fields with different rules.
   const challenge = b64uEncode(authDigest);
-  const clientDataJSONStr = JSON.stringify({ type: 'webauthn.get', challenge, origin: rpId });
+  const origin = `https://${rpId}`;
+  const clientDataJSONStr = JSON.stringify({ type: 'webauthn.get', challenge, origin });
   const clientDataJSON = new TextEncoder().encode(clientDataJSONStr);
 
   // Sign SHA256(authenticatorData || SHA256(clientDataJSON)) with P-256

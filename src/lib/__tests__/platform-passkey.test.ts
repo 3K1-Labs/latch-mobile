@@ -187,6 +187,40 @@ describe('createPlatformPasskeyCredential', () => {
     expect(result.publicKeyHex).toBe(expectedUncompressedHex);
   });
 
+  // Sign-in on a second device calls Passkey.get with no allowCredentials, so
+  // the credential has to be discoverable or the provider has nothing to offer.
+  it('asks the provider for a discoverable credential', async () => {
+    const { spkiDer } = generateP256KeyPair();
+    (Passkey.create as jest.Mock).mockResolvedValue({
+      id: b64uEncode(credentialId),
+      rawId: b64uEncode(credentialId),
+      response: {
+        clientDataJSON: b64uEncode('{}'),
+        attestationObject: b64uEncode(new Uint8Array([0xff])),
+        publicKey: b64uEncode(new Uint8Array(spkiDer)),
+      },
+    });
+
+    await createPlatformPasskeyCredential({
+      rpId: 'latch.finance',
+      rpName: 'Latch',
+      userId: new Uint8Array([9, 9]),
+      userName: 'user',
+      userDisplayName: 'User',
+      challenge: new Uint8Array(32),
+    });
+
+    const request = (Passkey.create as jest.Mock).mock.calls[0][0];
+    expect(request.authenticatorSelection).toMatchObject({
+      residentKey: 'required',
+      requireResidentKey: true,
+      userVerification: 'required',
+    });
+    // Attachment must stay unset: pinning it to 'platform' is what stopped
+    // Google Password Manager being offered in the web extension.
+    expect(request.authenticatorSelection.authenticatorAttachment).toBeUndefined();
+  });
+
   it('rejects a COSE key with the wrong curve', async () => {
     const { xBytes, yBytes } = generateP256KeyPair();
     const badCoseKey = cMapIntKeys([
