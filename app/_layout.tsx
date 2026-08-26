@@ -19,6 +19,7 @@ import '../shim';
 import { queryClient } from '../src/api/client';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
+import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
@@ -98,7 +99,9 @@ export default function RootLayout() {
   const [networkReady, setNetworkReady] = useState(false);
 
   useEffect(() => {
-    hydrateActiveNetwork().finally(() => setNetworkReady(true));
+    Promise.all([hydrateActiveNetwork(), hydrateDisplayCurrency()]).finally(() =>
+      setNetworkReady(true),
+    );
   }, []);
 
   const [fontsLoaded] = useFonts({

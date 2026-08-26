@@ -4,6 +4,7 @@ import Text from '@/src/components/shared/Text';
 import { getWellKnownTokens } from '@/src/constants/known-tokens';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { usePrices } from '@/src/hooks/use-prices';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { disconnectSession, getActiveSessions } from '@/src/lib/walletconnect';
 import { useWalletConnectStore } from '@/src/store/walletconnect';
@@ -65,10 +66,10 @@ function formatChange(change: number): string {
   return `${sign}${change.toFixed(2)}%`;
 }
 
-function formatPrice(price: string): string {
+function formatPrice(price: string, formatUsdValue: (usd: number) => { text: string }): string {
   const n = parseFloat(price);
-  if (!isFinite(n)) return '$—';
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  if (!isFinite(n)) return '—';
+  return formatUsdValue(n).text;
 }
 
 interface TokenRowProps {
@@ -83,6 +84,7 @@ interface TokenRowProps {
 function TokenRow({ code, name, issuer, price, change, isDark }: TokenRowProps) {
   const iconUrl = useTokenIcon(code, issuer);
   const isPositive = change >= 0;
+  const { formatUsdValue } = useDisplayFiat();
 
   return (
     <Box
@@ -122,7 +124,7 @@ function TokenRow({ code, name, issuer, price, change, isDark }: TokenRowProps) 
       </Box>
       <Box alignItems="flex-end">
         <Text variant="h10" color="textPrimary">
-          {formatPrice(price)}
+          {formatPrice(price, formatUsdValue)}
         </Text>
         <Text variant="p8" color={isPositive ? 'success700' : 'inputError'}>
           {formatChange(change)}

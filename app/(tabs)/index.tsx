@@ -13,6 +13,7 @@ import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
 import { usePortfolio, type TokenBalance } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
@@ -65,21 +66,19 @@ function TokenRow({
   showBalance,
   isDark,
   theme,
+  fiatLabel,
 }: {
   token: TokenBalance;
   showBalance: boolean;
   isDark: boolean;
   theme: Theme;
+  fiatLabel: string;
 }) {
   const iconUrl = useTokenIcon(token.code, token.issuer);
   const amount = parseFloat(token.amount);
   const formattedAmount = amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: token.code === 'XLM' ? 7 : 2,
-  });
-  const formattedUsd = token.usdValue.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
   });
 
   return (
@@ -120,7 +119,7 @@ function TokenRow({
           {showBalance ? `${formattedAmount} ${token.code}` : '****'}
         </Text>
         <Text variant="p8" color="textSecondary" mt="xs">
-          {showBalance ? `$${formattedUsd}` : '****'}
+          {showBalance ? fiatLabel : '****'}
         </Text>
       </Box>
     </Box>
@@ -282,6 +281,7 @@ const Home = () => {
     refetch: refetchPrices,
     isPlaceholderData: pricesArePlaceholder,
   } = usePrices();
+  const { formatUsdValue, formatToken, usedFallback } = useDisplayFiat();
   // No blocking overlay on either of these. Both render their own section
   // state, so balances are usable while the (far slower) history scan is still
   // running, and a cold start paints the last known values immediately from the
@@ -482,10 +482,7 @@ const Home = () => {
                 : // No figure at all beats a fabricated one: with nothing fetched
                   // and nothing cached, "$0.00" would read as an empty wallet.
                   portfolio
-                  ? `$${totalUsd.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
+                  ? formatUsdValue(totalUsd).text
                   : '—'}
             </Text>
           )}
@@ -531,6 +528,11 @@ const Home = () => {
           {balanceStatus && (
             <Text variant="p8" color="textSecondary" mt="xs">
               {balanceStatus}
+            </Text>
+          )}
+          {usedFallback && showBalance && (
+            <Text variant="p8" color="textSecondary" mt="xs">
+              Showing USD — rate unavailable
             </Text>
           )}
         </Box>
@@ -611,6 +613,7 @@ const Home = () => {
                 <TokenRow
                   key={token.code + (token.issuer ?? '')}
                   token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
+                  fiatLabel={formatToken(token.amount, livePrices[token.code]?.price, { approx: false }).text}
                   showBalance={showBalance}
                   isDark={isDark}
                   theme={theme}

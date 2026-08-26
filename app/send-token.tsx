@@ -15,6 +15,7 @@ import TxAuthModal from '@/src/components/shared/TxAuthModal';
 import { useAddressBook } from '@/src/hooks/use-address-book';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createTransfer } from '@/src/lib/cosign-transport';
@@ -46,6 +47,7 @@ const SendToken = () => {
   const activeAccount = accounts[activeAccountIndex];
   const { tokens: trackedTokens } = useTrackedTokens();
   const { data: prices } = usePrices();
+  const { formatToken } = useDisplayFiat();
   const { entries: addressBookEntries } = useAddressBook();
 
   const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
@@ -390,6 +392,7 @@ const SendToken = () => {
         selectedToken={selectedToken}
         selectedWallet={selectedWallet}
         amount={amount}
+        fiatLabel={formatToken(amount, prices?.[selectedToken.code]?.price).text}
         onKeyPress={handleKeyPress}
         onMaxPress={handleMaxPress}
         onPresetPress={handlePresetUSD}
