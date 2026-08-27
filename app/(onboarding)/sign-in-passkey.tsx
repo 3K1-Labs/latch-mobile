@@ -22,15 +22,22 @@ import { isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
 import { signInToExistingWalletWithPlatformPasskey } from '@/src/lib/wallet-auth';
 import { useWalletStore } from '@/src/store/wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { Keyboard, StyleSheet, TouchableOpacity } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Theme } from '@/src/theme/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
 
 const SignInPasskey = () => {
   const statusBarStyle = useStatusBarStyle();
+  const theme = useTheme<Theme>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { accounts, appendAccount } = useWalletStore();
@@ -41,7 +48,17 @@ const SignInPasskey = () => {
 
   const platformSupported = isPlatformPasskeySupported();
 
+  const handlePaste = async () => {
+    // Trimmed because a copied address routinely carries a trailing newline,
+    // and the field is the one thing the user is asked to get exactly right.
+    const text = (await Clipboard.getStringAsync()).trim();
+    if (!text) return;
+    setAddress(text);
+    setError(null);
+  };
+
   const handleSignIn = async () => {
+    Keyboard.dismiss();
     const trimmed = address.trim();
     if (!trimmed.startsWith('C') || trimmed.length < 20) {
       setError('Enter a valid smart account address (starts with "C").');
@@ -93,18 +110,29 @@ const SignInPasskey = () => {
       />
       <StatusBar style={statusBarStyle} />
 
-      <Box
-        flex={1}
-        paddingHorizontal="m"
-        style={{ paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 24) }}
+      {/* Scrollable content. keyboardShouldPersistTaps="handled" is what makes a
+          tap on empty space dismiss the keyboard while still letting a tap land
+          on the button in one go — same as import-phrase.tsx and collect-email.tsx. */}
+      <KeyboardAwareScrollView
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          paddingHorizontal: theme.spacing.m,
+          paddingTop: insets.top,
+          paddingBottom: 24,
+          flexGrow: 1,
+        }}
+        style={{ flex: 1 }}
+        bottomOffset={16}
       >
         <Box alignItems="center" mb="xxl">
           <Header />
 
-          <Text variant="h7" mt="m" fontSize={30} textAlign="center">
+          <Text variant="h7" mt="s" fontSize={30} textAlign="center">
             Sign In With Passkey
           </Text>
-          <Text variant="p4" color="textSecondary" mt="m" textAlign="center" width="90%">
+          <Text variant="p6" color="textSecondary" mt="xs" textAlign="center" width="95%">
             {platformSupported
               ? "Enter your wallet's address. We'll use the passkey synced to this device's Google Password Manager or iCloud Keychain to verify it's yours."
               : "This device doesn't support synced passkeys, so this option isn't available here."}
@@ -112,42 +140,69 @@ const SignInPasskey = () => {
         </Box>
 
         {platformSupported && (
-          <>
-            <Box mb="l">
-              <Text variant="p7" color="textPrimary" fontWeight="700" mb="xs">
-                Smart Account Address
-              </Text>
-              <Input
-                placeholder="C..."
-                value={address}
-                onChangeText={(t) => {
-                  setAddress(t);
-                  setError(null);
-                }}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                status={error ? 'danger' : 'basic'}
-              />
-              {error && (
-                <Text variant="p7" color="danger900" mt="xs">
-                  {error}
-                </Text>
-              )}
-            </Box>
-
-            <Box flex={1} />
-
-            <Button
-              label="Sign In"
-              variant={address.trim() ? 'primary' : 'disabled'}
-              onPress={handleSignIn}
-              bg={address.trim() ? 'primary700' : 'btnDisabled'}
-              labelColor={address.trim() ? 'black' : 'gray600'}
-              disabled={!address.trim() || isLoading}
+          <Box mb="l">
+            <Text variant="p7" color="textPrimary" fontWeight="700" mb="xs">
+              Smart Account Address
+            </Text>
+            <Input
+              placeholder="C..."
+              value={address}
+              onChangeText={(t) => {
+                setAddress(t);
+                setError(null);
+              }}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              status={error ? 'danger' : 'basic'}
+              rightElement={
+                address.length > 0 ? (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setAddress('');
+                      setError(null);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={20} color={theme.colors.gray600} />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity activeOpacity={0.7} onPress={handlePaste}>
+                    <Box backgroundColor="primary" px="m" py="xs" borderRadius={8}>
+                      <Text variant="p8" color="black" fontWeight="700">
+                        Paste
+                      </Text>
+                    </Box>
+                  </TouchableOpacity>
+                )
+              }
             />
-          </>
+            {error && (
+              <Text variant="p7" color="danger900" mt="xs">
+                {error}
+              </Text>
+            )}
+          </Box>
         )}
-      </Box>
+      </KeyboardAwareScrollView>
+
+      {/* Pinned outside the scroll view so the keyboard never covers it — the
+          old <Box flex={1} /> spacer put it below the fold once the keyboard
+          opened, leaving the address typed but unsubmittable. */}
+      {platformSupported && (
+        <Box
+          paddingHorizontal="m"
+          style={{ paddingBottom: Math.max(insets.bottom, 24), paddingTop: 8 }}
+        >
+          <Button
+            label="Sign In"
+            variant={address.trim() ? 'primary' : 'disabled'}
+            onPress={handleSignIn}
+            bg={address.trim() ? 'primary700' : 'btnDisabled'}
+            labelColor={address.trim() ? 'black' : 'gray600'}
+            disabled={!address.trim() || isLoading}
+          />
+        </Box>
+      )}
 
       <LoadingBlur visible={isLoading} text="Verifying your passkey…" />
     </Box>
