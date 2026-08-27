@@ -159,15 +159,24 @@ export default {
           },
         },
       ],
+      // The plugin is added only when a token is available, so a build without
+      // one skips source-map upload instead of failing on it.
+      //
+      // `authToken` and `url` are deliberately NOT passed here. Passing the
+      // token inline bakes it into the resolved config (the plugin warns:
+      // "Detected unsecure use of 'authToken'"), and setting `url` alongside a
+      // token that sentry-cli reads from the environment makes the two come
+      // from different configuration sources, which makes sentry-cli discard
+      // the URL ("Ignoring a configured URL..."). sentry-cli reads
+      // SENTRY_AUTH_TOKEN from the environment on its own, and defaults to
+      // sentry.io, so both are better left unset.
       ...(sentry
         ? [
             [
               '@sentry/react-native/expo',
               {
-                url: 'https://sentry.io/',
-                authToken: sentry,
                 project: 'latch-mobile',
-                organization: 'latch',
+                organization: 'latch-ha',
               },
             ],
           ]
