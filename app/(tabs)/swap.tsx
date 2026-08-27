@@ -340,12 +340,17 @@ const Swap = () => {
   const toAmount = quote?.amountOut ?? '0.00';
   const toValue = formatToken(quote?.amountOut ?? '0', prices?.[toToken?.code ?? '']?.price).text;
 
-  const fromUsdPrice = parseFloat(prices?.[fromToken?.code ?? '']?.price ?? '0');
+  const fromUsdPrice = parseFloat(prices?.[fromToken?.code ?? '']?.price ?? '');
+  // An unpriced token falls back to the token-denominated rate rather than
+  // claiming it is worth $0.00.
+  const usdRateLabel =
+    fromToken && fromUsdPrice > 0
+      ? `1 ${fromToken.code} ≈ ${formatUsdValue(fromUsdPrice, { approx: true }).text.replace(/^≈/, '')}`
+      : null;
   const rateLabel =
     quote && fromToken && toToken
-      ? showUsdRate
-        ? `1 ${fromToken.code} ≈ ${formatUsdValue(fromUsdPrice, { approx: true }).text.replace(/^≈/, '')}`
-        : `1 ${fromToken.code} ≈ ${quote.rate.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${toToken.code}`
+      ? ((showUsdRate ? usdRateLabel : null) ??
+        `1 ${fromToken.code} ≈ ${quote.rate.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${toToken.code}`)
       : '—';
 
   return (

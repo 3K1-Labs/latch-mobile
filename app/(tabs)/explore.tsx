@@ -9,6 +9,7 @@ import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { disconnectSession, getActiveSessions } from '@/src/lib/walletconnect';
 import { useWalletConnectStore } from '@/src/store/walletconnect';
 import { Theme } from '@/src/theme/theme';
+import { UNPRICED_LABEL } from '@/src/utils/format-fiat';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
@@ -66,9 +67,12 @@ function formatChange(change: number): string {
   return `${sign}${change.toFixed(2)}%`;
 }
 
-function formatPrice(price: string, formatUsdValue: (usd: number) => { text: string }): string {
-  const n = parseFloat(price);
-  if (!isFinite(n)) return '—';
+function formatPrice(
+  price: string | undefined,
+  formatUsdValue: (usd: number) => { text: string },
+): string {
+  const n = parseFloat(price ?? '');
+  if (!isFinite(n)) return UNPRICED_LABEL;
   return formatUsdValue(n).text;
 }
 
@@ -76,14 +80,15 @@ interface TokenRowProps {
   code: string;
   name: string;
   issuer?: string;
-  price: string;
-  change: number;
+  /** Undefined when the token has no quote — the row shows UNPRICED_LABEL. */
+  price?: string;
+  change?: number;
   isDark: boolean;
 }
 
 function TokenRow({ code, name, issuer, price, change, isDark }: TokenRowProps) {
   const iconUrl = useTokenIcon(code, issuer);
-  const isPositive = change >= 0;
+  const isPositive = (change ?? 0) >= 0;
   const { formatUsdValue } = useDisplayFiat();
 
   return (
@@ -126,9 +131,11 @@ function TokenRow({ code, name, issuer, price, change, isDark }: TokenRowProps) 
         <Text variant="h10" color="textPrimary">
           {formatPrice(price, formatUsdValue)}
         </Text>
-        <Text variant="p8" color={isPositive ? 'success700' : 'inputError'}>
-          {formatChange(change)}
-        </Text>
+        {change != null && (
+          <Text variant="p8" color={isPositive ? 'success700' : 'inputError'}>
+            {formatChange(change)}
+          </Text>
+        )}
       </Box>
     </Box>
   );
@@ -239,8 +246,8 @@ const Explore = () => {
         code,
         name: config?.name ?? code,
         issuer: config?.issuer,
-        price: priceData?.price ?? '0',
-        change: priceData?.change_24h ?? 0,
+        price: priceData?.price,
+        change: priceData?.change_24h,
       };
     });
   }, [prices]);
