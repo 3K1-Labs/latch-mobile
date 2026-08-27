@@ -23,6 +23,7 @@
  */
 
 import * as Sentry from '@sentry/react-native';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { Alert } from 'react-native';
 import QuickCrypto from 'react-native-quick-crypto';
 
@@ -47,6 +48,14 @@ export interface ProvisionedPasskey {
    * `kind === 'local'` and a platform passkey was actually attempted.
    */
   deviceOnlyReason?: string;
+  /**
+   * How a local key is actually protected. 'keystore' = bound to a Class 3
+   * biometric by the OS; 'app' = stored ungated because the device has no
+   * Class 3 biometric, with LocalAuthentication guarding access instead;
+   * 'none' = the caller did not ask for a biometric gate. Undefined on the
+   * platform path, where the OS ceremony owns user verification.
+   */
+  biometricGate?: 'keystore' | 'app' | 'none';
 }
 
 export interface ProvisionPasskeyOptions {
@@ -82,6 +91,45 @@ export function describePasskeyFailure(err: unknown): string {
 }
 
 /**
+ * Whether the OS can bind a stored key to a biometric.
+ *
+ * expo-secure-store's `requireAuthentication` maps to Android Keystore's
+ * setUserAuthenticationRequired, and expo gates that on BIOMETRIC_STRONG
+ * (AuthenticationHelper.kt: canAuthenticate(BIOMETRIC_STRONG)). A device whose
+ * only biometric is Class 2 — face unlock on a Galaxy A05, say — throws
+ * ERROR_NO_HARDWARE there rather than degrading, which turned the device-only
+ * fallback into a dead end and surfaced as a bare "Setup Failed". iOS has no
+ * Class 2 tier, so this only ever bit Android.
+ *
+ * Class 2 devices are still supported: the key is stored without the Keystore
+ * gate and the biometric check happens at the app level instead, via
+ * LocalAuthentication.authenticateAsync, which accepts Class 2 by default.
+ * That is a real difference in strength — an app-level prompt is not
+ * hardware-enforced the way a Keystore-bound key is — so it is recorded in
+ * `biometricGate` and said out loud by notifyIfWeakBiometricGate, never
+ * silently downgraded.
+ */
+async function hasStrongBiometrics(): Promise<boolean> {
+  try {
+    return (
+      (await LocalAuthentication.getEnrolledLevelAsync()) ===
+      LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG
+    );
+  } catch {
+    // Never let a capability probe be the thing that fails provisioning.
+    return false;
+  }
+}
+
+/** Which protection a local key can actually get on this device. */
+async function resolveBiometricGate(
+  requireBiometric: boolean,
+): Promise<'keystore' | 'app' | 'none'> {
+  if (!requireBiometric) return 'none';
+  return (await hasStrongBiometrics()) ? 'keystore' : 'app';
+}
+
+/**
  * Create and store the passkey credential for an account list index, preferring
  * a real platform passkey and falling back to a local key.
  *
@@ -112,25 +160,29 @@ export async function provisionPasskeyAtIndex(
       Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
 
       const local = createPasskeyCredential();
-      await storePasskeyCredentialAtIndex(local, listIndex, options.requireBiometric);
+      const gate = await resolveBiometricGate(options.requireBiometric);
+      await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
       return {
         credentialId: local.credentialId,
         publicKeyHex: local.publicKeyHex,
         keyDataHex: local.publicKeyHex + local.credentialId,
         kind: 'local',
         deviceOnlyReason,
+        biometricGate: gate,
       };
     }
   }
 
   const local = createPasskeyCredential();
-  await storePasskeyCredentialAtIndex(local, listIndex, options.requireBiometric);
+  const gate = await resolveBiometricGate(options.requireBiometric);
+  await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
   return {
     credentialId: local.credentialId,
     publicKeyHex: local.publicKeyHex,
     keyDataHex: local.publicKeyHex + local.credentialId,
     kind: 'local',
     deviceOnlyReason: 'this device does not support passkeys',
+    biometricGate: gate,
   };
 }
 
@@ -138,6 +190,24 @@ export async function provisionPasskeyAtIndex(
  * Tell the user their wallet is backed by a device-only key. No-op for a
  * platform passkey, which is the case that needs no explanation.
  */
+/**
+ * Tell the user their biometric gate is app-level, not hardware-bound.
+ *
+ * Separate from notifyIfDeviceOnly because it is a different fact about a
+ * different layer: a wallet can be device-only AND keystore-gated, or synced
+ * AND irrelevant here. Saying nothing would let someone believe their key is
+ * hardware-protected when the device cannot do that.
+ */
+export function notifyIfWeakBiometricGate(result: ProvisionedPasskey): void {
+  if (result.biometricGate !== 'app') return;
+  Alert.alert(
+    'Biometrics protected by the app',
+    "This device's biometric hardware isn't strong enough (Class 2) for Android to bind your wallet key to it. " +
+      'Latch will still ask for your biometric before unlocking, but the check happens in the app rather than in secure hardware.\n\n' +
+      'Your PIN remains the fallback. Keep your recovery options up to date.',
+  );
+}
+
 export function notifyIfDeviceOnly(result: ProvisionedPasskey): void {
   if (result.kind === 'platform') return;
   Alert.alert(

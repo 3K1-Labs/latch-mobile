@@ -39,7 +39,11 @@ import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signe
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
-import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
+import {
+  notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
+  provisionPasskeyAtIndex,
+} from '@/src/lib/provision-passkey';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
   getPasskeyStorageKeys,
@@ -506,6 +510,7 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
           displayName: name,
         });
         notifyIfDeviceOnly(provisioned);
+        notifyIfWeakBiometricGate(provisioned);
         const { credentialId, publicKeyHex, keyDataHex } = provisioned;
 
         newAccount = await addPasskeyAccount(credentialId, publicKeyHex);

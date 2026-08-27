@@ -12,6 +12,7 @@ import { Passkey } from 'react-native-passkey';
 import {
   describePasskeyFailure,
   notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
   provisionPasskeyAtIndex,
 } from '../provision-passkey';
 
@@ -30,6 +31,16 @@ jest.mock('react-native-quick-crypto', () => ({
 }));
 
 jest.mock('@sentry/react-native', () => ({ captureException: jest.fn() }));
+
+// Class 3 by default; individual tests drop it to Class 2 to exercise the
+// Android path where Keystore cannot bind a key to a weak biometric.
+jest.mock('expo-local-authentication', () => ({
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(3)),
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const localAuth = require('expo-local-authentication');
 
 jest.mock('@/src/constants/config', () => ({ PASSKEY_RP_ID: 'latch.finance' }));
 
@@ -71,6 +82,7 @@ describe('provisionPasskeyAtIndex', () => {
     delete stored.local;
     delete stored.platform;
     (platformModule.isPlatformPasskeySupported as jest.Mock).mockReturnValue(true);
+    (localAuth.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(localAuth.SecurityLevel.BIOMETRIC_STRONG);
     jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -143,5 +155,93 @@ describe('notifyIfDeviceOnly', () => {
     expect(body).toContain('the system passkey sheet was dismissed');
     expect(body).toContain('iCloud Keychain');
     expect(body).toContain('Google Password Manager');
+  });
+});
+
+/**
+ * Class 2 (weak) biometrics — the Android-only case that made setup dead-end.
+ *
+ * expo-secure-store gates requireAuthentication on BIOMETRIC_STRONG, so asking
+ * for it on a device whose only biometric is Class 2 throws ERROR_NO_HARDWARE
+ * instead of degrading. The fallback that was supposed to rescue a failed
+ * platform ceremony was itself the thing that threw, and the caller reported a
+ * bare "Setup Failed" with the cause discarded.
+ */
+describe('biometric gate selection', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete stored.local;
+    delete stored.platform;
+    (platformModule.isPlatformPasskeySupported as jest.Mock).mockReturnValue(true);
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockRejectedValue({
+      error: 'NoCreateOption',
+    });
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('binds the key to the Keystore when a Class 3 biometric is enrolled', async () => {
+    (localAuth.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(
+      localAuth.SecurityLevel.BIOMETRIC_STRONG,
+    );
+
+    const result = await provisionPasskeyAtIndex(0, { requireBiometric: true });
+
+    expect(result.biometricGate).toBe('keystore');
+    expect(stored.local).toMatchObject({ requireBiometric: true });
+  });
+
+  it('stores without the Keystore gate on a Class 2-only device instead of throwing', async () => {
+    (localAuth.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(
+      localAuth.SecurityLevel.BIOMETRIC_WEAK,
+    );
+
+    const result = await provisionPasskeyAtIndex(0, { requireBiometric: true });
+
+    expect(result.biometricGate).toBe('app');
+    // The regression: requireBiometric must NOT reach expo-secure-store here,
+    // or it throws ERROR_NO_HARDWARE and provisioning dead-ends.
+    expect(stored.local).toMatchObject({ requireBiometric: false });
+  });
+
+  it('reports gate=none when the caller never asked for a biometric', async () => {
+    const result = await provisionPasskeyAtIndex(0, { requireBiometric: false });
+
+    expect(result.biometricGate).toBe('none');
+    expect(stored.local).toMatchObject({ requireBiometric: false });
+  });
+
+  it('survives a capability probe that throws, without gating on Keystore', async () => {
+    (localAuth.getEnrolledLevelAsync as jest.Mock).mockRejectedValue(new Error('probe blew up'));
+
+    const result = await provisionPasskeyAtIndex(0, { requireBiometric: true });
+
+    expect(result.biometricGate).toBe('app');
+    expect(stored.local).toMatchObject({ requireBiometric: false });
+  });
+});
+
+describe('notifyIfWeakBiometricGate', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('warns only when the gate fell back to the app level', () => {
+    notifyIfWeakBiometricGate({
+      credentialId: 'a',
+      publicKeyHex: 'b',
+      keyDataHex: 'ab',
+      kind: 'local',
+      biometricGate: 'app',
+    });
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet for a Keystore-bound key', () => {
+    notifyIfWeakBiometricGate({
+      credentialId: 'a',
+      publicKeyHex: 'b',
+      keyDataHex: 'ab',
+      kind: 'local',
+      biometricGate: 'keystore',
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,11 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
+import {
+  notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
+  provisionPasskeyAtIndex,
+} from '@/src/lib/provision-passkey';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,6 +47,7 @@ function hashPin(pin: string): string {
 async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void> {
   const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric });
   notifyIfDeviceOnly(provisioned);
+  notifyIfWeakBiometricGate(provisioned);
 }
 
 const MAX_ATTEMPTS = 5;
@@ -335,8 +340,13 @@ const Biometrics = () => {
       router.replace(
         from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
       );
-    } catch {
-      Alert.alert('Setup Failed', 'Could not save your biometric credential. Please try again.', [
+    } catch (err) {
+      // Bound, not discarded. This catch used to swallow the error whole, so a
+      // Class 2-only device produced a bare "try again" with no trace anywhere:
+      // metro strips console.* from release builds and EXPO_PUBLIC_SENTRY_DSN
+      // is unset, so Sentry.init is a no-op. The message is the diagnosis.
+      const reason = err instanceof Error ? err.message : String(err);
+      Alert.alert('Setup Failed', `Could not save your biometric credential.\n\n${reason}`, [
         { text: 'OK' },
       ]);
     } finally {

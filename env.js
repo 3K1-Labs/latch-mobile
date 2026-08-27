@@ -185,7 +185,39 @@ const trimmed = Object.fromEntries(
   ]),
 );
 
-const parsed = envSchema.safeParse(trimmed);
+/**
+ * A release build with no Sentry DSN reports nothing, anywhere.
+ *
+ * Metro strips every `console.*` from a non-dev bundle (drop_console in
+ * metro.config.js) and app/_layout.tsx only calls Sentry.init when a DSN is
+ * present, so a build made without one has no diagnostic channel at all — a
+ * crash on a user's device leaves no trace in logcat, in Xcode, or in Sentry.
+ * That is exactly how a passkey provisioning failure reached a device and
+ * produced nothing but "Setup Failed" with the cause discarded.
+ *
+ * Absent for a development build is fine and expected; absent for anything
+ * that ships is a build that cannot be debugged, so fail here rather than
+ * discover it after the fact.
+ */
+const requiresErrorReporting = (env) => {
+  const appEnv = env.EXPO_PUBLIC_APP_ENV;
+  return typeof appEnv === 'string' && appEnv !== '' && appEnv !== 'development';
+};
+
+const envSchemaChecked = envSchema.superRefine((env, ctx) => {
+  if (requiresErrorReporting(env) && !env.EXPO_PUBLIC_SENTRY_DSN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['EXPO_PUBLIC_SENTRY_DSN'],
+      message:
+        `required when EXPO_PUBLIC_APP_ENV is "${env.EXPO_PUBLIC_APP_ENV}" — a shipped build ` +
+        'without it reports no errors at all (console.* is stripped and Sentry.init is skipped). ' +
+        'Set it, or set EXPO_PUBLIC_APP_ENV=development for a local build.',
+    });
+  }
+});
+
+const parsed = envSchemaChecked.safeParse(trimmed);
 
 const result =
   parsed.success || !isConfigResolutionPass ? parsed : configResolutionSchema.safeParse(trimmed);

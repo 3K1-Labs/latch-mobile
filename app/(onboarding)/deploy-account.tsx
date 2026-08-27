@@ -19,7 +19,11 @@ import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import DeployTimeline, { type DeployStep, type StepStatus } from '@/src/components/deploy/DeployTimeline';
-import { notifyIfDeviceOnly, provisionPasskeyAtIndex } from '@/src/lib/provision-passkey';
+import {
+  notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
+  provisionPasskeyAtIndex,
+} from '@/src/lib/provision-passkey';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -97,6 +101,7 @@ async function getOrCreatePasskeyCredentials(): Promise<{
   // retry after wipe). See provision-passkey.ts.
   const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric: useBiometric });
   notifyIfDeviceOnly(provisioned);
+  notifyIfWeakBiometricGate(provisioned);
 
   return { credentialId: provisioned.credentialId, keyDataHex: provisioned.keyDataHex };
 }
