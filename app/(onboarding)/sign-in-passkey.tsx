@@ -13,6 +13,7 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
+import Header from '@/src/components/shared/Header';
 import Input from '@/src/components/shared/Input';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
@@ -98,7 +99,9 @@ const SignInPasskey = () => {
         style={{ paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 24) }}
       >
         <Box alignItems="center" mb="xxl">
-          <Text variant="h7" fontSize={30} textAlign="center">
+          <Header />
+
+          <Text variant="h7" mt="m" fontSize={30} textAlign="center">
             Sign In With Passkey
           </Text>
           <Text variant="p4" color="textSecondary" mt="m" textAlign="center" width="90%">

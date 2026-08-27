@@ -2,7 +2,7 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { useTheme } from '@shopify/restyle';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -100,10 +100,10 @@ const GetStarted = () => {
         <Box alignItems="center" mb="xxl">
           <Header />
 
-          <Text variant="h7" mt="m" fontSize={32} textAlign="center">
+          <Text variant="h7" mt="xs" fontSize={32} textAlign="center">
             I Have A Wallet
           </Text>
-          <Text variant="p4" color="textSecondary" mt="xs" textAlign="center" width={'85%'}>
+          <Text variant="p5" color="textSecondary" mt="xs" textAlign="center" width={'85%'}>
             Import the wallet you already have or connect an existing stellar wallet.
           </Text>
         </Box>
@@ -118,9 +118,9 @@ const GetStarted = () => {
             >
               <Box
                 flexDirection="row"
-                alignItems="flex-start"
+                alignItems="center"
                 gap="m"
-                padding="m"
+                paddingHorizontal="m"
                 height={90}
                 borderRadius={16}
                 borderWidth={2}
@@ -133,7 +133,7 @@ const GetStarted = () => {
                 }
                 backgroundColor="mainBackground"
               >
-                <Box flex={1} mt="s">
+                <Box flex={1}>
                   <Text variant="h10" color="textPrimary" fontWeight="bold">
                     {option.title}
                   </Text>
