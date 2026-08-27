@@ -85,7 +85,13 @@ export function describePasskeyFailure(err: unknown): string {
       return 'the system passkey sheet timed out';
     default: {
       const message = (err as { message?: string })?.message;
-      return message ? message : 'the system passkey sheet did not complete';
+      if (!message) return 'the system passkey sheet did not complete';
+      // These read as "…because <reason>." so a native message — capitalised
+      // and full-stopped as its own sentence — has to be folded back into the
+      // middle of one, or the user sees "because The operation couldn't be
+      // completed.." See notifyIfDeviceOnly.
+      const trimmed = message.trim().replace(/\.+$/, '');
+      return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
     }
   }
 }

@@ -102,10 +102,21 @@ export default {
       // ScannerFrame, ScanQRSheet and pair-show-qr, with no recordAsync and no
       // video mode anywhere — so a microphone permission on a wallet is dead
       // weight that reviewers and users both have to wonder about.
+      //
+      // READ_MEDIA_IMAGES comes from expo-screen-capture, not the image picker.
+      // Its manifest declares the screenshot-DETECTION permissions
+      // (READ_MEDIA_IMAGES on API 33, DETECT_SCREEN_CAPTURE on 34+), but
+      // use-secure-screen.ts only calls preventScreenCaptureAsync /
+      // allowScreenCaptureAsync, which need no permission. It is a photo
+      // permission, so leaving it merges it into the AAB from the AAR at Gradle
+      // time and Play rejects the submission — which is precisely what happened
+      // after the first pass here blocked only the storage permissions.
       blockedPermissions: [
         'android.permission.READ_EXTERNAL_STORAGE',
         'android.permission.WRITE_EXTERNAL_STORAGE',
         'android.permission.RECORD_AUDIO',
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
       ],
     },
     web: {

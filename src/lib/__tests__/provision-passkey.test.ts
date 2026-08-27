@@ -245,3 +245,20 @@ describe('notifyIfWeakBiometricGate', () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 });
+
+describe('describePasskeyFailure sentence folding', () => {
+  it('lowercases and de-punctuates a native message so it reads mid-sentence', () => {
+    const reason = describePasskeyFailure({
+      message: 'The operation couldn’t be completed. Application is not associated with domain.',
+    });
+    expect(reason).toBe(
+      'the operation couldn’t be completed. Application is not associated with domain',
+    );
+  });
+
+  it('leaves the mapped codes alone', () => {
+    expect(describePasskeyFailure({ error: 'UserCancelled' })).toBe(
+      'the system passkey sheet was dismissed',
+    );
+  });
+});
