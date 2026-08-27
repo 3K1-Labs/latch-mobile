@@ -93,7 +93,7 @@ function RootLayoutContent() {
   );
 }
 
-export default function RootLayout() {
+export default Sentry.wrap(function RootLayout() {
   // Gates rendering until the persisted network choice is applied, so no query
   // or screen reads a network-derived value while it's still the default.
   const [networkReady, setNetworkReady] = useState(false);
@@ -141,4 +141,4 @@ export default function RootLayout() {
       </KeyboardProvider>
     </GestureHandlerRootView>
   );
-}
+});

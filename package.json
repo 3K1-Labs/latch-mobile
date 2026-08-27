@@ -40,7 +40,7 @@
     "@react-navigation/native": "^7.1.33",
     "@reown/walletkit": "^1.5.5",
     "@scure/bip39": "^2.2.0",
-    "@sentry/react-native": "^8.13.0",
+    "@sentry/react-native": "^8.24.0",
     "@shopify/react-native-skia": "^2.6.2",
     "@shopify/restyle": "^2.4.5",
     "@stellar/freighter-api": "^6.0.1",

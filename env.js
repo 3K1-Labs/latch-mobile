@@ -199,22 +199,43 @@ const trimmed = Object.fromEntries(
  * that ships is a build that cannot be debugged, so fail here rather than
  * discover it after the fact.
  */
-const requiresErrorReporting = (env) => {
-  const appEnv = env.EXPO_PUBLIC_APP_ENV;
-  return typeof appEnv === 'string' && appEnv !== '' && appEnv !== 'development';
-};
+/**
+ * Only a build that actually ships is worth failing over.
+ *
+ * Keying this off EXPO_PUBLIC_APP_ENV alone was wrong: a local .env routinely
+ * carries APP_ENV=production while running `expo start` or `run:android`, so
+ * it broke ordinary local work over a variable that only matters for an
+ * artifact someone else will run. EAS and CI set these; a laptop does not.
+ */
+const isShippingBuild =
+  process.env.EAS_BUILD === 'true' || process.env.CI === 'true' || process.env.CI === '1';
+
+const missingErrorReporting = (env) =>
+  !env.EXPO_PUBLIC_SENTRY_DSN &&
+  typeof env.EXPO_PUBLIC_APP_ENV === 'string' &&
+  env.EXPO_PUBLIC_APP_ENV !== '' &&
+  env.EXPO_PUBLIC_APP_ENV !== 'development';
 
 const envSchemaChecked = envSchema.superRefine((env, ctx) => {
-  if (requiresErrorReporting(env) && !env.EXPO_PUBLIC_SENTRY_DSN) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['EXPO_PUBLIC_SENTRY_DSN'],
-      message:
-        `required when EXPO_PUBLIC_APP_ENV is "${env.EXPO_PUBLIC_APP_ENV}" — a shipped build ` +
-        'without it reports no errors at all (console.* is stripped and Sentry.init is skipped). ' +
-        'Set it, or set EXPO_PUBLIC_APP_ENV=development for a local build.',
-    });
+  if (!missingErrorReporting(env)) return;
+  if (!isShippingBuild) {
+    // Local build: say it once, loudly, and carry on. Blocking here helps
+    // nobody — the bundle stays on this machine.
+    console.warn(
+      '\n[env] EXPO_PUBLIC_SENTRY_DSN is not set. This build reports no errors: ' +
+        'metro strips console.* and Sentry.init is skipped without a DSN. ' +
+        'Fine locally; a release build will fail until it is set.\n',
+    );
+    return;
   }
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['EXPO_PUBLIC_SENTRY_DSN'],
+    message:
+      `required for a release build (EXPO_PUBLIC_APP_ENV="${env.EXPO_PUBLIC_APP_ENV}") — a ` +
+      'shipped build without it reports no errors at all (console.* is stripped and ' +
+      'Sentry.init is skipped), leaving a crash on a user device with no trace anywhere.',
+  });
 });
 
 const parsed = envSchemaChecked.safeParse(trimmed);
