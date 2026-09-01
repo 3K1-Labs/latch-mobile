@@ -9,6 +9,7 @@
  */
 
 import { Address, xdr } from '@stellar/stellar-sdk';
+import * as Sentry from '@sentry/react-native';
 
 import { ledgerKeyToBase64, sorobanCall } from '@/src/api/smart-account';
 import { MAINNET_NETWORK, TESTNET_NETWORK, getNetworkId } from '@/src/constants/config';
@@ -40,12 +41,36 @@ async function isDeployedOn(network: NetworkId, address: string): Promise<boolea
 export async function findDeployedNetwork(address: string): Promise<NetworkId | null> {
   const active = getNetworkId();
   const order: NetworkId[] = active === 'testnet' ? ['testnet', 'mainnet'] : ['mainnet', 'testnet'];
+  const probeErrors: Record<string, string> = {};
   for (const network of order) {
     try {
       if (await isDeployedOn(network, address)) return network;
-    } catch {
+    } catch (err) {
       // Probe failed (RPC down, device offline) — try the other, then give up.
+      // Recorded so a caller reporting "not deployed" can be told when the real
+      // cause was an unreachable RPC. This is the difference between an iOS build
+      // that works and an Android build that doesn't hit the Soroban endpoint.
+      probeErrors[network] = err instanceof Error ? err.message : String(err);
     }
   }
+  // The resolved URLs (env value or the baked-in default) — this is what the
+  // build actually calls, which is the thing that differs between platforms.
+  const rpcUrls = {
+    testnet: TESTNET_NETWORK.sorobanRpcUrl,
+    mainnet: MAINNET_NETWORK.sorobanRpcUrl,
+  };
+  const allProbesThrew = order.every((n) => n in probeErrors);
+  console.warn('[account-network] findDeployedNetwork found nothing', {
+    address,
+    order,
+    probeErrors,
+    rpcUrls,
+    allProbesThrew,
+  });
+  Sentry.captureMessage('findDeployedNetwork: no deployed network', {
+    level: allProbesThrew ? 'error' : 'warning',
+    tags: { allProbesThrew: String(allProbesThrew) },
+    extra: { address, order, probeErrors, rpcUrls },
+  });
   return null;
 }
