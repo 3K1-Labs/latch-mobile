@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Networks } from '@stellar/stellar-sdk';
 
-import { ACTIVE_NETWORK_STORAGE_KEY } from './network-storage-key';
 import { normalizePasskeyRpId } from '@/src/lib/passkey-rp-id';
+import { ACTIVE_NETWORK_STORAGE_KEY } from './network-storage-key';
 
 export { ACTIVE_NETWORK_STORAGE_KEY };
 
@@ -36,7 +36,8 @@ export const TESTNET_NETWORK: NetworkDetails = {
   networkName: 'Test Net',
   horizonUrl: 'https://horizon-testnet.stellar.org',
   networkPassphrase: Networks.TESTNET,
-  sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
+  sorobanRpcUrl:
+    process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://rpc.ankr.com/stellar_testnet_soroban',
   friendbotUrl: 'https://friendbot.stellar.org',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
 };
@@ -46,7 +47,8 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkName: 'Main Net',
   horizonUrl: 'https://horizon.stellar.org',
   networkPassphrase: Networks.PUBLIC,
-  sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
+  sorobanRpcUrl:
+    process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
 };
 

@@ -29,12 +29,8 @@ import {
   Vibration,
   View,
 } from 'react-native';
-import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-function hashPin(pin: string): string {
-  return QuickCrypto.createHash('sha256').update(pin).digest('hex') as unknown as string;
-}
+import { hashPin } from '@/src/lib/hash-pin';
 
 /**
  * Provision the primary passkey credential (account list index 0).
