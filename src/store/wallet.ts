@@ -27,6 +27,15 @@ export const SECURE_KEYS = {
   // Password Manager / iCloud Keychain, no local private key); absent or
   // 'local' for today's SecureStore-only P-256 key. See platform-passkey.ts.
   PASSKEY_KIND: 'latch_passkey_kind',
+  // The relying party ID the credential in this slot was created under.
+  //
+  // A platform passkey is scoped to its RP: the OS locates it by RP ID, so
+  // changing EXPO_PUBLIC_PASSKEY_RP_ID orphans every credential minted under
+  // the old one. Credential Manager then simply reports no match, which
+  // surfaces as a generic ceremony failure naming nothing — the app asks for a
+  // nonce, signs nothing, and never reaches the deploy call. Recording the RP
+  // makes that detectable instead of a silent dead end.
+  PASSKEY_RP_ID: 'latch_passkey_rp_id',
   // Fingerprint of the keyDataHex used when the smart account was last deployed.
   // If this differs from the current KEY_DATA_HEX, the account must be re-deployed.
   DEPLOYED_KEY_DATA: 'latch_deployed_key_data',
@@ -165,6 +174,7 @@ export function getPasskeyStorageKeys(listIndex: number): {
   privateKey: string;
   requiresBiometric: string;
   kind: string;
+  rpId: string;
 } {
   if (listIndex === 0) {
     return {
@@ -173,6 +183,7 @@ export function getPasskeyStorageKeys(listIndex: number): {
       privateKey: SECURE_KEYS.PASSKEY_PRIVATE_KEY,
       requiresBiometric: SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
       kind: SECURE_KEYS.PASSKEY_KIND,
+      rpId: SECURE_KEYS.PASSKEY_RP_ID,
     };
   }
   return {
@@ -181,6 +192,7 @@ export function getPasskeyStorageKeys(listIndex: number): {
     privateKey: `latch_passkey_private_key_${listIndex}`,
     requiresBiometric: `latch_passkey_requires_biometric_${listIndex}`,
     kind: `latch_passkey_kind_${listIndex}`,
+    rpId: `latch_passkey_rp_id_${listIndex}`,
   };
 }
 
@@ -822,6 +834,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           SecureStore.deleteItemAsync(keys.privateKey),
           SecureStore.deleteItemAsync(keys.requiresBiometric),
           SecureStore.deleteItemAsync(keys.kind),
+          SecureStore.deleteItemAsync(keys.rpId),
         ];
       });
 

@@ -8,6 +8,8 @@
  * this screen reads it from there — no route params needed.
  */
 
+import * as Sentry from '@sentry/react-native';
+
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { logout, uploadBackup } from '@/src/api/latch-auth';
 import { deploySmartAccount as deploySmartAccountPasskey } from '@/src/api/passkey';
@@ -24,6 +26,7 @@ import {
   notifyIfWeakBiometricGate,
   provisionPasskeyAtIndex,
 } from '@/src/lib/provision-passkey';
+import { getNetworkId } from '@/src/constants/config';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -270,6 +273,20 @@ const DeployAccount = () => {
         }
       } catch (err: any) {
         __DEV__ && console.log(err);
+        // This catch is where a deployment failure stops — it is shown to the
+        // user and goes no further, so without a capture here the whole flow is
+        // invisible in Sentry. `stage` is the useful part: it separates a failed
+        // passkey ceremony ('auth') from a failed deploy call ('deploying'),
+        // which are different bugs with the same message on screen.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err?.message ?? err)), {
+          tags: {
+            scope: 'deploy-account',
+            stage,
+            flow: flow ?? 'personal',
+            network: getNetworkId(),
+            ...(typeof err?.status === 'number' ? { httpStatus: String(err.status) } : {}),
+          },
+        });
         if (!cancelled) {
           setErrorMsg(err?.message ?? 'Deployment failed. Please try again.');
           setStage('error');

@@ -177,14 +177,23 @@ export async function storePasskeyCredentialAtIndex(
  * biometric flag, since user verification happens inside the OS ceremony
  * itself on every create/sign call.
  */
+/**
+ * `rpId` is required, and must be the value the ceremony that produced
+ * `credential` actually ran under — not whatever is configured at the time of
+ * the call. A platform credential is only findable under its own RP, so
+ * storing it without recording that is storing something we cannot later prove
+ * we can still use.
+ */
 export async function storePlatformPasskeyCredentialAtIndex(
   credential: { credentialId: string; keyDataHex: string },
   listIndex: number,
+  rpId: string,
 ): Promise<void> {
   const keys = getPasskeyStorageKeys(listIndex);
   await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
   await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
   await SecureStore.setItemAsync(keys.kind, 'platform');
+  await SecureStore.setItemAsync(keys.rpId, rpId);
 }
 
 // ─── Signing ──────────────────────────────────────────────────────────────────
@@ -331,12 +340,27 @@ export async function signWithStoredPasskeyAtIndex(
 
   const kind = await SecureStore.getItemAsync(keys.kind);
   if (kind === 'platform') {
-    const [credentialId, keyDataHex] = await Promise.all([
+    const [credentialId, keyDataHex, storedRpId] = await Promise.all([
       SecureStore.getItemAsync(keys.credentialId),
       SecureStore.getItemAsync(keys.keyDataHex),
+      SecureStore.getItemAsync(keys.rpId),
     ]);
     if (!keyDataHex) {
       throw new Error('Key data missing. Please complete passkey setup first.');
+    }
+    // A platform credential is scoped to the RP it was created under, so asking
+    // the OS for it under a different one cannot succeed — Credential Manager
+    // reports no match and the ceremony fails with nothing naming the reason.
+    // Fail here instead, where we still know what actually changed.
+    //
+    // Only platform keys are affected. A local key's authenticatorData is
+    // rebuilt from `rpId` on every signature, so it works under whatever RP is
+    // current (provided the origin is in the backend's allowlist).
+    if (storedRpId && storedRpId !== rpId) {
+      throw new Error(
+        `This passkey was created for "${storedRpId}" but the app is now configured for "${rpId}". ` +
+          `The device can no longer find it — set up your passkey again to continue.`,
+      );
     }
     // Dynamic import: keeps react-native-passkey's native module out of every
     // consumer of this file (e.g. pairing-payload.ts imports it in a pure,
@@ -347,6 +371,12 @@ export async function signWithStoredPasskeyAtIndex(
       challenge: authDigest,
       allowCredentialIdHex: credentialId ?? undefined,
     });
+    // Credentials provisioned before the RP was recorded get stamped on their
+    // first successful signature: the ceremony just proved which RP they answer
+    // to, so a later change is detectable rather than another silent dead end.
+    if (!storedRpId) {
+      await SecureStore.setItemAsync(keys.rpId, rpId).catch(() => {});
+    }
     return { sig, keyDataHex };
   }
 
@@ -370,6 +400,7 @@ export async function signWithStoredPasskeyAtIndex(
       SecureStore.deleteItemAsync(keys.keyDataHex),
       SecureStore.deleteItemAsync(keys.requiresBiometric),
       SecureStore.deleteItemAsync(keys.kind),
+      SecureStore.deleteItemAsync(keys.rpId),
     ]);
     throw new Error(
       'PASSKEY_CREDENTIAL_MISSING: No passkey found. Please complete biometric setup again.',

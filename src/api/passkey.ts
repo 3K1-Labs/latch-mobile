@@ -10,10 +10,12 @@
  * return it across app restarts without any network call.
  */
 
+import * as Sentry from '@sentry/react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { deployPasskeyAccount } from '@/src/api/smart-account-deploy';
 import {
+  getNetworkId,
   HORIZON_URL,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
@@ -119,6 +121,19 @@ export async function deploySmartAccount(
     return { smartAccountAddress, alreadyDeployed };
   } catch (error: any) {
     console.error('[passkey] deploySmartAccount error:', error?.message);
+    // Reported here, not only at the screen, because this is the last point at
+    // which the real Error exists: the return below flattens it to a string and
+    // the caller rebuilds it with `new Error(result.error)`, losing the stack
+    // and the DeployApiError status. A deployment that fails on one physical
+    // device and nowhere else is exactly the case that needs the original.
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error?.message ?? error)), {
+      tags: {
+        scope: 'passkey-deploy',
+        network: getNetworkId(),
+        ...(typeof error?.status === 'number' ? { httpStatus: String(error.status) } : {}),
+      },
+      extra: { credentialId, keyDataHexLength: keyDataHex?.length },
+    });
     return {
       smartAccountAddress: '',
       alreadyDeployed: false,

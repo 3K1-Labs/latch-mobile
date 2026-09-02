@@ -93,9 +93,7 @@ export function describePasskeyFailure(err: unknown): string {
       // verify this build against the RP's /.well-known/assetlinks.json — either
       // the signing cert is not listed, or (common on emulators with a skewed
       // clock) Play Services could not fetch the file over HTTPS at all.
-      if (
-        /cannot be validated|not associated|asset[\s_]?links|asset_?statements/i.test(message)
-      ) {
+      if (/cannot be validated|not associated|asset[\s_]?links|asset_?statements/i.test(message)) {
         return `this build could not be verified against ${PASSKEY_RP_ID} — check the signing cert in assetlinks.json, or the device's clock and network`;
       }
       // These read as "…because <reason>." so a native message — capitalised
@@ -168,19 +166,24 @@ export async function provisionPasskeyAtIndex(
         userDisplayName: options.displayName || 'Latch Wallet',
         challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
       });
-      await storePlatformPasskeyCredentialAtIndex(credential, listIndex);
+      await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
       return { ...credential, kind: 'platform' };
     } catch (err) {
       const deviceOnlyReason = describePasskeyFailure(err);
       // Warn, not log-in-__DEV__-only: on a real build this line is the only
       // way to tell a dismissed sheet from a misconfigured associated domain.
-      console.warn('[passkey] platform ceremony failed, using a device-only key:', deviceOnlyReason);
+      console.warn(
+        '[passkey] platform ceremony failed, using a device-only key:',
+        deviceOnlyReason,
+      );
       // react-native-passkey rejects with a plain `{ error, message }` object, not
       // an Error — passing that straight to captureException logs it as "Object
       // captured as exception with keys: error, message" and buries the reason.
       // Wrap it so the issue title is the actual failure.
       Sentry.captureException(
-        err instanceof Error ? err : new Error(`platform passkey ceremony failed: ${deviceOnlyReason}`),
+        err instanceof Error
+          ? err
+          : new Error(`platform passkey ceremony failed: ${deviceOnlyReason}`),
         {
           tags: { scope: 'platform-passkey-fallback' },
           extra: {

@@ -17,6 +17,9 @@ import Header from '@/src/components/shared/Header';
 import Input from '@/src/components/shared/Input';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
+import * as Sentry from '@sentry/react-native';
+
+import { getNetworkId, PASSKEY_RP_ID } from '@/src/constants/config';
 import { storePlatformPasskeyCredentialAtIndex } from '@/src/lib/passkey-webauthn';
 import { isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
 import { signInToExistingWalletWithPlatformPasskey } from '@/src/lib/wallet-auth';
@@ -71,9 +74,12 @@ const SignInPasskey = () => {
       const result = await signInToExistingWalletWithPlatformPasskey(trimmed);
 
       const listIndex = accounts.length;
+      // signInToExistingWalletWithPlatformPasskey ran its ceremony under
+      // PASSKEY_RP_ID, so that is the RP this credential answers to.
       await storePlatformPasskeyCredentialAtIndex(
         { credentialId: result.credentialId, keyDataHex: result.keyDataHex },
         listIndex,
+        PASSKEY_RP_ID,
       );
 
       await appendAccount(
@@ -93,6 +99,14 @@ const SignInPasskey = () => {
       await AsyncStorage.setItem('latch_onboarding_complete', 'true');
       router.replace('/(tabs)');
     } catch (e: any) {
+      // Same reasoning as deploy-account: this is where a passkey sign-in
+      // failure stops. The address is a public C-address, and it is the one
+      // thing that makes a report actionable — it says which account the OS
+      // could not produce a credential for.
+      Sentry.captureException(e instanceof Error ? e : new Error(String(e?.message ?? e)), {
+        tags: { scope: 'sign-in-passkey', network: getNetworkId() },
+        extra: { smartAccountAddress: trimmed },
+      });
       setError(e?.message ?? 'Sign in failed. Please try again.');
     } finally {
       setIsLoading(false);
