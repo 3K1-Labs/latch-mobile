@@ -158,29 +158,53 @@ const DeployAccount = () => {
         if (cancelled) return;
 
         // ── Step 2: deploy smart account ──────────────────────────────────────
-        let deployedAddress: string;
+        // The root span for the whole operation. `passkeyKind` is the dimension
+        // worth slicing on: 'platform' means the OS ceremony ran and the
+        // credential lives with whatever provider the device uses (Google
+        // Password Manager on most Android, iCloud Keychain on iOS); 'local'
+        // means it fell back to a device-only key. WebAuthn never tells us the
+        // provider by name, so this plus Sentry's own os/device tags is as
+        // close to "GPM devices" as the platform allows.
+        const deployedAddress = await Sentry.startSpan(
+          {
+            name: 'deploy.account',
+            op: 'app.deploy',
+            attributes: { flow: flow ?? 'personal', network: getNetworkId() },
+          },
+          async (span): Promise<string | null> => {
+            if (storedMnemonic) {
+              // Import-wallet path: derive Ed25519 pubkey from mnemonic and deploy.
+              // No biometric auth needed — the mnemonic itself proves ownership.
+              span.setAttribute('signer', 'ed25519');
+              setIsMnemonicPath(true);
+              setStage('deploying');
+              const wallet = restoreStellarWallet(storedMnemonic);
+              const result = await deploySmartAccountEd25519(wallet.publicKeyHex);
+              return result.smartAccountAddress;
+            }
+            // New-wallet path: passkey / biometric credential created on the
+            // biometric setup screen; retrieve it and deploy with WebAuthn signer.
+            span.setAttribute('signer', 'passkey');
+            setStage('auth');
+            const { credentialId, keyDataHex } = await Sentry.startSpan(
+              { name: 'passkey.provision', op: 'passkey.ceremony' },
+              () => getOrCreatePasskeyCredentials(),
+            );
+            span.setAttribute(
+              'passkeyKind',
+              (await SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_KIND)) ?? 'local',
+            );
+            // Returning null rather than bailing out of run() directly: this is
+            // a callback now, so a bare `return` would only end the span.
+            if (cancelled) return null;
+            setStage('deploying');
+            const result = await deploySmartAccountPasskey(credentialId, keyDataHex);
+            if (result.error) throw new Error(result.error);
+            return result.smartAccountAddress;
+          },
+        );
 
-        if (storedMnemonic) {
-          // Import-wallet path: derive Ed25519 pubkey from mnemonic and deploy.
-          // No biometric auth needed — the mnemonic itself proves ownership.
-          setIsMnemonicPath(true);
-          setStage('deploying');
-          const wallet = restoreStellarWallet(storedMnemonic);
-          const result = await deploySmartAccountEd25519(wallet.publicKeyHex);
-          deployedAddress = result.smartAccountAddress;
-        } else {
-          // New-wallet path: passkey / biometric credential created on the
-          // biometric setup screen; retrieve it and deploy with WebAuthn signer.
-          setStage('auth');
-          const { credentialId, keyDataHex } = await getOrCreatePasskeyCredentials();
-          if (cancelled) return;
-          setStage('deploying');
-          const result = await deploySmartAccountPasskey(credentialId, keyDataHex);
-          if (result.error) throw new Error(result.error);
-          deployedAddress = result.smartAccountAddress;
-        }
-
-        if (cancelled) return;
+        if (cancelled || deployedAddress === null) return;
 
         // ── Step 2.5: clear any stale session before this wallet takes over ────
         // A previous session's tokens can still be sitting in SecureStore here

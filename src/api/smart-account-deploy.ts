@@ -16,6 +16,7 @@
  * Transport is raw XHR, not Axios — see the Android TLS note in CLAUDE.md.
  */
 
+import * as Sentry from '@sentry/react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
 
@@ -212,26 +213,42 @@ export async function deploySeedWalletAccount(
   });
 }
 
-/** Deploy the smart account for a passkey (P-256 / WebAuthn) credential. */
+/**
+ * Deploy the smart account for a passkey (P-256 / WebAuthn) credential.
+ *
+ * The three phases are traced separately because they fail independently and
+ * for unrelated reasons: `deploy.challenge` and `deploy.submit` are network
+ * round-trips to latch-api, while `passkey.sign` is an OS ceremony that touches
+ * no network at all. A deployment that dies between the first and the third
+ * with nothing in the backend log is a signing failure, and the span breakdown
+ * says so without needing the backend's access log to prove a negative.
+ */
 export async function deployPasskeyAccount(
   credentialId: string,
   keyDataHex: string,
 ): Promise<BackendDeployResult> {
   return withExpiredProofRetry(async () => {
-    const nonceHex = await requestChallenge('webauthn', keyDataHex);
-    const proof = await signNonceWithPasskey(credentialId, hexToBytes(nonceHex));
+    const nonceHex = await Sentry.startSpan(
+      { name: 'deploy.challenge', op: 'http.client' },
+      () => requestChallenge('webauthn', keyDataHex),
+    );
+    const proof = await Sentry.startSpan({ name: 'passkey.sign', op: 'passkey.ceremony' }, () =>
+      signNonceWithPasskey(credentialId, hexToBytes(nonceHex)),
+    );
 
     return unwrapDeploy(
-      await xhrPost('/webauthn', {
-        key_data_hex: keyDataHex,
-        network: getNetworkId(),
-        proof: {
-          nonce: nonceHex,
-          signature: proof.signature,
-          authenticator_data: proof.authenticatorData,
-          client_data_json: proof.clientDataJSON,
-        },
-      }),
+      await Sentry.startSpan({ name: 'deploy.submit', op: 'http.client' }, () =>
+        xhrPost('/webauthn', {
+          key_data_hex: keyDataHex,
+          network: getNetworkId(),
+          proof: {
+            nonce: nonceHex,
+            signature: proof.signature,
+            authenticator_data: proof.authenticatorData,
+            client_data_json: proof.clientDataJSON,
+          },
+        }),
+      ),
     );
   });
 }

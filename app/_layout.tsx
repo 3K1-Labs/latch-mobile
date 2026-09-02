@@ -46,6 +46,18 @@ if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
     // stripped there (metro.config.js drop_console), so Sentry is the only
     // channel left. `environment` still separates staging from production.
     enabled: !__DEV__,
+    // A sampler, not a flat tracesSampleRate. Nothing here is auto-instrumented
+    // — no navigation or HTTP integration is wired up — so today a flat rate
+    // would behave identically. It would stop behaving identically the moment
+    // someone adds navigation instrumentation, at which point a wallet starts
+    // shipping a trace for every screen. Naming what we want to measure keeps
+    // that decision explicit: account deployment is rare, slow, and the only
+    // flow we need percentiles for.
+    //
+    // Only root spans reach the sampler; children inherit the decision, so
+    // matching `deploy.account` also keeps its passkey/challenge/submit spans.
+    tracesSampler: (ctx) =>
+      typeof ctx.name === 'string' && ctx.name.startsWith('deploy.') ? 1 : 0,
   });
 }
 
