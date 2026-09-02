@@ -86,6 +86,18 @@ export function describePasskeyFailure(err: unknown): string {
     default: {
       const message = (err as { message?: string })?.message;
       if (!message) return 'the system passkey sheet did not complete';
+      // Android Credential Manager reports a failed Digital Asset Links check
+      // with any of "RP ID cannot be validated", "the incoming request cannot
+      // be validated", or "...not associated with domain" — never a
+      // BadConfiguration code. They all mean the same thing: the OS could not
+      // verify this build against the RP's /.well-known/assetlinks.json — either
+      // the signing cert is not listed, or (common on emulators with a skewed
+      // clock) Play Services could not fetch the file over HTTPS at all.
+      if (
+        /cannot be validated|not associated|asset[\s_]?links|asset_?statements/i.test(message)
+      ) {
+        return `this build could not be verified against ${PASSKEY_RP_ID} — check the signing cert in assetlinks.json, or the device's clock and network`;
+      }
       // These read as "…because <reason>." so a native message — capitalised
       // and full-stopped as its own sentence — has to be folded back into the
       // middle of one, or the user sees "because The operation couldn't be
@@ -163,7 +175,22 @@ export async function provisionPasskeyAtIndex(
       // Warn, not log-in-__DEV__-only: on a real build this line is the only
       // way to tell a dismissed sheet from a misconfigured associated domain.
       console.warn('[passkey] platform ceremony failed, using a device-only key:', deviceOnlyReason);
-      Sentry.captureException(err, { tags: { scope: 'platform-passkey-fallback' } });
+      // react-native-passkey rejects with a plain `{ error, message }` object, not
+      // an Error — passing that straight to captureException logs it as "Object
+      // captured as exception with keys: error, message" and buries the reason.
+      // Wrap it so the issue title is the actual failure.
+      Sentry.captureException(
+        err instanceof Error ? err : new Error(`platform passkey ceremony failed: ${deviceOnlyReason}`),
+        {
+          tags: { scope: 'platform-passkey-fallback' },
+          extra: {
+            deviceOnlyReason,
+            rawError: err,
+            errorCode: (err as { error?: string })?.error,
+            errorMessage: (err as { message?: string })?.message,
+          },
+        },
+      );
 
       const local = createPasskeyCredential();
       const gate = await resolveBiometricGate(options.requireBiometric);

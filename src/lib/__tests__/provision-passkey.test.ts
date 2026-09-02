@@ -249,16 +249,30 @@ describe('notifyIfWeakBiometricGate', () => {
 describe('describePasskeyFailure sentence folding', () => {
   it('lowercases and de-punctuates a native message so it reads mid-sentence', () => {
     const reason = describePasskeyFailure({
-      message: 'The operation couldn’t be completed. Application is not associated with domain.',
+      message: 'Face ID is not available. Please try again.',
     });
-    expect(reason).toBe(
-      'the operation couldn’t be completed. Application is not associated with domain',
-    );
+    expect(reason).toBe('face ID is not available. Please try again');
   });
 
   it('leaves the mapped codes alone', () => {
     expect(describePasskeyFailure({ error: 'UserCancelled' })).toBe(
       'the system passkey sheet was dismissed',
     );
+  });
+
+  it.each([
+    'RP ID cannot be validated',
+    'The incoming request cannot be validated',
+  ])('maps an Android Digital Asset Links failure (%s) to a specific reason', (message) => {
+    const reason = describePasskeyFailure({ message });
+    expect(reason).toContain('could not be verified against');
+    expect(reason).toContain('assetlinks.json');
+  });
+
+  it('maps the iOS associated-domain failure the same way', () => {
+    const reason = describePasskeyFailure({
+      message: 'The operation couldn’t be completed. Application is not associated with domain.',
+    });
+    expect(reason).toContain('could not be verified against');
   });
 });

@@ -2,6 +2,29 @@
 const { z } = require('zod');
 
 /**
+ * Load `.env*` before validating, because Expo does not always get there first.
+ *
+ * `expo export` resolves `app.config.js` from `resolveOptionsAsync`, which runs
+ * *before* `exportApp` calls `loadEnvFiles` — so on that first pass nothing from
+ * `.env` is in `process.env` and every required variable looks missing. That is
+ * how `eas update` fails on a machine whose `.env` is complete: without an
+ * explicit `--environment` flag eas-cli injects no server-side variables (it
+ * keys that off the flag, not off the interactive environment prompt), leaving
+ * the export to rely on a `.env` that has not been read yet.
+ *
+ * Doing it here is safe and idempotent: `@expo/env` never overwrites a value
+ * already in `process.env`, and it honours `EXPO_NO_DOTENV`, so an EAS build —
+ * which sets that flag precisely because it supplies its own environment — is
+ * unaffected.
+ */
+try {
+  require('@expo/env').loadProjectEnv(__dirname, { silent: true });
+} catch {
+  // @expo/env ships with expo. If it cannot be resolved, carry on with whatever
+  // is already in process.env and let validation below name what is missing.
+}
+
+/**
  * Environment schema.
  *
  * Required vs optional is drawn around *running the app on testnet*: a fresh
