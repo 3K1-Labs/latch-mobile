@@ -13,7 +13,7 @@ import NetworkSheet from '@/src/components/profile/NetworkSheet';
 import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
 // import PoliciesSheet from '@/src/components/profile/PoliciesSheet';
-import { logout } from '@/src/api/latch-auth';
+import { getBackupStatus, logout } from '@/src/api/latch-auth';
 import PrivacyPolicySheet from '@/src/components/profile/PrivacyPolicySheet';
 import RecoveryPhraseSheet from '@/src/components/profile/RecoveryPhraseSheet';
 import SettingItem from '@/src/components/profile/SettingItem';
@@ -23,15 +23,16 @@ import Text from '@/src/components/shared/Text';
 import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useDrawer } from '@/src/context/drawer-context';
-import { ASYNC_KEYS, useWalletStore } from '@/src/store/wallet';
+import { ASYNC_KEYS, SECURE_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BIOMETRIC_ENABLED_KEY } from '../(auth)/biometric';
@@ -60,6 +61,7 @@ const Profile = () => {
   const [aboutVisible, setAboutVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
   const [logoutVisible, setLogoutVisible] = useState(false);
+  const [logoutVariant, setLogoutVariant] = useState<'checking' | 'normal' | 'warning' | 'unknown'>('checking');
   const [backupVisible, setBackupVisible] = useState(false);
   const [sharedWalletVisible, setSharedWalletVisible] = useState(false);
 
@@ -85,6 +87,30 @@ const Profile = () => {
     await clearAll();
     await AsyncStorage.multiRemove([BIOMETRIC_ENABLED_KEY, 'latch_onboarding_complete']);
     router.replace('/onboarding');
+  };
+
+  const openLogoutPrompt = async () => {
+    setLogoutVisible(true);
+    setLogoutVariant('checking');
+
+    try {
+      const pendingBackup = await AsyncStorage.getItem(ASYNC_KEYS.BACKUP_PENDING);
+      if (pendingBackup === 'true') {
+        setLogoutVariant('warning');
+        return;
+      }
+
+      const accessToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
+      if (!accessToken) {
+        setLogoutVariant('unknown');
+        return;
+      }
+
+      const status = await getBackupStatus();
+      setLogoutVariant(status.exists ? 'normal' : 'warning');
+    } catch {
+      setLogoutVariant('unknown');
+    }
   };
 
   return (
@@ -157,8 +183,13 @@ const Profile = () => {
         <PrivacyPolicySheet visible={privacyVisible} onClose={() => setPrivacyVisible(false)} />
         <LogoutPromptSheet
           visible={logoutVisible}
+          variant={logoutVariant}
           onClose={() => setLogoutVisible(false)}
           onConfirm={handleLogout}
+          onBackup={() => {
+            setLogoutVisible(false);
+            setBackupVisible(true);
+          }}
         />
         <BackupSheet visible={backupVisible} onClose={() => setBackupVisible(false)} />
         <SharedWalletWizardSheet
@@ -308,7 +339,7 @@ const Profile = () => {
             />
           </Box>
 
-          <LogoutItem onPress={() => setLogoutVisible(true)} bottomInset={insets.bottom} />
+          <LogoutItem onPress={openLogoutPrompt} bottomInset={insets.bottom} />
         </Box>
       </ScrollView>
     </Box>
