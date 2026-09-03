@@ -29,6 +29,7 @@ import QuickCrypto from 'react-native-quick-crypto';
 
 import { PASSKEY_RP_ID } from '@/src/constants/config';
 
+import { describePasskeyFailure } from './passkey-failure';
 import {
   createPasskeyCredential,
   storePasskeyCredentialAtIndex,
@@ -65,46 +66,10 @@ export interface ProvisionPasskeyOptions {
   displayName?: string;
 }
 
-/**
- * Turn a failed ceremony into something worth showing a user. react-native-passkey
- * rejects with `{ error, message }`; a native module failure can reject with
- * anything.
- */
-export function describePasskeyFailure(err: unknown): string {
-  const code = (err as { error?: string })?.error;
-  switch (code) {
-    case 'UserCancelled':
-      return 'the system passkey sheet was dismissed';
-    case 'NotSupported':
-      return 'this device does not support passkeys';
-    case 'NoCreateOption':
-      return 'no passkey provider is set up on this device';
-    case 'BadConfiguration':
-      return `this build is not registered with ${PASSKEY_RP_ID}`;
-    case 'Timeout':
-      return 'the system passkey sheet timed out';
-    default: {
-      const message = (err as { message?: string })?.message;
-      if (!message) return 'the system passkey sheet did not complete';
-      // Android Credential Manager reports a failed Digital Asset Links check
-      // with any of "RP ID cannot be validated", "the incoming request cannot
-      // be validated", or "...not associated with domain" — never a
-      // BadConfiguration code. They all mean the same thing: the OS could not
-      // verify this build against the RP's /.well-known/assetlinks.json — either
-      // the signing cert is not listed, or (common on emulators with a skewed
-      // clock) Play Services could not fetch the file over HTTPS at all.
-      if (/cannot be validated|not associated|asset[\s_]?links|asset_?statements/i.test(message)) {
-        return `this build could not be verified against ${PASSKEY_RP_ID} — check the signing cert in assetlinks.json, or the device's clock and network`;
-      }
-      // These read as "…because <reason>." so a native message — capitalised
-      // and full-stopped as its own sentence — has to be folded back into the
-      // middle of one, or the user sees "because The operation couldn't be
-      // completed.." See notifyIfDeviceOnly.
-      const trimmed = message.trim().replace(/\.+$/, '');
-      return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
-    }
-  }
-}
+// Moved to ./passkey-failure so the signing path can share it without closing
+// an import cycle through this module. Re-exported because this has been its
+// import site since it was written.
+export { describePasskeyFailure };
 
 /**
  * Whether the OS can bind a stored key to a biometric.
@@ -169,7 +134,7 @@ export async function provisionPasskeyAtIndex(
       await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
       return { ...credential, kind: 'platform' };
     } catch (err) {
-      const deviceOnlyReason = describePasskeyFailure(err);
+      const deviceOnlyReason = describePasskeyFailure(err, PASSKEY_RP_ID);
       // Warn, not log-in-__DEV__-only: on a real build this line is the only
       // way to tell a dismissed sheet from a misconfigured associated domain.
       console.warn(

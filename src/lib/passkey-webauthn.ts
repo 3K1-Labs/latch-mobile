@@ -29,6 +29,7 @@ import { hashSorobanAuthPayload } from './soroban-auth-payload';
 
 import { createLogger } from './logger';
 import { b64uDecode, b64uEncode } from './base64url';
+import { describePasskeyFailure } from './passkey-failure';
 
 // Moved to ./base64url so pure consumers need not import this module (it
 // reaches SecureStore and the wallet store); re-exported so existing callers
@@ -366,11 +367,24 @@ export async function signWithStoredPasskeyAtIndex(
     // consumer of this file (e.g. pairing-payload.ts imports it in a pure,
     // testable context) unless a platform passkey is actually being signed with.
     const { signWithPlatformPasskey } = await import('./platform-passkey');
-    const sig = await signWithPlatformPasskey({
-      rpId,
-      challenge: authDigest,
-      allowCredentialIdHex: credentialId ?? undefined,
-    });
+    let sig;
+    try {
+      sig = await signWithPlatformPasskey({
+        rpId,
+        challenge: authDigest,
+        allowCredentialIdHex: credentialId ?? undefined,
+      });
+    } catch (err) {
+      // Until now only the creation path in provision-passkey.ts translated
+      // these, so the single most common Android passkey failure reached users
+      // as the raw native string ("User canceled the selector") — a message
+      // that names neither the app nor anything to do about it. The original is
+      // kept as `cause` so the Sentry capture upstream still carries it.
+      const reason = describePasskeyFailure(err, rpId);
+      throw Object.assign(new Error(`Couldn't sign with your passkey — ${reason}.`), {
+        cause: err,
+      });
+    }
     // Credentials provisioned before the RP was recorded get stamped on their
     // first successful signature: the ceremony just proved which RP they answer
     // to, so a later change is detectable rather than another silent dead end.

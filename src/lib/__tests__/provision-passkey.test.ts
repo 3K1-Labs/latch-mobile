@@ -130,7 +130,7 @@ describe('describePasskeyFailure', () => {
     [{ message: 'boom' }, 'boom'],
     [{}, 'the system passkey sheet did not complete'],
   ])('%p -> %s', (err, expected) => {
-    expect(describePasskeyFailure(err)).toBe(expected);
+    expect(describePasskeyFailure(err, 'latch.finance')).toBe(expected);
   });
 });
 
@@ -248,14 +248,15 @@ describe('notifyIfWeakBiometricGate', () => {
 
 describe('describePasskeyFailure sentence folding', () => {
   it('lowercases and de-punctuates a native message so it reads mid-sentence', () => {
-    const reason = describePasskeyFailure({
-      message: 'Face ID is not available. Please try again.',
-    });
+    const reason = describePasskeyFailure(
+      { message: 'Face ID is not available. Please try again.' },
+      'latch.finance',
+    );
     expect(reason).toBe('face ID is not available. Please try again');
   });
 
   it('leaves the mapped codes alone', () => {
-    expect(describePasskeyFailure({ error: 'UserCancelled' })).toBe(
+    expect(describePasskeyFailure({ error: 'UserCancelled' }, 'latch.finance')).toBe(
       'the system passkey sheet was dismissed',
     );
   });
@@ -264,15 +265,32 @@ describe('describePasskeyFailure sentence folding', () => {
     'RP ID cannot be validated',
     'The incoming request cannot be validated',
   ])('maps an Android Digital Asset Links failure (%s) to a specific reason', (message) => {
-    const reason = describePasskeyFailure({ message });
+    const reason = describePasskeyFailure({ message }, 'latch.finance');
     expect(reason).toContain('could not be verified against');
     expect(reason).toContain('assetlinks.json');
   });
 
+  it.each([
+    // The literal string Android Credential Manager produces, seen in
+    // production when a passkey deploy died between the challenge and the
+    // assertion. It is not thrown by any JS dependency — it comes up from
+    // native, so nothing mapped it before.
+    'User canceled the selector',
+    'User cancelled the selector',
+    'androidx.credentials.exceptions.GetCredentialCancellationException',
+  ])('maps the Android selector cancellation (%s) without guessing why', (message) => {
+    const reason = describePasskeyFailure({ message }, 'michaelesenwa.me');
+    // Both readings, because Credential Manager reports a dismissed sheet and
+    // a sheet with nothing to show identically.
+    expect(reason).toContain('dismissed');
+    expect(reason).toContain('no passkey for michaelesenwa.me');
+  });
+
   it('maps the iOS associated-domain failure the same way', () => {
-    const reason = describePasskeyFailure({
-      message: 'The operation couldn’t be completed. Application is not associated with domain.',
-    });
+    const reason = describePasskeyFailure(
+      { message: 'The operation couldn’t be completed. Application is not associated with domain.' },
+      'latch.finance',
+    );
     expect(reason).toContain('could not be verified against');
   });
 });
