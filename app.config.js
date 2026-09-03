@@ -183,7 +183,13 @@ export default {
         {
           android: {
             compileSdkVersion: 36,
-            targetSdkVersion: 35,
+            // Play rejects an upload whose target API is below the level it
+            // required a year earlier ("Target SDK of artifact is too low"),
+            // and that floor moved to 36 on 2026-08-31. Pinned rather than left
+            // to the Expo default because it is a store deadline, not a
+            // preference: it has to move on Google's schedule, and an explicit
+            // number is what makes the next bump a visible edit.
+            targetSdkVersion: 36,
             buildToolsVersion: '36.0.0',
             gradlePluginVersion: '8.9.1',
             ndk: '27.1.12297006',
