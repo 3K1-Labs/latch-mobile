@@ -19,12 +19,12 @@ import '../shim';
 import { queryClient } from '../src/api/client';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
-import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
+import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
 // Wire React Query's online/offline state to the device's actual connectivity.
@@ -41,6 +41,9 @@ if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     environment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    integrations: [Sentry.mobileReplayIntegration()],
     // Any non-dev build, not just production: a TestFlight/preview build is
     // precisely the case that can't be debugged locally, and console.* is
     // stripped there (metro.config.js drop_console), so Sentry is the only
