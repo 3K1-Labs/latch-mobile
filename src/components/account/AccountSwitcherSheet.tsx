@@ -29,7 +29,6 @@ import AppToast from '@/src/components/toast/AppToast';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import {
-  PASSKEY_RP_ID,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,

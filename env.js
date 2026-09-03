@@ -66,9 +66,11 @@ const requiredEnv = {
   EXPO_PUBLIC_SOROBAN_RPC_URL: httpUrl(),
   EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
 
-  // Relying party ID for passkey signing. Must match the backend's
-  // WEBAUTHN_ALLOWED_ORIGINS entry exactly, scheme included, or passkey
-  // sign-in and deployment both fail signature verification.
+  // Relying party ID (bare domain, e.g. "uselatch.app" — no scheme; a
+  // "https://" prefix is tolerated and stripped by normalizePasskeyRpId).
+  // The backend's WEBAUTHN_ALLOWED_ORIGINS must separately list the full
+  // "https://<this value>" origin, or passkey sign-in and deployment both
+  // fail signature verification.
   EXPO_PUBLIC_PASSKEY_RP_ID: z.string(),
 };
 
