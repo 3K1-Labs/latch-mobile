@@ -68,7 +68,6 @@ import {
   View,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import LoadingBlur from '../shared/LoadingBlur';
