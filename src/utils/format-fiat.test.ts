@@ -1,4 +1,9 @@
-import { formatFiat, formatTokenAsFiat, resolveDisplayCurrency } from './format-fiat';
+import {
+  formatFiat,
+  formatTokenAsFiat,
+  resolveDisplayCurrency,
+  UNPRICED_LABEL,
+} from './format-fiat';
 
 describe('resolveDisplayCurrency', () => {
   it('keeps USD at a 1:1 rate', () => {
@@ -84,5 +89,21 @@ describe('formatTokenAsFiat', () => {
   it('formats zero when amount or price is missing', () => {
     const result = formatTokenAsFiat('0', '5', 'USD', 1, { approx: true });
     expect(result.text).toContain('0.00');
+  });
+});
+
+describe('formatTokenAsFiat with no price', () => {
+  it('renders the unpriced label rather than a zero figure', () => {
+    expect(formatTokenAsFiat('12.5', undefined, 'USD', 1).text).toBe(UNPRICED_LABEL);
+    expect(formatTokenAsFiat('12.5', undefined, 'USD', 1).unpriced).toBe(true);
+  });
+
+  it('treats an unparseable price as unpriced', () => {
+    expect(formatTokenAsFiat('12.5', '', 'USD', 1).text).toBe(UNPRICED_LABEL);
+    expect(formatTokenAsFiat('12.5', 'n/a', 'USD', 1).text).toBe(UNPRICED_LABEL);
+  });
+
+  it('still formats when the price is present and the amount is zero', () => {
+    expect(formatTokenAsFiat('0', '1.0', 'USD', 1).unpriced).toBeUndefined();
   });
 });

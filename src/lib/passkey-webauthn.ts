@@ -29,6 +29,7 @@ import { hashSorobanAuthPayload } from './soroban-auth-payload';
 
 import { createLogger } from './logger';
 import { b64uDecode, b64uEncode } from './base64url';
+import { describePasskeyFailure } from './passkey-failure';
 
 // Moved to ./base64url so pure consumers need not import this module (it
 // reaches SecureStore and the wallet store); re-exported so existing callers
@@ -100,16 +101,13 @@ export async function storePasskeyCredential(
   credential: PasskeyCredential,
   requireBiometric = true,
 ): Promise<void> {
-  // Public material — never auth-gated
-  await SecureStore.setItemAsync(SECURE_KEYS.CREDENTIAL_ID, credential.credentialId);
-  await SecureStore.setItemAsync(SECURE_KEYS.KEY_DATA_HEX, credential.keyDataHex);
-
-  // Auth mode flag — read back by signWithStoredPasskey to pick the right read options
-  await SecureStore.setItemAsync(
-    SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
-    requireBiometric ? 'true' : 'false',
-  );
-
+  // Private key FIRST. If this whole sequence is interrupted (app reload,
+  // crash, navigation away) partway through, the worst case must be "no
+  // credential exists yet" (safe — the next attempt just creates fresh), never
+  // "public pointers exist but there's no private key to sign with" (a
+  // permanent dead end previously reachable by writing credentialId/keyDataHex
+  // first — see the PASSKEY_KIND write below, which is what made a
+  // half-written credential look valid to callers).
   if (requireBiometric) {
     await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY, credential.privateKeyHex, {
       requireAuthentication: true,
@@ -122,6 +120,22 @@ export async function storePasskeyCredential(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
   }
+
+  // Public material — never auth-gated
+  await SecureStore.setItemAsync(SECURE_KEYS.CREDENTIAL_ID, credential.credentialId);
+  await SecureStore.setItemAsync(SECURE_KEYS.KEY_DATA_HEX, credential.keyDataHex);
+
+  // Auth mode flag — read back by signWithStoredPasskey to pick the right read options
+  await SecureStore.setItemAsync(
+    SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
+    requireBiometric ? 'true' : 'false',
+  );
+  // Kind LAST — this is the flag that makes signWithStoredPasskeyAtIndex trust
+  // the local branch, so it must never be set before the private key it
+  // promises is actually there. Explicit 'local' value: a slot previously
+  // holding a platform passkey (e.g. after a wipe-and-recreate) must not be
+  // left reporting 'platform' for a local key.
+  await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_KIND, 'local');
 }
 
 /**
@@ -136,10 +150,9 @@ export async function storePasskeyCredentialAtIndex(
 ): Promise<void> {
   const keys = getPasskeyStorageKeys(listIndex);
 
-  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
-  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
-  await SecureStore.setItemAsync(keys.requiresBiometric, requireBiometric ? 'true' : 'false');
-
+  // Private key first — see the comment in storePasskeyCredential for why the
+  // order matters: an interruption must never leave public pointers pointing
+  // at a private key that was never written.
   if (requireBiometric) {
     await SecureStore.setItemAsync(keys.privateKey, credential.privateKeyHex, {
       requireAuthentication: true,
@@ -150,6 +163,38 @@ export async function storePasskeyCredentialAtIndex(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
   }
+
+  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
+  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
+  await SecureStore.setItemAsync(keys.requiresBiometric, requireBiometric ? 'true' : 'false');
+  // Kind last — see storePasskeyCredential.
+  await SecureStore.setItemAsync(keys.kind, 'local');
+}
+
+/**
+ * Store a real platform passkey (react-native-passkey) at a specific list
+ * index. Unlike storePasskeyCredentialAtIndex, there is no private key to
+ * persist — it never leaves the Secure Enclave/Keystore — and no separate
+ * biometric flag, since user verification happens inside the OS ceremony
+ * itself on every create/sign call.
+ */
+/**
+ * `rpId` is required, and must be the value the ceremony that produced
+ * `credential` actually ran under — not whatever is configured at the time of
+ * the call. A platform credential is only findable under its own RP, so
+ * storing it without recording that is storing something we cannot later prove
+ * we can still use.
+ */
+export async function storePlatformPasskeyCredentialAtIndex(
+  credential: { credentialId: string; keyDataHex: string },
+  listIndex: number,
+  rpId: string,
+): Promise<void> {
+  const keys = getPasskeyStorageKeys(listIndex);
+  await SecureStore.setItemAsync(keys.credentialId, credential.credentialId);
+  await SecureStore.setItemAsync(keys.keyDataHex, credential.keyDataHex);
+  await SecureStore.setItemAsync(keys.kind, 'platform');
+  await SecureStore.setItemAsync(keys.rpId, rpId);
 }
 
 // ─── Signing ──────────────────────────────────────────────────────────────────
@@ -190,9 +235,15 @@ export async function signWithPasskey(
   authenticatorData.set(flags, 32);
   authenticatorData.set(signCount, 33);
 
-  // clientDataJSON: type, challenge (= base64url(authDigest)), origin
+  // clientDataJSON: type, challenge (= base64url(authDigest)), origin.
+  //
+  // origin is the scheme-qualified form of the RP ID — what a browser and the
+  // OS passkey APIs both emit, and what the platform-passkey path (which hands
+  // back the OS's own clientDataJSON) will send for the same account. rpIdHash
+  // above stays the bare host: they are different fields with different rules.
   const challenge = b64uEncode(authDigest);
-  const clientDataJSONStr = JSON.stringify({ type: 'webauthn.get', challenge, origin: rpId });
+  const origin = `https://${rpId}`;
+  const clientDataJSONStr = JSON.stringify({ type: 'webauthn.get', challenge, origin });
   const clientDataJSON = new TextEncoder().encode(clientDataJSONStr);
 
   // Sign SHA256(authenticatorData || SHA256(clientDataJSON)) with P-256
@@ -266,6 +317,12 @@ export async function getStoredPrivateKeyHex(
   promptMsg = 'Authenticate to receive this wallet’s key',
 ): Promise<string | null> {
   const keys = getPasskeyStorageKeys(listIndex);
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    throw new Error(
+      "PASSKEY_IS_PLATFORM: This device's passkey is a synced platform passkey (Google Password Manager / iCloud Keychain) — its private key never leaves the OS and cannot be read or exported.",
+    );
+  }
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';
   return SecureStore.getItemAsync(
@@ -282,6 +339,61 @@ export async function signWithStoredPasskeyAtIndex(
 ): Promise<{ sig: PasskeySignature; keyDataHex: string }> {
   const keys = getPasskeyStorageKeys(listIndex);
 
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    const [credentialId, keyDataHex, storedRpId] = await Promise.all([
+      SecureStore.getItemAsync(keys.credentialId),
+      SecureStore.getItemAsync(keys.keyDataHex),
+      SecureStore.getItemAsync(keys.rpId),
+    ]);
+    if (!keyDataHex) {
+      throw new Error('Key data missing. Please complete passkey setup first.');
+    }
+    // A platform credential is scoped to the RP it was created under, so asking
+    // the OS for it under a different one cannot succeed — Credential Manager
+    // reports no match and the ceremony fails with nothing naming the reason.
+    // Fail here instead, where we still know what actually changed.
+    //
+    // Only platform keys are affected. A local key's authenticatorData is
+    // rebuilt from `rpId` on every signature, so it works under whatever RP is
+    // current (provided the origin is in the backend's allowlist).
+    if (storedRpId && storedRpId !== rpId) {
+      throw new Error(
+        `This passkey was created for "${storedRpId}" but the app is now configured for "${rpId}". ` +
+          `The device can no longer find it — set up your passkey again to continue.`,
+      );
+    }
+    // Dynamic import: keeps react-native-passkey's native module out of every
+    // consumer of this file (e.g. pairing-payload.ts imports it in a pure,
+    // testable context) unless a platform passkey is actually being signed with.
+    const { signWithPlatformPasskey } = await import('./platform-passkey');
+    let sig;
+    try {
+      sig = await signWithPlatformPasskey({
+        rpId,
+        challenge: authDigest,
+        allowCredentialIdHex: credentialId ?? undefined,
+      });
+    } catch (err) {
+      // Until now only the creation path in provision-passkey.ts translated
+      // these, so the single most common Android passkey failure reached users
+      // as the raw native string ("User canceled the selector") — a message
+      // that names neither the app nor anything to do about it. The original is
+      // kept as `cause` so the Sentry capture upstream still carries it.
+      const reason = describePasskeyFailure(err, rpId);
+      throw Object.assign(new Error(`Couldn't sign with your passkey — ${reason}.`), {
+        cause: err,
+      });
+    }
+    // Credentials provisioned before the RP was recorded get stamped on their
+    // first successful signature: the ceremony just proved which RP they answer
+    // to, so a later change is detectable rather than another silent dead end.
+    if (!storedRpId) {
+      await SecureStore.setItemAsync(keys.rpId, rpId).catch(() => {});
+    }
+    return { sig, keyDataHex };
+  }
+
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';
 
@@ -290,7 +402,23 @@ export async function signWithStoredPasskeyAtIndex(
     useBiometric ? { requireAuthentication: true, authenticationPrompt: promptMsg } : undefined,
   );
   if (!privateKeyHex) {
-    throw new Error('No passkey found. Please complete biometric setup first.');
+    // kind === 'local' promised a private key that isn't here — a corrupted
+    // slot from an interrupted storePasskeyCredential write, predating the
+    // write-order fix above (private key now written first, so this specific
+    // corruption can't recur for new credentials). Clear the stale public
+    // pointers rather than leaving a permanent dead end: the next attempt
+    // (e.g. re-visiting the biometric setup screen) sees nothing here and
+    // creates a fresh credential instead of getting stuck forever.
+    await Promise.all([
+      SecureStore.deleteItemAsync(keys.credentialId),
+      SecureStore.deleteItemAsync(keys.keyDataHex),
+      SecureStore.deleteItemAsync(keys.requiresBiometric),
+      SecureStore.deleteItemAsync(keys.kind),
+      SecureStore.deleteItemAsync(keys.rpId),
+    ]);
+    throw new Error(
+      'PASSKEY_CREDENTIAL_MISSING: No passkey found. Please complete biometric setup again.',
+    );
   }
 
   const keyDataHex = await SecureStore.getItemAsync(keys.keyDataHex);
@@ -444,6 +572,17 @@ export function buildWebAuthnAuthPayload(
  */
 export async function redeployWithCurrentKey(listIndex: number): Promise<string> {
   const keys = getPasskeyStorageKeys(listIndex);
+
+  const kind = await SecureStore.getItemAsync(keys.kind);
+  if (kind === 'platform') {
+    // There is no local private key to re-derive a public key from, and a
+    // platform passkey's keyDataHex can't silently drift the way a
+    // SecureStore-only key can (see storePasskeyCredentialAtIndex) — so this
+    // repair path does not apply.
+    throw new Error(
+      "PASSKEY_IS_PLATFORM: This account's passkey is a synced platform passkey and has no local private key to redeploy with.",
+    );
+  }
 
   const requiresBiometric = await SecureStore.getItemAsync(keys.requiresBiometric);
   const useBiometric = requiresBiometric !== 'false';

@@ -10,11 +10,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Dimensions, Modal, StyleSheet, TouchableOpacity, Vibration, View } from 'react-native';
-import QuickCrypto from 'react-native-quick-crypto';
-
-function hashPin(pin: string): string {
-  return QuickCrypto.createHash('sha256').update(pin).digest('hex') as unknown as string;
-}
+import { hashPin } from '@/src/lib/hash-pin';
 
 const PIN_LENGTH = 4;
 const MAX_ATTEMPTS = 5;

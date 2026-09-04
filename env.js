@@ -2,6 +2,29 @@
 const { z } = require('zod');
 
 /**
+ * Load `.env*` before validating, because Expo does not always get there first.
+ *
+ * `expo export` resolves `app.config.js` from `resolveOptionsAsync`, which runs
+ * *before* `exportApp` calls `loadEnvFiles` — so on that first pass nothing from
+ * `.env` is in `process.env` and every required variable looks missing. That is
+ * how `eas update` fails on a machine whose `.env` is complete: without an
+ * explicit `--environment` flag eas-cli injects no server-side variables (it
+ * keys that off the flag, not off the interactive environment prompt), leaving
+ * the export to rely on a `.env` that has not been read yet.
+ *
+ * Doing it here is safe and idempotent: `@expo/env` never overwrites a value
+ * already in `process.env`, and it honours `EXPO_NO_DOTENV`, so an EAS build —
+ * which sets that flag precisely because it supplies its own environment — is
+ * unaffected.
+ */
+try {
+  require('@expo/env').loadProjectEnv(__dirname, { silent: true });
+} catch {
+  // @expo/env ships with expo. If it cannot be resolved, carry on with whatever
+  // is already in process.env and let validation below name what is missing.
+}
+
+/**
  * Environment schema.
  *
  * Required vs optional is drawn around *running the app on testnet*: a fresh
@@ -43,9 +66,11 @@ const requiredEnv = {
   EXPO_PUBLIC_SOROBAN_RPC_URL: httpUrl(),
   EXPO_PUBLIC_FACTORY_ADDRESS: z.string(),
 
-  // Relying party ID for passkey signing. Must match the backend's
-  // WEBAUTHN_ALLOWED_ORIGINS entry exactly, scheme included, or passkey
-  // sign-in and deployment both fail signature verification.
+  // Relying party ID (bare domain, e.g. "uselatch.app" — no scheme; a
+  // "https://" prefix is tolerated and stripped by normalizePasskeyRpId).
+  // The backend's WEBAUTHN_ALLOWED_ORIGINS must separately list the full
+  // "https://<this value>" origin, or passkey sign-in and deployment both
+  // fail signature verification.
   EXPO_PUBLIC_PASSKEY_RP_ID: z.string(),
 };
 
@@ -97,12 +122,35 @@ const optionalEnv = {
 const runtimeEnv = z.object({ ...requiredEnv, ...optionalEnv });
 
 // Build-time only (never inlined into the bundle).
-const envSchema = runtimeEnv.and(
-  z.object({
-    APP_NAME: z.string().default('Latch'),
-    SENTRY_AUTH_TOKEN: z.string().optional(),
-  }),
-);
+const buildtimeEnv = z.object({
+  APP_NAME: z.string().default('Latch'),
+  SENTRY_AUTH_TOKEN: z.string().optional(),
+});
+
+const envSchema = runtimeEnv.and(buildtimeEnv);
+
+/**
+ * Expo resolves `app.config.js` in a subprocess that deliberately skips `.env`:
+ * eas-cli spawns `expo config` with EXPO_NO_DOTENV=1, and it does so before it
+ * knows which EAS environment to read server-side variables from, so nothing
+ * can supply them at that point. Throwing there fails `eas update` on a machine
+ * whose `.env` is complete, so that pass validates whatever is present and
+ * leaves the rest undefined — `app.config.js` reads only APP_NAME,
+ * SENTRY_AUTH_TOKEN and EXPO_PUBLIC_PASSKEY_RP_ID, each with its own fallback.
+ *
+ * Bundling (`export`, `start`, `run:*`) still fails naming the variable, which
+ * is where a missing value would actually reach a shipped bundle.
+ */
+const configResolutionSchema = z
+  .object({
+    ...Object.fromEntries(
+      Object.entries(requiredEnv).map(([key, schema]) => [key, schema.optional()]),
+    ),
+    ...optionalEnv,
+  })
+  .and(buildtimeEnv);
+
+const isConfigResolutionPass = process.argv[2] === 'config';
 
 /**
  * `EXPO_PUBLIC` values must be referenced directly (e.g.
@@ -162,10 +210,66 @@ const trimmed = Object.fromEntries(
   ]),
 );
 
-const parsed = envSchema.safeParse(trimmed);
+/**
+ * A release build with no Sentry DSN reports nothing, anywhere.
+ *
+ * Metro strips every `console.*` from a non-dev bundle (drop_console in
+ * metro.config.js) and app/_layout.tsx only calls Sentry.init when a DSN is
+ * present, so a build made without one has no diagnostic channel at all — a
+ * crash on a user's device leaves no trace in logcat, in Xcode, or in Sentry.
+ * That is exactly how a passkey provisioning failure reached a device and
+ * produced nothing but "Setup Failed" with the cause discarded.
+ *
+ * Absent for a development build is fine and expected; absent for anything
+ * that ships is a build that cannot be debugged, so fail here rather than
+ * discover it after the fact.
+ */
+/**
+ * Only a build that actually ships is worth failing over.
+ *
+ * Keying this off EXPO_PUBLIC_APP_ENV alone was wrong: a local .env routinely
+ * carries APP_ENV=production while running `expo start` or `run:android`, so
+ * it broke ordinary local work over a variable that only matters for an
+ * artifact someone else will run. EAS and CI set these; a laptop does not.
+ */
+const isShippingBuild =
+  process.env.EAS_BUILD === 'true' || process.env.CI === 'true' || process.env.CI === '1';
 
-if (!parsed.success) {
-  const missing = parsed.error.issues
+const missingErrorReporting = (env) =>
+  !env.EXPO_PUBLIC_SENTRY_DSN &&
+  typeof env.EXPO_PUBLIC_APP_ENV === 'string' &&
+  env.EXPO_PUBLIC_APP_ENV !== '' &&
+  env.EXPO_PUBLIC_APP_ENV !== 'development';
+
+const envSchemaChecked = envSchema.superRefine((env, ctx) => {
+  if (!missingErrorReporting(env)) return;
+  if (!isShippingBuild) {
+    // Local build: say it once, loudly, and carry on. Blocking here helps
+    // nobody — the bundle stays on this machine.
+    console.warn(
+      '\n[env] EXPO_PUBLIC_SENTRY_DSN is not set. This build reports no errors: ' +
+        'metro strips console.* and Sentry.init is skipped without a DSN. ' +
+        'Fine locally; a release build will fail until it is set.\n',
+    );
+    return;
+  }
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['EXPO_PUBLIC_SENTRY_DSN'],
+    message:
+      `required for a release build (EXPO_PUBLIC_APP_ENV="${env.EXPO_PUBLIC_APP_ENV}") — a ` +
+      'shipped build without it reports no errors at all (console.* is stripped and ' +
+      'Sentry.init is skipped), leaving a crash on a user device with no trace anywhere.',
+  });
+});
+
+const parsed = envSchemaChecked.safeParse(trimmed);
+
+const result =
+  parsed.success || !isConfigResolutionPass ? parsed : configResolutionSchema.safeParse(trimmed);
+
+if (!result.success) {
+  const missing = result.error.issues
     .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)
     .join('\n');
   throw new Error(
@@ -174,4 +278,4 @@ if (!parsed.success) {
   );
 }
 
-module.exports = parsed.data;
+module.exports = result.data;

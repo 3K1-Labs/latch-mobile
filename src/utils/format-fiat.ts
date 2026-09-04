@@ -14,7 +14,12 @@ export interface FiatFormatResult {
   text: string;
   currency: string;
   usedFallback: boolean;
+  /** True when no USD price was available, so `text` is UNPRICED_LABEL. */
+  unpriced?: boolean;
 }
+
+/** Rendered in place of a figure when a token has no USD price. */
+export const UNPRICED_LABEL = '—';
 
 export function resolveDisplayCurrency(
   selectedCurrency: string,
@@ -68,6 +73,11 @@ export function formatFiat(input: FiatFormatInput): FiatFormatResult {
   };
 }
 
+/**
+ * A missing price is not a zero balance: /v1/prices omits a quote whenever the
+ * symbol is unknown or the upstream feed missed, and rendering that as $0.00
+ * states a value we do not have. Return UNPRICED_LABEL instead.
+ */
 export function formatTokenAsFiat(
   amountStr: string,
   usdPrice: string | undefined,
@@ -76,7 +86,16 @@ export function formatTokenAsFiat(
   options?: { approx?: boolean; maximumFractionDigits?: number },
 ): FiatFormatResult {
   const amount = parseFloat(amountStr || '0');
-  const price = parseFloat(usdPrice ?? '0');
+  const price = parseFloat(usdPrice ?? '');
+  if (!Number.isFinite(price)) {
+    const resolved = resolveDisplayCurrency(selectedCurrency, usdToSelectedRate);
+    return {
+      text: UNPRICED_LABEL,
+      currency: resolved.currency,
+      usedFallback: resolved.usedFallback,
+      unpriced: true,
+    };
+  }
   const usdAmount = amount && price ? amount * price : 0;
   return formatFiat({
     usdAmount,

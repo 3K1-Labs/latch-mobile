@@ -17,6 +17,7 @@ import Text from '@/src/components/shared/Text';
 import TokenIcon from '@/src/components/shared/TokenIcon';
 import { usePrices } from '@/src/hooks/use-prices';
 import { Theme } from '@/src/theme/theme';
+import { UNPRICED_LABEL } from '@/src/utils/format-fiat';
 
 /** Fiat currency the amount is denominated in — MoonPay's `baseCurrencyCode`. */
 export const MOONPAY_BASE_CURRENCY = 'usd';
@@ -118,7 +119,13 @@ const MoonPayAmountSheet = ({ visible, onClose, onContinue, submitting }: Props)
           {({ values, errors, handleSubmit, setFieldValue, isValid, dirty }) => {
             const display = formatAmountDisplay(values.amount);
             const numeric = parseFloat(values.amount) || 0;
-            const xlmOut = xlmPrice > 0 ? numeric / xlmPrice : 0;
+            const xlmOut =
+              xlmPrice > 0
+                ? (numeric / xlmPrice).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+                : UNPRICED_LABEL;
             const amountVariant = display.length <= 6 ? 'h4' : display.length <= 9 ? 'h5' : 'h6';
 
             return (
@@ -137,12 +144,7 @@ const MoonPayAmountSheet = ({ visible, onClose, onContinue, submitting }: Props)
                   </Box>
 
                   <Text variant="p6" color="textSecondary" mt="s">
-                    You get:{' '}
-                    {xlmOut.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{' '}
-                    XLM
+                    You get: {xlmOut} XLM
                   </Text>
 
                   {dirty && !!errors.amount && (

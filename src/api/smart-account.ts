@@ -24,7 +24,8 @@ import {
   TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
-import QuickCrypto from 'react-native-quick-crypto';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 import { deployMultisigAccount, deploySeedWalletAccount } from '@/src/api/smart-account-deploy';
 import { AccountSigner, encodeAccountInitParams } from '@/src/lib/account-signers';
@@ -67,9 +68,7 @@ const deploymentCache = new Map<string, { smartAccountAddress: string; gAddress?
 
 async function deriveSalt(input: string): Promise<Buffer> {
   const SMART_ACCOUNT_VERSION = 'factory-v2';
-  const saltHex = QuickCrypto.createHash('sha256')
-    .update(input + SMART_ACCOUNT_VERSION)
-    .digest('hex');
+  const saltHex = bytesToHex(sha256(utf8ToBytes(input + SMART_ACCOUNT_VERSION)));
   return Buffer.from(saltHex, 'hex');
 }
 

@@ -29,6 +29,13 @@ export function friendlyTxError(err: unknown): string {
     return 'Your account credential has changed. Re-initialize the account to continue.';
   }
 
+  // Platform passkey (Google Password Manager / iCloud Keychain) has no
+  // locally readable private key — the mismatch-repair / WCK-bundle-opening
+  // paths that need one don't apply to this signer.
+  if (msg.startsWith('PASSKEY_IS_PLATFORM') || lower.includes('passkey_is_platform')) {
+    return "This device's passkey is a synced passkey and doesn't support this action.";
+  }
+
   // Contract rejected the authorization: the signing device isn't an
   // accepted signer for this wallet (e.g. signing a shared wallet from a
   // device that isn't one of its owners, or a stale signer).

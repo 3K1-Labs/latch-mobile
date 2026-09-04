@@ -38,7 +38,11 @@ import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signe
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
-import { createPasskeyCredential, storePasskeyCredentialAtIndex } from '@/src/lib/passkey-webauthn';
+import {
+  notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
+  provisionPasskeyAtIndex,
+} from '@/src/lib/provision-passkey';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
   getPasskeyStorageKeys,
@@ -495,15 +499,23 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
           SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
         );
         const useBiometric = requiresBiometric !== 'false';
-        const credential = createPasskeyCredential();
-        await storePasskeyCredentialAtIndex(credential, currentLength, useBiometric);
-        newAccount = await addPasskeyAccount(credential.credentialId, credential.publicKeyHex);
+
+        // Prefer a real platform passkey (synced via Google Password Manager /
+        // iCloud Keychain) for this additional account, same as onboarding.
+        const provisioned = await provisionPasskeyAtIndex(currentLength, {
+          requireBiometric: useBiometric,
+          displayName: name,
+        });
+        notifyIfDeviceOnly(provisioned);
+        notifyIfWeakBiometricGate(provisioned);
+        const { credentialId, publicKeyHex, keyDataHex } = provisioned;
+
+        newAccount = await addPasskeyAccount(credentialId, publicKeyHex);
 
         await renameAccount(currentLength, name);
         if (image) await setAccountImage(currentLength, image);
 
-        const keyDataHex = credential.publicKeyHex + credential.credentialId;
-        const result = await deploySmartAccountPasskey(credential.credentialId, keyDataHex, true);
+        const result = await deploySmartAccountPasskey(credentialId, keyDataHex, true);
         if (result.error) throw new Error(result.error);
         await updateAccountSmartAddress(newAccount.index, result.smartAccountAddress);
       }

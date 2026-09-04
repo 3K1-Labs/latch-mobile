@@ -2,7 +2,11 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
-import { createPasskeyCredential, storePasskeyCredential } from '@/src/lib/passkey-webauthn';
+import {
+  notifyIfDeviceOnly,
+  notifyIfWeakBiometricGate,
+  provisionPasskeyAtIndex,
+} from '@/src/lib/provision-passkey';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,11 +29,21 @@ import {
   Vibration,
   View,
 } from 'react-native';
-import QuickCrypto from 'react-native-quick-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { hashPin } from '@/src/lib/hash-pin';
 
-function hashPin(pin: string): string {
-  return QuickCrypto.createHash('sha256').update(pin).digest('hex') as unknown as string;
+/**
+ * Provision the primary passkey credential (account list index 0).
+ *
+ * Prefers a real platform passkey — synced via Google Password Manager
+ * (Android) or iCloud Keychain (iOS), whichever the OS's own passkey sheet
+ * offers — over a SecureStore-only key, and tells the user when it had to
+ * settle for the latter. See provision-passkey.ts.
+ */
+async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void> {
+  const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric });
+  notifyIfDeviceOnly(provisioned);
+  notifyIfWeakBiometricGate(provisioned);
 }
 
 const MAX_ATTEMPTS = 5;
@@ -267,8 +281,7 @@ const Biometrics = () => {
     try {
       const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
       if (!existingCredId) {
-        const credential = createPasskeyCredential();
-        await storePasskeyCredential(credential, false);
+        await provisionPrimaryPasskey(false);
       }
       router.replace(
         from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
@@ -314,8 +327,7 @@ const Biometrics = () => {
       // and the user is not left in a broken state on next launch.
       const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
       if (!existingCredId) {
-        const credential = createPasskeyCredential();
-        await storePasskeyCredential(credential);
+        await provisionPrimaryPasskey(true);
       }
       await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
 
@@ -324,8 +336,13 @@ const Biometrics = () => {
       router.replace(
         from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
       );
-    } catch {
-      Alert.alert('Setup Failed', 'Could not save your biometric credential. Please try again.', [
+    } catch (err) {
+      // Bound, not discarded. This catch used to swallow the error whole, so a
+      // Class 2-only device produced a bare "try again" with no trace anywhere:
+      // metro strips console.* from release builds and EXPO_PUBLIC_SENTRY_DSN
+      // is unset, so Sentry.init is a no-op. The message is the diagnosis.
+      const reason = err instanceof Error ? err.message : String(err);
+      Alert.alert('Setup Failed', `Could not save your biometric credential.\n\n${reason}`, [
         { text: 'OK' },
       ]);
     } finally {

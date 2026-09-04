@@ -19,12 +19,12 @@ import '../shim';
 import { queryClient } from '../src/api/client';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
-import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
 import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
+import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
 // Wire React Query's online/offline state to the device's actual connectivity.
@@ -41,11 +41,26 @@ if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     environment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    integrations: [Sentry.mobileReplayIntegration()],
     // Any non-dev build, not just production: a TestFlight/preview build is
     // precisely the case that can't be debugged locally, and console.* is
     // stripped there (metro.config.js drop_console), so Sentry is the only
     // channel left. `environment` still separates staging from production.
     enabled: !__DEV__,
+    // A sampler, not a flat tracesSampleRate. Nothing here is auto-instrumented
+    // — no navigation or HTTP integration is wired up — so today a flat rate
+    // would behave identically. It would stop behaving identically the moment
+    // someone adds navigation instrumentation, at which point a wallet starts
+    // shipping a trace for every screen. Naming what we want to measure keeps
+    // that decision explicit: account deployment is rare, slow, and the only
+    // flow we need percentiles for.
+    //
+    // Only root spans reach the sampler; children inherit the decision, so
+    // matching `deploy.account` also keeps its passkey/challenge/submit spans.
+    tracesSampler: (ctx) =>
+      typeof ctx.name === 'string' && ctx.name.startsWith('deploy.') ? 1 : 0,
   });
 }
 
@@ -93,7 +108,7 @@ function RootLayoutContent() {
   );
 }
 
-export default function RootLayout() {
+export default Sentry.wrap(function RootLayout() {
   // Gates rendering until the persisted network choice is applied, so no query
   // or screen reads a network-derived value while it's still the default.
   const [networkReady, setNetworkReady] = useState(false);
@@ -141,4 +156,4 @@ export default function RootLayout() {
       </KeyboardProvider>
     </GestureHandlerRootView>
   );
-}
+});
