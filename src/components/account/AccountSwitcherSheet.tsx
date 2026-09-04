@@ -53,7 +53,6 @@ import {
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
-import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
