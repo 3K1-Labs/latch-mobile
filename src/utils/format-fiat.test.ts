@@ -67,6 +67,13 @@ describe('formatFiat', () => {
     expect(result.text).toContain('(USD)');
   });
 
+  it('renders CAD/AUD/MXN with a plain $ rather than a country-prefixed symbol', () => {
+    for (const currency of ['CAD', 'AUD', 'MXN']) {
+      const result = formatFiat({ usdAmount: 20, selectedCurrency: currency, usdToSelectedRate: 1 });
+      expect(result.text).toBe('$20.00');
+    }
+  });
+
   it('prefixes an approximate marker when asked', () => {
     const result = formatFiat({
       usdAmount: 1,

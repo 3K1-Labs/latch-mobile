@@ -58,11 +58,15 @@ export interface LookupResult {
  *
  * @param credentialId  Local credential identifier (cache + SecureStore key)
  * @param keyDataHex    Uncompressed P-256 pubkey (65B = 130 hex) + credentialId hex (16B = 32 hex)
+ * @param label         Fed to latch-api's passkey-credentials recovery index; see provision-passkey.ts
+ * @param seq           The seq baked into `label`
  */
 export async function deploySmartAccount(
   credentialId: string,
   keyDataHex: string,
   skipCache = false,
+  label?: string,
+  seq?: number,
 ): Promise<DeployResult> {
   if (!keyDataHex || keyDataHex.length < 132) {
     return {
@@ -113,6 +117,8 @@ export async function deploySmartAccount(
     const { smartAccountAddress, alreadyDeployed } = await deployPasskeyAccount(
       credentialId,
       keyDataHex,
+      label,
+      seq,
     );
 
     if (__DEV__) console.log('[passkey] deployed:', smartAccountAddress);

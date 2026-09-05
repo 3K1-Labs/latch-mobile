@@ -32,6 +32,31 @@ jest.mock('react-native-quick-crypto', () => ({
 
 jest.mock('@sentry/react-native', () => ({ captureException: jest.fn() }));
 
+// provision-passkey.ts reads/bumps a monotonic counter (PASSKEY_SEQ) to number
+// passkeys in the OS credential manager. expo-secure-store is a native module
+// that throws under plain Node, and @/src/store/wallet pulls it in transitively,
+// so both are mocked here — same reason platform-passkey / passkey-webauthn are.
+const mockSecureStore = new Map<string, string>();
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn((key: string) => Promise.resolve(mockSecureStore.get(key) ?? null)),
+  setItemAsync: jest.fn((key: string, value: string) => {
+    mockSecureStore.set(key, value);
+    return Promise.resolve();
+  }),
+}));
+
+jest.mock('@/src/store/wallet', () => ({
+  SECURE_KEYS: {
+    PASSKEY_SEQ: 'latch_passkey_seq',
+    PASSKEY_LABEL: 'latch_passkey_label',
+    PASSKEY_LABEL_SEQ: 'latch_passkey_label_seq',
+  },
+  getPasskeyStorageKeys: (listIndex: number) => ({
+    label: `latch_passkey_label_${listIndex}`,
+    labelSeq: `latch_passkey_label_seq_${listIndex}`,
+  }),
+}));
+
 // Class 3 by default; individual tests drop it to Class 2 to exercise the
 // Android path where Keystore cannot bind a key to a weak biometric.
 jest.mock('expo-local-authentication', () => ({
@@ -81,6 +106,7 @@ describe('provisionPasskeyAtIndex', () => {
     jest.clearAllMocks();
     delete stored.local;
     delete stored.platform;
+    mockSecureStore.clear();
     (platformModule.isPlatformPasskeySupported as jest.Mock).mockReturnValue(true);
     (localAuth.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(localAuth.SecurityLevel.BIOMETRIC_STRONG);
     jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -93,9 +119,48 @@ describe('provisionPasskeyAtIndex', () => {
 
     const result = await provisionPasskeyAtIndex(0, { requireBiometric: true });
 
-    expect(result).toEqual({ ...platformCredential, kind: 'platform' });
+    expect(result).toEqual({
+      ...platformCredential,
+      kind: 'platform',
+      passkeyName: 'Latch Wallet 1',
+      seq: 1,
+    });
     expect(stored.platform).toEqual({ credential: platformCredential, index: 0 });
     expect(stored.local).toBeUndefined();
+  });
+
+  it('numbers passkeys with a monotonic counter, not the list index', async () => {
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockResolvedValue(
+      platformCredential,
+    );
+
+    await provisionPasskeyAtIndex(0, { requireBiometric: true });
+    await provisionPasskeyAtIndex(0, { requireBiometric: true, accountLabel: 'Savings' });
+
+    const [first, second] = (platformModule.createPlatformPasskeyCredential as jest.Mock).mock.calls;
+    // Both fields carry the readable name — iOS shows user.name (not
+    // displayName) in the iCloud Keychain entry.
+    expect(first[0]).toMatchObject({ userName: 'Latch Wallet 1', userDisplayName: 'Latch Wallet 1' });
+    // Second create at the same index still gets 2, and folds in the label.
+    expect(second[0]).toMatchObject({
+      userName: 'Savings (Latch 2)',
+      userDisplayName: 'Savings (Latch 2)',
+    });
+  });
+
+  it('still names the passkey when the seq counter cannot be read', async () => {
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockResolvedValue(
+      platformCredential,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require('expo-secure-store').getItemAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('keychain unavailable'),
+    );
+
+    await provisionPasskeyAtIndex(3, { requireBiometric: true });
+
+    const [call] = (platformModule.createPlatformPasskeyCredential as jest.Mock).mock.calls;
+    expect(call[0]).toMatchObject({ userName: 'Latch Wallet 1' });
   });
 
   it('falls back to a device-only key and names the reason when the sheet is dismissed', async () => {
@@ -138,7 +203,12 @@ describe('notifyIfDeviceOnly', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('says nothing for a platform passkey', () => {
-    notifyIfDeviceOnly({ ...platformCredential, kind: 'platform' });
+    notifyIfDeviceOnly({
+      ...platformCredential,
+      kind: 'platform',
+      passkeyName: 'Latch Wallet 1',
+      seq: 1,
+    });
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
@@ -149,6 +219,8 @@ describe('notifyIfDeviceOnly', () => {
       keyDataHex: '04aabb',
       kind: 'local',
       deviceOnlyReason: 'the system passkey sheet was dismissed',
+      passkeyName: 'Latch Wallet 1',
+      seq: 1,
     });
 
     const [, body] = (Alert.alert as jest.Mock).mock.calls[0];
@@ -230,6 +302,8 @@ describe('notifyIfWeakBiometricGate', () => {
       keyDataHex: 'ab',
       kind: 'local',
       biometricGate: 'app',
+      passkeyName: 'Latch Wallet 1',
+      seq: 1,
     });
     expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
@@ -241,6 +315,8 @@ describe('notifyIfWeakBiometricGate', () => {
       keyDataHex: 'ab',
       kind: 'local',
       biometricGate: 'keystore',
+      passkeyName: 'Latch Wallet 1',
+      seq: 1,
     });
     expect(Alert.alert).not.toHaveBeenCalled();
   });

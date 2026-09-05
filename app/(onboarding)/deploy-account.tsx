@@ -22,6 +22,7 @@ import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import DeployTimeline, { type DeployStep, type StepStatus } from '@/src/components/deploy/DeployTimeline';
 import {
+  getStoredPasskeyLabel,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
   provisionPasskeyAtIndex,
@@ -81,12 +82,25 @@ async function tryBiometricAuth(promptMessage: string): Promise<boolean> {
 async function getOrCreatePasskeyCredentials(): Promise<{
   credentialId: string;
   keyDataHex: string;
+  /** The name provisioning computed for this passkey, if known — see getStoredPasskeyLabel. Undefined only for a slot that predates this being stored. */
+  passkeyName?: string;
+  seq?: number;
 }> {
   const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
   const existingKeyData = await SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX);
 
   if (existingCredId && existingKeyData) {
-    return { credentialId: existingCredId, keyDataHex: existingKeyData };
+    // Credentials were created on the biometric screen, in a separate call to
+    // provisionPasskeyAtIndex — read back the name it computed then rather
+    // than recomputing, which would bump the seq counter again and disagree
+    // with whatever the OS sheet actually showed the user.
+    const stored = await getStoredPasskeyLabel(0);
+    return {
+      credentialId: existingCredId,
+      keyDataHex: existingKeyData,
+      passkeyName: stored?.passkeyName,
+      seq: stored?.seq,
+    };
   }
 
   // Credentials missing — re-create, preferring biometrics if the device supports them.
@@ -106,7 +120,12 @@ async function getOrCreatePasskeyCredentials(): Promise<{
   notifyIfDeviceOnly(provisioned);
   notifyIfWeakBiometricGate(provisioned);
 
-  return { credentialId: provisioned.credentialId, keyDataHex: provisioned.keyDataHex };
+  return {
+    credentialId: provisioned.credentialId,
+    keyDataHex: provisioned.keyDataHex,
+    passkeyName: provisioned.passkeyName,
+    seq: provisioned.seq,
+  };
 }
 
 const DeployAccount = () => {
@@ -186,7 +205,7 @@ const DeployAccount = () => {
             // biometric setup screen; retrieve it and deploy with WebAuthn signer.
             span.setAttribute('signer', 'passkey');
             setStage('auth');
-            const { credentialId, keyDataHex } = await Sentry.startSpan(
+            const { credentialId, keyDataHex, passkeyName, seq } = await Sentry.startSpan(
               { name: 'passkey.provision', op: 'passkey.ceremony' },
               () => getOrCreatePasskeyCredentials(),
             );
@@ -198,7 +217,13 @@ const DeployAccount = () => {
             // a callback now, so a bare `return` would only end the span.
             if (cancelled) return null;
             setStage('deploying');
-            const result = await deploySmartAccountPasskey(credentialId, keyDataHex);
+            const result = await deploySmartAccountPasskey(
+              credentialId,
+              keyDataHex,
+              false,
+              passkeyName,
+              seq,
+            );
             if (result.error) throw new Error(result.error);
             return result.smartAccountAddress;
           },

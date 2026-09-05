@@ -226,6 +226,9 @@ export async function deploySeedWalletAccount(
 export async function deployPasskeyAccount(
   credentialId: string,
   keyDataHex: string,
+  /** Fed straight into latch-api's passkey-credentials recovery index — see provision-passkey.ts. Omit when there's no computed name to send (never blocks the deploy itself). */
+  label?: string,
+  seq?: number,
 ): Promise<BackendDeployResult> {
   return withExpiredProofRetry(async () => {
     const nonceHex = await Sentry.startSpan(
@@ -241,6 +244,7 @@ export async function deployPasskeyAccount(
         xhrPost('/webauthn', {
           key_data_hex: keyDataHex,
           network: getNetworkId(),
+          ...(label ? { label, seq } : {}),
           proof: {
             nonce: nonceHex,
             signature: proof.signature,
