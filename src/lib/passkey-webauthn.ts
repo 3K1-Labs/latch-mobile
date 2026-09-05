@@ -276,7 +276,7 @@ export async function signWithPasskey(
  * The app-level PIN already gated access to this code path.
  *
  * @param authDigest   32-byte auth digest to sign
- * @param rpId         Relying party ID (e.g. "latch.finance")
+ * @param rpId         Relying party ID (e.g. "uselatch.app")
  * @param promptMsg    Message shown in the biometric prompt (biometric path only)
  */
 export async function signWithStoredPasskey(
@@ -294,7 +294,7 @@ export async function signWithStoredPasskey(
  *
  * @param listIndex    Position in the accounts array (0 = first account)
  * @param authDigest   32-byte auth digest to sign
- * @param rpId         Relying party ID (e.g. "latch.finance")
+ * @param rpId         Relying party ID (e.g. "uselatch.app")
  * @param promptMsg    Message shown in the biometric prompt (biometric path only)
  */
 /**

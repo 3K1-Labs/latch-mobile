@@ -83,7 +83,7 @@ export const BASE_RESERVE_MIN_COUNT = 2;
 // Must be a stable domain string — the on-chain verifier checks signature math, not this value.
 // Normalised to a bare domain: see normalizePasskeyRpId for what a scheme here breaks.
 const PASSKEY_RP_ID = normalizePasskeyRpId(
-  process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'michaelesenwa.me',
+  process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'uselatch.app',
 );
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
