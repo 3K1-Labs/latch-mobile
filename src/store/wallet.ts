@@ -39,6 +39,21 @@ export const SECURE_KEYS = {
   // Fingerprint of the keyDataHex used when the smart account was last deployed.
   // If this differs from the current KEY_DATA_HEX, the account must be re-deployed.
   DEPLOYED_KEY_DATA: 'latch_deployed_key_data',
+  // Monotonically increasing counter used to number platform passkeys in the OS
+  // credential manager ("Latch Wallet 1", "Latch Wallet 2", …). Never derived
+  // from accounts.length or a list index: removing an account and adding another
+  // reuses the index, which would mint two passkeys the OS chooser shows with
+  // the same name. Only ever incremented. See provision-passkey.ts.
+  PASSKEY_SEQ: 'latch_passkey_seq',
+  // The name computed for account index 0's passkey at creation time
+  // ("Latch Wallet 1", "Savings (Latch 2)") and the seq baked into it.
+  // Persisted so a later, separate deploy call — e.g. deploy-account.tsx
+  // picking up credentials that biometric.tsx already provisioned — can send
+  // latch-api's passkey-credentials index the same label the OS sheet showed,
+  // instead of recomputing (which would bump PASSKEY_SEQ again and disagree
+  // with it). See provision-passkey.ts.
+  PASSKEY_LABEL: 'latch_passkey_label',
+  PASSKEY_LABEL_SEQ: 'latch_passkey_label_seq',
   // Latch backend auth tokens
   ACCESS_TOKEN: 'latch_access_token',
   REFRESH_TOKEN: 'latch_refresh_token',
@@ -175,6 +190,10 @@ export function getPasskeyStorageKeys(listIndex: number): {
   requiresBiometric: string;
   kind: string;
   rpId: string;
+  /** The name shown for this slot's passkey at creation time ("Latch Wallet 2"). */
+  label: string;
+  /** The seq baked into `label`, as a string. */
+  labelSeq: string;
 } {
   if (listIndex === 0) {
     return {
@@ -184,6 +203,8 @@ export function getPasskeyStorageKeys(listIndex: number): {
       requiresBiometric: SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
       kind: SECURE_KEYS.PASSKEY_KIND,
       rpId: SECURE_KEYS.PASSKEY_RP_ID,
+      label: SECURE_KEYS.PASSKEY_LABEL,
+      labelSeq: SECURE_KEYS.PASSKEY_LABEL_SEQ,
     };
   }
   return {
@@ -193,6 +214,8 @@ export function getPasskeyStorageKeys(listIndex: number): {
     requiresBiometric: `latch_passkey_requires_biometric_${listIndex}`,
     kind: `latch_passkey_kind_${listIndex}`,
     rpId: `latch_passkey_rp_id_${listIndex}`,
+    label: `latch_passkey_label_${listIndex}`,
+    labelSeq: `latch_passkey_label_seq_${listIndex}`,
   };
 }
 

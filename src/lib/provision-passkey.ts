@@ -24,10 +24,12 @@
 
 import * as Sentry from '@sentry/react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
 import QuickCrypto from 'react-native-quick-crypto';
 
 import { PASSKEY_RP_ID } from '@/src/constants/config';
+import { getPasskeyStorageKeys, SECURE_KEYS } from '@/src/store/wallet';
 
 import { describePasskeyFailure } from './passkey-failure';
 import {
@@ -57,13 +59,30 @@ export interface ProvisionedPasskey {
    * platform path, where the OS ceremony owns user verification.
    */
   biometricGate?: 'keystore' | 'app' | 'none';
+  /**
+   * The name computed for this passkey ("Latch Wallet 2", "Savings (Latch 3)")
+   * — see buildPasskeyName. Present regardless of platform/local outcome, so
+   * callers can send it to latch-api's passkey-credentials index (the deploy
+   * call's `label` field) even when the OS ceremony fell back to a local key.
+   */
+  passkeyName: string;
+  /** The monotonic seq baked into `passkeyName`. */
+  seq: number;
 }
 
 export interface ProvisionPasskeyOptions {
   /** Gate the local key behind Face ID / Touch ID. Ignored on the platform path, where the OS ceremony does its own user verification. */
   requireBiometric: boolean;
-  /** Shown in the system passkey sheet. */
-  displayName?: string;
+  /**
+   * The account name the user chose, if any. Folded into the passkey's OS-level
+   * name so a device with several Latch passkeys can tell them apart — both in
+   * the sign-in sheet (`user.displayName`) and in the iCloud Keychain / Google
+   * Password Manager entry (`user.name`, the only per-credential text iOS shows
+   * there). A running number is always appended regardless; see
+   * buildPasskeyName. Omit on onboarding and the deploy-time fallback, which
+   * have no name yet — the passkey is then just "Latch Wallet N".
+   */
+  accountLabel?: string;
 }
 
 // Moved to ./passkey-failure so the signing path can share it without closing
@@ -111,6 +130,75 @@ async function resolveBiometricGate(
 }
 
 /**
+ * Next value of the passkey number shown in the OS credential manager.
+ *
+ * A standalone monotonic counter, not accounts.length: removing an account and
+ * adding another reuses the list index, and two passkeys numbered the same are
+ * indistinguishable in the system sign-in sheet. Reads, increments, persists.
+ * A read failure falls back to 1 rather than blocking provisioning — a
+ * duplicate number is cosmetic; a thrown error here is a dead end.
+ */
+async function nextPasskeySeq(): Promise<number> {
+  try {
+    const current = Number(await SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_SEQ)) || 0;
+    const next = current + 1;
+    await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_SEQ, String(next));
+    return next;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * The name a passkey carries in the OS: `<label> (Latch <n>)` when the user
+ * named the account, `Latch Wallet <n>` otherwise. Used for both `user.name`
+ * and `user.displayName` — the two fields surface in different places (the
+ * iCloud Keychain entry vs. the sign-in sheet) and iOS shows no `displayName`
+ * in the former, so an opaque `user.name` would leave that screen unreadable.
+ */
+function buildPasskeyName(seq: number, accountLabel?: string): string {
+  const label = accountLabel?.trim();
+  return label ? `${label} (Latch ${seq})` : `Latch Wallet ${seq}`;
+}
+
+/**
+ * Persist a slot's passkey name — either one this device just computed
+ * (provisionPasskeyAtIndex, so a later, separate deploy call can read it
+ * back) or one a fresh-device recovery lookup just discovered (see
+ * lookupWalletByPasskey in src/api/passkey-credential.ts), so this device
+ * has it locally from here on too.
+ */
+export async function storePasskeyLabel(
+  keys: ReturnType<typeof getPasskeyStorageKeys>,
+  passkeyName: string,
+  seq: number,
+): Promise<void> {
+  await Promise.all([
+    SecureStore.setItemAsync(keys.label, passkeyName),
+    SecureStore.setItemAsync(keys.labelSeq, String(seq)),
+  ]);
+}
+
+/**
+ * Read back the name provisionPasskeyAtIndex computed for a slot, for a
+ * caller that deploys separately from where provisioning happened (e.g.
+ * deploy-account.tsx picking up credentials biometric.tsx already created).
+ * Returns null for a slot that predates this (nothing stored) rather than
+ * fabricating a label — the deploy call already treats it as optional.
+ */
+export async function getStoredPasskeyLabel(
+  listIndex: number,
+): Promise<{ passkeyName: string; seq: number } | null> {
+  const keys = getPasskeyStorageKeys(listIndex);
+  const [passkeyName, seqStr] = await Promise.all([
+    SecureStore.getItemAsync(keys.label),
+    SecureStore.getItemAsync(keys.labelSeq),
+  ]);
+  if (!passkeyName) return null;
+  return { passkeyName, seq: Number(seqStr) || 0 };
+}
+
+/**
  * Create and store the passkey credential for an account list index, preferring
  * a real platform passkey and falling back to a local key.
  *
@@ -121,18 +209,27 @@ export async function provisionPasskeyAtIndex(
   listIndex: number,
   options: ProvisionPasskeyOptions,
 ): Promise<ProvisionedPasskey> {
+  // Computed once regardless of how provisioning ends up going: a local-key
+  // fallback still gets a name and seq, both so the SecureStore record stays
+  // consistent across every slot and so a caller need not branch on `kind`
+  // just to decide whether it has a label to send.
+  const seq = await nextPasskeySeq();
+  const passkeyName = buildPasskeyName(seq, options.accountLabel);
+  const keys = getPasskeyStorageKeys(listIndex);
+
   if (isPlatformPasskeySupported()) {
     try {
       const credential = await createPlatformPasskeyCredential({
         rpId: PASSKEY_RP_ID,
         rpName: 'Latch',
         userId: new Uint8Array(QuickCrypto.randomBytes(16)),
-        userName: 'latch-wallet',
-        userDisplayName: options.displayName || 'Latch Wallet',
+        userName: passkeyName,
+        userDisplayName: passkeyName,
         challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
       });
       await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
-      return { ...credential, kind: 'platform' };
+      await storePasskeyLabel(keys, passkeyName, seq);
+      return { ...credential, kind: 'platform', passkeyName, seq };
     } catch (err) {
       const deviceOnlyReason = describePasskeyFailure(err, PASSKEY_RP_ID);
       // Warn, not log-in-__DEV__-only: on a real build this line is the only
@@ -163,6 +260,7 @@ export async function provisionPasskeyAtIndex(
       const local = createPasskeyCredential();
       const gate = await resolveBiometricGate(options.requireBiometric);
       await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
+      await storePasskeyLabel(keys, passkeyName, seq);
       return {
         credentialId: local.credentialId,
         publicKeyHex: local.publicKeyHex,
@@ -170,6 +268,8 @@ export async function provisionPasskeyAtIndex(
         kind: 'local',
         deviceOnlyReason,
         biometricGate: gate,
+        passkeyName,
+        seq,
       };
     }
   }
@@ -177,6 +277,7 @@ export async function provisionPasskeyAtIndex(
   const local = createPasskeyCredential();
   const gate = await resolveBiometricGate(options.requireBiometric);
   await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
+  await storePasskeyLabel(keys, passkeyName, seq);
   return {
     credentialId: local.credentialId,
     publicKeyHex: local.publicKeyHex,
@@ -184,6 +285,8 @@ export async function provisionPasskeyAtIndex(
     kind: 'local',
     deviceOnlyReason: 'this device does not support passkeys',
     biometricGate: gate,
+    passkeyName,
+    seq,
   };
 }
 

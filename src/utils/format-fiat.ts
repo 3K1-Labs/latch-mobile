@@ -34,25 +34,26 @@ export function resolveDisplayCurrency(
   return { currency: DEFAULT_FIAT_CURRENCY, rate: 1, usedFallback: true };
 }
 
+/**
+ * Formats the number with Intl (grouping/decimals only, no `style: 'currency'`)
+ * and prepends our own symbol table. Hermes ships a stripped-down ICU that is
+ * missing narrow-symbol data for currencies like CAD/AUD/MXN, so asking Intl
+ * for a currency-styled string silently falls back to a country-prefixed
+ * symbol (`CA$`, `A$`, `MX$`) on-device even though it renders correctly in a
+ * full-ICU environment like Node. Formatting the number plain sidesteps that
+ * engine-dependent currency data entirely.
+ */
 function formatCurrencyNumber(
   amount: number,
   currency: string,
   maximumFractionDigits: number,
 ): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: Math.min(2, maximumFractionDigits),
-      maximumFractionDigits,
-    }).format(amount);
-  } catch {
-    const symbol = getFiatCurrency(currency).symbol;
-    return `${symbol}${amount.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits,
-    })}`;
-  }
+  const symbol = getFiatCurrency(currency).symbol;
+  const number = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: Math.min(2, maximumFractionDigits),
+    maximumFractionDigits,
+  }).format(amount);
+  return `${symbol}${number}`;
 }
 
 /**

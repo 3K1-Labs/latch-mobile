@@ -39,6 +39,7 @@ import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
 import {
+  getStoredPasskeyLabel,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
   provisionPasskeyAtIndex,
@@ -504,18 +505,24 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
         // iCloud Keychain) for this additional account, same as onboarding.
         const provisioned = await provisionPasskeyAtIndex(currentLength, {
           requireBiometric: useBiometric,
-          displayName: name,
+          accountLabel: name,
         });
         notifyIfDeviceOnly(provisioned);
         notifyIfWeakBiometricGate(provisioned);
-        const { credentialId, publicKeyHex, keyDataHex } = provisioned;
+        const { credentialId, publicKeyHex, keyDataHex, passkeyName, seq } = provisioned;
 
         newAccount = await addPasskeyAccount(credentialId, publicKeyHex);
 
         await renameAccount(currentLength, name);
         if (image) await setAccountImage(currentLength, image);
 
-        const result = await deploySmartAccountPasskey(credentialId, keyDataHex, true);
+        const result = await deploySmartAccountPasskey(
+          credentialId,
+          keyDataHex,
+          true,
+          passkeyName,
+          seq,
+        );
         if (result.error) throw new Error(result.error);
         await updateAccountSmartAddress(newAccount.index, result.smartAccountAddress);
       }
@@ -563,7 +570,14 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
     try {
       if (account.credentialId) {
         const keyDataHex = account.publicKeyHex + account.credentialId;
-        const result = await deploySmartAccountPasskey(account.credentialId, keyDataHex, true);
+        const stored = await getStoredPasskeyLabel(listIndex);
+        const result = await deploySmartAccountPasskey(
+          account.credentialId,
+          keyDataHex,
+          true,
+          stored?.passkeyName,
+          stored?.seq,
+        );
         if (result.error) throw new Error(result.error);
         await updateAccountSmartAddress(account.index, result.smartAccountAddress);
       } else {
