@@ -15,9 +15,9 @@ const sentry = env.SENTRY_AUTH_TOKEN;
 // `webcredentials` entry for this app served from that domain (backend/infra
 // change, outside this repo).
 // Normalised the same way as normalizePasskeyRpId in
-// src/constants/passkey-rp-id.ts — an RP ID configured as a URL would produce
+// src/lib/passkey-rp-id.ts — an RP ID configured as a URL would produce
 // `webcredentials:https://example.com`, which iOS cannot parse.
-const passkeyRpId = (env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://michaelesenwa.me')
+const passkeyRpId = (env.EXPO_PUBLIC_PASSKEY_RP_ID || 'uselatch.app')
   .trim()
   .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
   .replace(/\/.*$/, '');

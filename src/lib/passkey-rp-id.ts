@@ -5,7 +5,7 @@
  * https:// scheme in front, and iOS's associated domain is `webcredentials:` +
  * the domain.
  *
- * EXPO_PUBLIC_PASSKEY_RP_ID has been set to a URL ("https://michaelesenwa.me")
+ * EXPO_PUBLIC_PASSKEY_RP_ID has been set to a URL ("https://uselatch.app")
  * more than once, which produced a wrong rpIdHash, an origin with two schemes,
  * and an unparsable associated domain — all silently, because nothing rejects a
  * scheme until latch-api rejects the assertion. Normalising once at the edge is

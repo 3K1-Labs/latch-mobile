@@ -108,8 +108,8 @@ That gives you `AA:BB:CC:…` in the same shape `assetlinks.json` uses.
 ## Step 4 — Check the domain side
 
 ```bash
-curl -sSI https://michaelesenwa.me/.well-known/assetlinks.json
-curl -sS  https://michaelesenwa.me/.well-known/assetlinks.json | python3 -m json.tool
+curl -sSI https://uselatch.app/.well-known/assetlinks.json
+curl -sS  https://uselatch.app/.well-known/assetlinks.json | python3 -m json.tool
 ```
 
 All of these must hold, and Android is unforgiving about every one:
@@ -125,7 +125,7 @@ Then ask Google, since Google's copy is what Play Services actually consults:
 
 ```bash
 curl -sS "https://digitalassetlinks.googleapis.com/v1/statements:list?\
-source.web.site=https://michaelesenwa.me&\
+source.web.site=https://uselatch.app&\
 relation=delegate_permission/common.get_login_creds" | python3 -m json.tool
 ```
 
@@ -227,7 +227,7 @@ Then point Claude Code at it:
 > Android phone and the passkey ceremony failed. Find the Credential Manager
 > and Play Services lines around the failure, tell me whether the asset-links
 > check failed and why, and compare the installed APK's signing certificate
-> against `https://michaelesenwa.me/.well-known/assetlinks.json`.
+> against `https://uselatch.app/.well-known/assetlinks.json`.
 
 It can run steps 2 through 4 itself. Give it the log and the phone, and it will
 do the fingerprint comparison faster than you'll read the first screenful.

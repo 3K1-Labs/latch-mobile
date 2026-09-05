@@ -9,9 +9,10 @@ read by anyone.
 
 **Put every Latch client on one passkey domain that the company owns.**
 
-Today a passkey created on a phone is permanently tied to `michaelesenwa.me`,
-a personal domain. The browser extension ties its passkeys to its own Chrome
-extension ID. The web app uses a third value. A passkey only ever works for
+Until 2026-09-05 a passkey created on a phone was permanently tied to
+`michaelesenwa.me`, a personal domain; the mobile app now uses `uselatch.app`
+(see "The domain" below). The browser extension ties its passkeys to its own
+Chrome extension ID. The web app uses a third value. A passkey only ever works for
 the exact domain it was created under, so right now a passkey made on a phone
 can never be used on the web or in the extension, and vice versa, no matter
 how well it syncs.
@@ -46,14 +47,16 @@ project with one domain decision.
 
 | Client | Passkey domain today | Files hosted for it |
 | --- | --- | --- |
-| Android app | `michaelesenwa.me` | `assetlinks.json` served, valid, and matches the shipped Play signing certificate (verified on a real device 2026-09-03) |
-| iOS app | `michaelesenwa.me` | `apple-app-site-association` served with the right Team ID and bundle IDs (not yet verified on a real iPhone) |
+| Android app | `uselatch.app` (was `michaelesenwa.me` until 2026-09-05) | `assetlinks.json` served from `uselatch.app`, byte-identical to the file verified on a real device 2026-09-03; not yet re-verified on a device under the new domain |
+| iOS app | `uselatch.app` (was `michaelesenwa.me` until 2026-09-05) | `apple-app-site-association` served from `uselatch.app` with the right Team ID and bundle IDs (not yet verified on a real iPhone) |
 | Browser extension | its own Chrome extension ID | none needed, but this is why extension passkeys can never move to mobile |
 | Web app | set by an environment variable (`localhost` in the example config) | to be confirmed for production |
 
-The pairing screens also fall back to a fourth value (`latch.finance`) when
-the environment variable is unset. Harmless today because nothing checks it,
-but it is one more place that must change together with the rest.
+Every mobile fallback (`app.config.js`, `src/constants/config.ts`,
+`.env.example`) now defaults to `uselatch.app`; the stray `latch.finance`
+default is gone. Passkeys created under the old domain were testnet-only and
+are intentionally not supported: the mismatch guard in
+`src/lib/passkey-webauthn.ts` tells those users to set up a passkey again.
 
 ## Where things stand on the Android bug (#75)
 
@@ -141,10 +144,13 @@ looking it up.
 
 ## The domain: `uselatch.app`
 
-Purchased for the landing page, to be hosted on Vercel. It can serve both the
-landing page and the passkey proof files; no second domain is needed. Checked
-2026-09-03: still parked at Namecheap, not yet pointed at Vercel, so nothing
-existing has to be preserved.
+Purchased for the landing page, hosted on Vercel from the `latch-web` repo.
+It serves both the landing page and the passkey proof files; no second domain
+is needed. Checked 2026-09-05: both proof files answer 200 directly with
+`application/json`, `www` redirects to the bare domain, and the content is
+byte-identical to what `michaelesenwa.me` served. The mobile app was switched
+to it the same day (EAS `production` and `preview` environments, local env
+files, code fallbacks, iOS associated domain).
 
 Rules that must hold, in the order they usually go wrong:
 
@@ -173,8 +179,11 @@ an extension page; how it joins is the design question in Discussion #32.
 
 1. Decide the domain (the open question in #77) and confirm who deploys to it.
 2. Host both `.well-known` files there, copied from the current ones.
-3. Move mobile, web, and the extension to it, in one coordinated change, with
-   the old domain kept alive for existing users (sequencing in #77).
+3. Move mobile, web, and the extension to it. Mobile is done (2026-09-05);
+   no compatibility with the old domain was kept because all existing
+   passkeys were testnet-only. Web and extension remain (#77, Discussion #32).
+   latch-api's `WEBAUTHN_ALLOWED_ORIGINS` on Render must be
+   `https://uselatch.app`.
 4. Verify on real devices, both platforms, the same way #75 was verified.
 5. Then build address recovery from the passkey, so "I have a wallet" never
    asks for an address again.
