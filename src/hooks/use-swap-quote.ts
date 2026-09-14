@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
+import { getNetworkId } from '@/src/constants/config';
 import { usePrices } from '@/src/hooks/use-prices';
 import { getActiveSwapProvider } from '@/src/services/swap/registry';
 import type { SwapQuote } from '@/src/services/swap/types';
@@ -50,8 +51,19 @@ export class ImplausibleQuoteError extends Error {
  * Silently passes when either price is unknown — an unpriced token is not
  * evidence of a bad quote, and blocking it would break swaps for every token
  * outside the price feed.
+ *
+ * Also silently passes on testnet. `usePrices` is `/v1/prices`, a live
+ * CoinGecko lookup with no concept of network — it always reports the real
+ * mainnet price. Testnet AMM pools hold throwaway liquidity seeded at
+ * whatever ratio their creator picked, with no reason to track that price at
+ * all, so comparing the two on testnet doesn't test what this guard exists to
+ * catch (a real pool deliberately or accidentally skewed) — it just measures
+ * how close testnet liquidity happens to sit to the real market, which is
+ * arbitrary. Verified: a testnet Aquarius quote flagged 3.22x off reference
+ * purely from test-pool seeding, not a broken route.
  */
 function assertPlausibleRate(quote: SwapQuote, fromPrice: number, toPrice: number): void {
+  if (getNetworkId() === 'testnet') return;
   if (!(fromPrice > 0) || !(toPrice > 0) || !(quote.rate > 0)) return;
   const referenceRate = fromPrice / toPrice;
   const deviation = quote.rate / referenceRate;
