@@ -1,20 +1,28 @@
 /**
  * provision-passkey.test.ts
  *
- * The local-key fallback is disabled: a synced platform passkey is the only
- * supported way to back a wallet, so a failed or unavailable OS ceremony must
- * surface as a rejection carrying the reason — never a silent device-only key.
+ * provisionPasskeyAtIndex never falls back automatically: a failed or
+ * unavailable OS ceremony always surfaces as a PasskeyProvisionError carrying
+ * the reason. A device-only key can still be created (createDeviceOnlyPasskeyAtIndex),
+ * but only a caller that already has explicit consent (confirmDeviceOnlyFallback)
+ * may call it — never as a side effect of a ceremony failing.
  */
 
 import { Alert } from 'react-native';
 import { Passkey } from 'react-native-passkey';
 
 import {
+  classifyPasskeyFailure,
   clearProvisionedPasskeyAtIndex,
+  confirmDeviceOnlyFallback,
+  createDeviceOnlyPasskeyAtIndex,
   describePasskeyFailure,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
+  OFFER_DEVICE_ONLY_AFTER_ATTEMPTS,
+  PasskeyProvisionError,
   provisionPasskeyAtIndex,
+  shouldOfferDeviceOnlyFallback,
 } from '../provision-passkey';
 
 jest.mock('react-native', () => ({ Alert: { alert: jest.fn() } }));
@@ -290,11 +298,12 @@ describe('notifyIfDeviceOnly', () => {
 });
 
 /**
- * With the local-key fallback disabled, a failed OS ceremony rejects no matter
- * what biometric the caller asked for — there is no device-only key left to
- * gate, and none of the expo-secure-store / Class 2 machinery is reached.
+ * provisionPasskeyAtIndex itself never produces a device-only key — a failed
+ * OS ceremony rejects no matter what biometric the caller asked for, and none
+ * of the expo-secure-store / Class 2 machinery is reached. A device-only key
+ * only exists via the separate, explicit createDeviceOnlyPasskeyAtIndex below.
  */
-describe('failed ceremony never yields a device-only key', () => {
+describe('provisionPasskeyAtIndex never yields a device-only key on its own', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete stored.local;
@@ -390,5 +399,145 @@ describe('describePasskeyFailure sentence folding', () => {
       'latch.finance',
     );
     expect(reason).toContain('could not be verified against');
+  });
+});
+
+describe('classifyPasskeyFailure', () => {
+  it('reads a dismissed sheet as cancelled, not a failure', () => {
+    expect(classifyPasskeyFailure({ error: 'UserCancelled' })).toBe('cancelled');
+  });
+
+  it("reads Android's ambiguous selector-cancellation message as cancelled too", () => {
+    expect(classifyPasskeyFailure({ message: 'User canceled the selector' })).toBe('cancelled');
+  });
+
+  it.each(['NotSupported', 'NoCreateOption'])('reads %s as unsupported', (error) => {
+    expect(classifyPasskeyFailure({ error })).toBe('unsupported');
+  });
+
+  it('reads anything else as other', () => {
+    expect(classifyPasskeyFailure({ error: 'BadConfiguration' })).toBe('other');
+    expect(classifyPasskeyFailure({ message: 'boom' })).toBe('other');
+    expect(classifyPasskeyFailure({})).toBe('other');
+  });
+});
+
+describe('shouldOfferDeviceOnlyFallback', () => {
+  it('never offers it for a cancelled sheet, regardless of attempt count', () => {
+    expect(shouldOfferDeviceOnlyFallback('cancelled', 99)).toBe(false);
+  });
+
+  it('offers it immediately for an unsupported device', () => {
+    expect(shouldOfferDeviceOnlyFallback('unsupported', 1)).toBe(true);
+  });
+
+  it('withholds it for an ordinary failure until enough attempts have failed', () => {
+    expect(shouldOfferDeviceOnlyFallback('other', 1)).toBe(false);
+    expect(shouldOfferDeviceOnlyFallback('other', OFFER_DEVICE_ONLY_AFTER_ATTEMPTS)).toBe(true);
+  });
+});
+
+describe('provisionPasskeyAtIndex — PasskeyProvisionError.kind', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (platformModule.isPlatformPasskeySupported as jest.Mock).mockReturnValue(true);
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('classifies a dismissed sheet as cancelled', async () => {
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockRejectedValue({
+      error: 'UserCancelled',
+    });
+    await expect(provisionPasskeyAtIndex(0, { requireBiometric: true })).rejects.toMatchObject({
+      kind: 'cancelled',
+    });
+  });
+
+  it('classifies an unsupported device as unsupported, without attempting the ceremony', async () => {
+    (platformModule.isPlatformPasskeySupported as jest.Mock).mockReturnValue(false);
+    await expect(provisionPasskeyAtIndex(0, { requireBiometric: true })).rejects.toMatchObject({
+      kind: 'unsupported',
+    });
+    expect(platformModule.createPlatformPasskeyCredential).not.toHaveBeenCalled();
+  });
+
+  it('classifies any other ceremony error as other', async () => {
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockRejectedValue({
+      error: 'BadConfiguration',
+    });
+    await expect(provisionPasskeyAtIndex(0, { requireBiometric: true })).rejects.toMatchObject({
+      kind: 'other',
+    });
+  });
+
+  it('never logs to Sentry for a plain cancellation', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/react-native');
+    (platformModule.createPlatformPasskeyCredential as jest.Mock).mockRejectedValue({
+      error: 'UserCancelled',
+    });
+    await expect(provisionPasskeyAtIndex(0, { requireBiometric: true })).rejects.toThrow();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+});
+
+describe('createDeviceOnlyPasskeyAtIndex', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete stored.local;
+    delete stored.platform;
+    mockSecureStore.clear();
+    (localAuth.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(
+      localAuth.SecurityLevel.BIOMETRIC_STRONG,
+    );
+  });
+
+  it('stores a local credential and reports kind=local', async () => {
+    const result = await createDeviceOnlyPasskeyAtIndex(0, { requireBiometric: true });
+
+    expect(result.kind).toBe('local');
+    expect(result.biometricGate).toBe('keystore');
+    expect(stored.local).toMatchObject({ index: 0, requireBiometric: true });
+    // Only this function's own SecureStore write happened — nothing here
+    // touches the platform-credential path.
+    expect(stored.platform).toBeUndefined();
+  });
+});
+
+describe('confirmDeviceOnlyFallback', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('resolves false when the user cancels', async () => {
+    (Alert.alert as jest.Mock).mockImplementation((_title, _body, buttons) => {
+      buttons.find((b: { text: string }) => b.text === 'Cancel').onPress();
+    });
+    await expect(confirmDeviceOnlyFallback()).resolves.toBe(false);
+  });
+
+  it('resolves true when the user continues', async () => {
+    (Alert.alert as jest.Mock).mockImplementation((_title, _body, buttons) => {
+      buttons.find((b: { text: string }) => /Continue/.test(b.text)).onPress();
+    });
+    await expect(confirmDeviceOnlyFallback()).resolves.toBe(true);
+  });
+
+  it('warns about no sync and prompts to set up recovery', async () => {
+    (Alert.alert as jest.Mock).mockImplementation((_title, _body, buttons) => {
+      buttons[0].onPress();
+    });
+    await confirmDeviceOnlyFallback();
+    const [, body] = (Alert.alert as jest.Mock).mock.calls[0];
+    expect(body).toContain('iCloud Keychain');
+    expect(body).toContain('Google Password Manager');
+    expect(body).toContain('recovery');
+  });
+});
+
+describe('PasskeyProvisionError', () => {
+  it('is an instance of Error', () => {
+    const err = new PasskeyProvisionError('boom', 'other');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.kind).toBe('other');
+    expect(err.name).toBe('PasskeyProvisionError');
   });
 });
