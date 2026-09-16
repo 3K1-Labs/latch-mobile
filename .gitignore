@@ -2,7 +2,7 @@
 
 # dependencies
 node_modules/
-
+node_modules 11.09.48 AM/
 # Expo
 .expo/
 dist/

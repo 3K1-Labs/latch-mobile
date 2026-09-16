@@ -1,13 +1,13 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { useAddressBook } from '@/src/hooks/use-address-book';
+import { useAddressBookStore } from '@/src/store/address-book';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
 import * as Clipboard from 'expo-clipboard';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, TextInput, TouchableOpacity } from 'react-native';
 import { Recipient } from './types';
 
@@ -20,7 +20,17 @@ const RecipientStep = ({ onSelectWallet, initialAddress }: Props) => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const [address, setAddress] = useState(initialAddress ?? '');
-  const { entries } = useAddressBook();
+  const addressBookEntries = useAddressBookStore((s) => s.entries);
+  const rehydrateAddressBook = useAddressBookStore((s) => s.rehydrate);
+
+  useEffect(() => {
+    rehydrateAddressBook();
+  }, [rehydrateAddressBook]);
+
+  const entries = useMemo(
+    () => Object.values(addressBookEntries).sort((a, b) => a.createdAt - b.createdAt),
+    [addressBookEntries],
+  );
 
   const isValid = StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
 
