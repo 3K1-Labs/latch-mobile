@@ -11,9 +11,9 @@ import { getNetworkId } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { usePortfolio, type TokenBalance } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
-import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
@@ -377,7 +377,7 @@ const Home = () => {
 
   return (
     <Box flex={1} backgroundColor="onboardingbg">
-      <StatusBar style={'light'} />
+      <StatusBar style={'dark'} />
       {/* Header */}
       <Box
         flexDirection="row"
@@ -613,7 +613,9 @@ const Home = () => {
                 <TokenRow
                   key={token.code + (token.issuer ?? '')}
                   token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
-                  fiatLabel={formatToken(token.amount, livePrices[token.code]?.price, { approx: false }).text}
+                  fiatLabel={
+                    formatToken(token.amount, livePrices[token.code]?.price, { approx: false }).text
+                  }
                   showBalance={showBalance}
                   isDark={isDark}
                   theme={theme}

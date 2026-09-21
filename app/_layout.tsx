@@ -95,6 +95,21 @@ function RootLayoutContent() {
         <Stack.Screen name="qrcode-scan" options={{ headerShown: false }} />
         <Stack.Screen name="filter-sheet" options={{ presentation: 'modal' }} />
         <Stack.Screen name="add-device" options={{ presentation: 'modal' }} />
+        {/*
+          gestureEnabled: false on both — each renders a ScrollView (added to
+          keep long error/device lists from pushing their CTA button
+          off-screen), and react-native-screens' interactive swipe-to-dismiss
+          gesture can end up competing with that ScrollView's own pan gesture
+          recognizer. Losing that race leaves touches on the presenting
+          screen unhandled after dismissal, even via the in-app back button
+          (not just an actual swipe) — reproduced on-device: navigating back
+          out of account-signers.tsx left the whole app unresponsive to
+          taps until it was killed and relaunched. Disabling the interactive
+          gesture removes the competing recognizer; the in-app back button is
+          unaffected and remains the only way to dismiss.
+        */}
+        <Stack.Screen name="add-backup-signer" options={{ presentation: 'modal', gestureEnabled: false }} />
+        <Stack.Screen name="account-signers" options={{ presentation: 'modal', gestureEnabled: false }} />
         <Stack.Screen name="pair-show-code" options={{ headerShown: false }} />
         <Stack.Screen name="pair-enter-code" options={{ headerShown: false }} />
         <Stack.Screen name="pair-show-qr" options={{ headerShown: false }} />

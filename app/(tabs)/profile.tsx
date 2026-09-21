@@ -76,6 +76,10 @@ const Profile = () => {
 
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
+  // Locally-cached backup signer count — good enough to decide which screen to
+  // open. account-signers.tsx always syncs from chain on mount, so a stale
+  // count only affects which route is pushed, not what the user sees there.
+  const backupSignerCount = activeAccount?.devices?.filter((d) => d.isBackupSigner).length ?? 0;
 
   if (!activeAccount) return null;
 
@@ -278,6 +282,26 @@ const Profile = () => {
               onPress={() => setPermissionsVisible(true)}
               image={require('@/src/assets/icon/mobile-shield-protection.png')}
             />
+            {isPasskeyAccount && (
+              <SettingItem
+                icon="key-outline"
+                label="Backup Signers"
+                value={backupSignerCount > 0 ? String(backupSignerCount) : undefined}
+                onPress={() => {
+                  // Close the drawer first — the drawer is a React Native Modal,
+                  // and navigating without dismissing it leaves its invisible
+                  // backdrop blocking all touches once the Expo Router modal
+                  // screen dismisses. Wait for the close animation (200ms) before
+                  // pushing, matching the pattern used for network switching above.
+                  closeDrawer();
+                  // If there are existing backup signers, go to the list so the
+                  // user can view or remove them. If there are none, go straight
+                  // to the add flow.
+                  const dest = backupSignerCount > 0 ? '/account-signers' : '/add-backup-signer';
+                  setTimeout(() => router.push(dest), 250);
+                }}
+              />
+            )}
             {/* <SettingItem
               icon="options-outline"
               label="Policies"

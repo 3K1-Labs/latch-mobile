@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { Formik } from 'formik';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
@@ -37,7 +38,13 @@ const PoliciesSheet = ({ visible, onClose }: Props) => {
   const activeAccount = accounts[activeAccountIndex];
   const accountAddress = activeAccount?.smartAccountAddress ?? '';
   const isMultisig = !!activeAccount?.isMultisig;
-  const signerCount = Math.max(activeAccount?.devices?.length ?? 1, 1);
+  // Backup signers (src/lib/backup-signer-tx.ts) never raise the account's
+  // approval threshold — the account stays 1-of-N no matter how many exist —
+  // so they must not inflate the "M of N" signer count shown here.
+  const signerCount = Math.max(
+    activeAccount?.devices?.filter((d) => !d.isBackupSigner).length ?? 1,
+    1,
+  );
 
   const { byAccount, rehydrate, setThreshold, setSpendLimit } = usePermissions();
   const policies = byAccount[accountAddress]?.policies;
@@ -176,6 +183,36 @@ const PoliciesSheet = ({ visible, onClose }: Props) => {
                         </Text>
                       )}
                     </Box>
+
+                    {!isMultisig && (
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          onClose();
+                          router.push('/account-signers');
+                        }}
+                      >
+                        <Box
+                          backgroundColor="bg11"
+                          borderRadius={24}
+                          padding="l"
+                          mb="l"
+                          flexDirection="row"
+                          alignItems="center"
+                          justifyContent="space-between"
+                        >
+                          <Box>
+                            <Text variant="h11" color="textPrimary" fontWeight="700" mb="xs">
+                              Signers
+                            </Text>
+                            <Text variant="p7" color="textSecondary">
+                              View, add, or remove backup signers
+                            </Text>
+                          </Box>
+                          <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+                        </Box>
+                      </TouchableOpacity>
+                    )}
 
                     {/* Spending-limit policy */}
                     <Box backgroundColor="bg11" borderRadius={24} padding="l" mb="l">

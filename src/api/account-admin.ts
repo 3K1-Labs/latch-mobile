@@ -343,6 +343,14 @@ export interface ChainSigner {
    * byte-compatible (isVerifierCompatible) before re-registering this signer.
    */
   foreignVerifier?: boolean;
+  /**
+   * The signer's stable on-chain id — its array index in the rule's Vec<Signer>,
+   * which is the u32 that `add_signer` returns and `remove_signer(rule_id, signer_id)`
+   * consumes. Populated whenever signers are read via `fetchDefaultContextRule` or
+   * `fetchContextRuleSigners` so that chain-discovered signers that were never
+   * locally persisted (e.g. added on another device) can still be removed.
+   */
+  signerId?: number;
 }
 
 export interface DefaultContextRule {
@@ -437,11 +445,39 @@ export async function fetchDefaultContextRule(
     }
     if (rule && isDefaultRuleType(rule.context_type)) {
       const ruleId = typeof rule.id === 'number' ? rule.id : i;
-      const signers = (rule.signers as any[]).map((s) => decodeChainSigner(s, verifiers));
+      // The Vec<Signer> array index IS the stable signer id used by remove_signer —
+      // the same u32 that add_signer returns in its resultMetaXdr. Attach it so
+      // callers (syncSignersFromChain) can populate Device.onChainSignerId for
+      // signers discovered here that were never locally persisted.
+      const signers = (rule.signers as any[]).map((s, idx) => ({
+        ...decodeChainSigner(s, verifiers),
+        signerId: idx,
+      }));
       return { ruleId, signers };
     }
   }
   throw new Error('no Default context rule found on account');
+}
+
+/**
+ * Read an arbitrary context rule's signer set by id, without searching for
+ * the Default rule. Callers that already know the id — e.g. `syncSignersFromChain`
+ * reading `WalletAccount.adminRuleId` to tell a multisig member apart from a
+ * backup signer — use this instead of `fetchDefaultContextRule`.
+ */
+export async function fetchContextRuleSigners(
+  p: SimulationParams,
+  accountAddress: string,
+  ruleId: number,
+): Promise<ChainSigner[]> {
+  const verifiers = await fetchFactoryVerifiers(p);
+  const rule: any = await simulateRead(p, accountAddress, 'get_context_rule', [
+    xdr.ScVal.scvU32(ruleId),
+  ]);
+  return (rule.signers as any[]).map((s, idx) => ({
+    ...decodeChainSigner(s, verifiers),
+    signerId: idx,
+  }));
 }
 
 /**
