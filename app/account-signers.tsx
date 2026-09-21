@@ -47,7 +47,6 @@ function summarizeError(message: string, max = 240): string {
 export default function AccountSigners() {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
-  const insets = useSafeAreaInsets();
   const { accounts, activeAccountIndex, updateAccountDevices, syncSignersFromChain } =
     useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
