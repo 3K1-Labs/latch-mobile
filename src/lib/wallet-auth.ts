@@ -25,9 +25,9 @@ import {
   TESTNET_NETWORK,
 } from '../constants/config';
 import { findDeployedNetwork } from './account-network';
-import { signWithPasskey } from './passkey-webauthn';
+import { signWithStoredPasskeyAtIndex } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
-import { getPasskeyStorageKeys, SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
+import { SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
 import { API_BASE_URL } from '@/src/constants/api-host';
 
 const API_ROOT = API_BASE_URL;
@@ -225,6 +225,22 @@ async function buildEd25519Payload(
   };
 }
 
+/**
+ * Position of `account` in the accounts array — what `getPasskeyStorageKeys`
+ * and `signWithStoredPasskeyAtIndex` key their SecureStore slots on. Matched
+ * by smart account address rather than object identity: `account` here may be
+ * a copy read fresh from the store rather than the exact stored reference.
+ * Falls back to 0 (the legacy non-indexed slot, where the first passkey
+ * credential always lives) rather than -1 on a miss — every passkey account
+ * has a credential somewhere, and 0 is the only slot guaranteed to exist.
+ */
+function resolvePasskeyListIndex(account: WalletAccount): number {
+  const idx = useWalletStore
+    .getState()
+    .accounts.findIndex((a) => a.smartAccountAddress === account.smartAccountAddress);
+  return idx >= 0 ? idx : 0;
+}
+
 async function buildPasskeyPayload(
   account: WalletAccount,
   nonceB64URL: string,
@@ -232,41 +248,32 @@ async function buildPasskeyPayload(
   wallet: string,
   keyType: string,
 ): Promise<Record<string, string>> {
-  // Find this account's passkey privateKey in SecureStore.
-  // List index 0 uses the legacy non-indexed keys; later indices use suffixes.
-  // We don't have the list index handy here, so probe index 0 first (the
-  // common case) then fall back if missing.
-  const keys0 = getPasskeyStorageKeys(0);
-  let privateKeyHex = await SecureStore.getItemAsync(keys0.privateKey);
-  if (!privateKeyHex) {
-    // Try indexed slots up to a small bound.
-    for (let i = 1; i < 10; i++) {
-      const keys = getPasskeyStorageKeys(i);
-      const credIdHex = await SecureStore.getItemAsync(keys.credentialId);
-      if (credIdHex && credIdHex === account.credentialId) {
-        privateKeyHex = await SecureStore.getItemAsync(keys.privateKey);
-        break;
-      }
-    }
-  }
-  if (!privateKeyHex) throw new Error('passkey private key not found in SecureStore');
+  const listIndex = resolvePasskeyListIndex(account);
 
-  // signWithPasskey embeds challenge=b64url(nonceBytes) inside clientDataJSON
-  // and sets origin=rpId (PASSKEY_RP_ID). The backend allowlist must contain
-  // this rpId value (LATCH_WEBAUTHN_ALLOWED_ORIGINS).
-  const { authenticatorData, clientDataJSON, signature } = await signWithPasskey(
-    privateKeyHex,
+  // signWithStoredPasskeyAtIndex is the one place that knows how to route
+  // between a locally-stored raw key and a real platform passkey (Face ID /
+  // Touch ID via the OS ceremony, no local private key to read at all) — this
+  // used to re-read SecureStore by hand and always assumed a local key,
+  // which is why signing in with a platform-passkey account failed with
+  // "passkey private key not found in SecureStore" (it never had one to
+  // find). It embeds challenge=b64url(nonceBytes) inside clientDataJSON and
+  // sets origin=rpId (PASSKEY_RP_ID) exactly like the old direct call did, so
+  // the backend allowlist requirement (LATCH_WEBAUTHN_ALLOWED_ORIGINS) is
+  // unchanged.
+  const { sig } = await signWithStoredPasskeyAtIndex(
+    listIndex,
     nonceBytes,
     PASSKEY_RP_ID,
+    'Authenticate to sign in',
   );
-  const derSig = compactSigToDER(signature);
+  const derSig = compactSigToDER(sig.signature);
 
   return {
     wallet,
     key_type: keyType,
     nonce: nonceB64URL,
-    authenticator_data: bytesToB64(authenticatorData),
-    client_data_json: bytesToB64(clientDataJSON),
+    authenticator_data: bytesToB64(sig.authenticatorData),
+    client_data_json: bytesToB64(sig.clientDataJSON),
     passkey_signature: bytesToB64(derSig),
   };
 }

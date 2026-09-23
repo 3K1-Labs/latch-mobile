@@ -82,9 +82,7 @@ export const BASE_RESERVE_MIN_COUNT = 2;
 // Relying party ID used when constructing WebAuthn authenticatorData for passkey signing.
 // Must be a stable domain string — the on-chain verifier checks signature math, not this value.
 // Normalised to a bare domain: see normalizePasskeyRpId for what a scheme here breaks.
-const PASSKEY_RP_ID = normalizePasskeyRpId(
-  process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'uselatch.app',
-);
+const PASSKEY_RP_ID = normalizePasskeyRpId(process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'uselatch.app');
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
 // The API key is baked into the bundle (EXPO_PUBLIC_*). Testnet only — move the
@@ -95,6 +93,22 @@ const SOROSWAP_API_URL = (
 const SOROSWAP_API_KEY = process.env.EXPO_PUBLIC_SOROSWAP_API_KEY ?? '';
 // Soroswap expects the network as a lowercase query param (?network=testnet|mainnet).
 let SOROSWAP_NETWORK = getNetworkId();
+
+// Aggregator contract — target of `swap_exact_tokens_for_tokens`. The provider
+// used to get its invocation XDR from Soroswap's POST /quote/build, but that
+// endpoint expects `from` to be a classic G wallet; it mis-builds against a
+// smart account's C-address. We build the invocation locally instead (same fix
+// latch-web-extension shipped — providers/soroswap.ts), which needs the
+// aggregator's own contract address rather than whatever /quote/build resolved
+// server-side. Sourced from soroswap/aggregator public/*.contracts.json, same
+// as the extension's config — hardcoded there too (no env override): unlike
+// the Aquarius router below, this contract isn't redeployed on a schedule, so
+// there's nothing to override for.
+const TESTNET_SOROSWAP_AGGREGATOR = 'CAYP3UWLJM7ZPTUKL6R6BFGTRWLZ46LRKOXTERI2K6BIJAWGYY62TXTO';
+const MAINNET_SOROSWAP_AGGREGATOR = 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA';
+// Reassigned by applyNetworkDetails() on a live switch, same as the Aquarius values below.
+let SOROSWAP_AGGREGATOR_ADDRESS =
+  ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_SOROSWAP_AGGREGATOR : MAINNET_SOROSWAP_AGGREGATOR;
 
 /** `'testnet' | 'mainnet'` form of ACTIVE_NETWORK, used across cosign/multisig/swap code. */
 export function getNetworkId(): 'testnet' | 'mainnet' {
@@ -148,6 +162,9 @@ function applyNetworkDetails(details: NetworkDetails): void {
   const isTestnet = details.network === 'TESTNET';
   AQUARIUS_AMM_API_URL = isTestnet ? TESTNET_AQUARIUS_API_URL : MAINNET_AQUARIUS_API_URL;
   AQUARIUS_ROUTER_ADDRESS = isTestnet ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
+  SOROSWAP_AGGREGATOR_ADDRESS = isTestnet
+    ? TESTNET_SOROSWAP_AGGREGATOR
+    : MAINNET_SOROSWAP_AGGREGATOR;
 }
 
 /**
@@ -227,12 +244,12 @@ export {
   DEPOSIT_RELAYER_NETWORKS,
   HORIZON_URL,
   PASSKEY_RP_ID,
+  SOROSWAP_AGGREGATOR_ADDRESS,
   SOROSWAP_API_KEY,
   SOROSWAP_API_URL,
   SOROSWAP_NETWORK,
   STELLAR_AUTH_PREFIX,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL
+  STELLAR_RPC_URL,
 };
-

@@ -13,7 +13,7 @@ import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import TxAuthModal from '@/src/components/shared/TxAuthModal';
 import { getNetworkId } from '@/src/constants/config';
-import { useAddressBook } from '@/src/hooks/use-address-book';
+import { useAddressBookStore } from '@/src/store/address-book';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
@@ -51,7 +51,12 @@ const SendToken = () => {
   const { tokens: trackedTokens } = useTrackedTokens();
   const { data: prices } = usePrices();
   const { formatToken } = useDisplayFiat();
-  const { entries: addressBookEntries } = useAddressBook();
+  const findAddressBookEntry = useAddressBookStore((s) => s.findByAddress);
+  const rehydrateAddressBook = useAddressBookStore((s) => s.rehydrate);
+
+  useEffect(() => {
+    rehydrateAddressBook();
+  }, [rehydrateAddressBook]);
 
   const { data: portfolio, refetch: refetchPortfolio } = usePortfolio(
     smartAccountAddress,
@@ -411,7 +416,7 @@ const SendToken = () => {
   const renderContent = () => {
     if (status === 'success') {
       const recipientAddress = selectedWallet?.address ?? '';
-      const alreadySaved = addressBookEntries.some((e) => e.address === recipientAddress);
+      const alreadySaved = !!findAddressBookEntry(recipientAddress);
       return (
         <SuccessStep
           amount={amount}

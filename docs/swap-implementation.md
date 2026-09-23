@@ -16,18 +16,38 @@ extracts. Auth (`Bearer`), the `?network=` query param, and the request body are
 all confirmed against the live API.
 
 ### Findings
-1. **Aggregator route + `/build` → "Invalid poolHashes string" — RESOLVED
-   (single-AMM fallback).** `getQuote` still uses the full
-   `['soroswap','aqua','phoenix','sdex']` set for best price. If `/quote/build`
-   is rejected with a poolHashes error, `buildSwapOperation` re-quotes with
+0. **`POST /quote/build` stopped working for smart accounts — RESOLVED (build
+   locally).** That endpoint expects `from` to be a classic G wallet; handed
+   our smart account's C-address it either 400s or returns an operation that
+   doesn't match what we simulate and sign, so mainnet swaps stopped
+   completing. `buildSwapOperation` now encodes the aggregator's
+   `swap_exact_tokens_for_tokens` DexDistribution locally from the raw
+   `/quote`'s `rawTrade.distribution` (`providers/soroswap-distribution.ts`),
+   the same fix latch-web-extension shipped in `providers/soroswap.ts`
+   (commit 15d60ea) — no `/quote/build` call left in the provider. Because
+   Soroswap's `/quote` `amountOut` can disagree with on-chain execution, the
+   build probe-simulates with `amountOutMin=0` first, reads the real output,
+   and rebuilds with a slippage-calibrated minimum (stricter of that and the
+   quote's own threshold) before returning the operation — ported from the
+   same extension commit. The local `DexDistribution` encoder has no case for
+   `sdex` (the classic order book isn't a leg it can name); `getQuote` keeps
+   requesting it for price discovery, and `buildSwapOperation` falls back to
+   the existing single-AMM route (finding 1) if the winning route picks it.
+1. **Aggregator route with an unbuildable leg (bad poolHashes, or `sdex` —
+   see finding 0) — RESOLVED (single-AMM fallback).** `getQuote` uses
+   `['soroswap','phoenix','sdex']` for best price (`aqua` stays blocklisted at
+   the symbol level — see the `PROTOCOLS` comment in `providers/soroswap.ts`
+   for the mispriced-pool finding). If the winning route names a leg
+   `soroswap-distribution.ts` can't encode, `buildSwapOperation` re-quotes with
    `['soroswap']` and builds that route instead. Because the fallback route is
    built from its **own fresh quote**, its on-chain `amountOutMin` (slippage
    guard) is correct for what actually executes. `buildSwapOperation` returns a
    `SwapBuildResult { operation, effectiveQuote }`; `confirm.tsx` reports
    `effectiveQuote.amountOut`, so the success copy reflects the route that ran,
    not the (possibly higher) aggregator estimate the user saw pre-confirm.
-   Verified live on mainnet: aggregator build fails → fallback builds an
-   `invokeHostFunction` op. **Remaining UX gap:** the pre-confirm screen still
+   Verified live on mainnet (pre-finding-0, against the old `/quote/build`
+   flow) that this fallback builds an `invokeHostFunction` op when the
+   aggregator route rejects. **Remaining UX gap:** the pre-confirm screen still
    shows the aggregator estimate; if the fallback fires the executed amount can
    be lower (still ≥ the fallback route's min-out). A pre-confirm re-quote /
    re-confirm is a possible future polish, not done here.
@@ -58,9 +78,14 @@ account (blocked on finding #2).
 
 - `src/services/swap/types.ts` — `SwapProvider` interface + quote types
 - `src/services/swap/providers/soroswap.ts` — Soroswap Aggregator API
-  (`POST /quote`, `POST /quote/build?network=testnet`, `Authorization: Bearer`);
-  `buildSwapOperation` extracts the `invokeHostFunction` op from the build XDR and
-  strips its auth so we re-derive the smart-account auth ourselves
+  (`POST /quote?network=...`, `Authorization: Bearer`); `buildSwapOperation`
+  encodes the aggregator's `swap_exact_tokens_for_tokens` invocation locally
+  from the quote's `rawTrade.distribution` (see finding 0) rather than calling
+  `POST /quote/build`, so it never carries any auth to strip — the
+  smart-account auth is derived from scratch during execute-swap.ts's own
+  simulate pass, exactly like `providers/aquarius.ts`
+- `src/services/swap/providers/soroswap-distribution.ts` — pure
+  `DexDistribution` encode/decode helpers `buildOpFromRawQuote` uses
 - `src/services/swap/registry.ts` — provider registry
 - `src/services/swap/execute-swap.ts` — `executeSwapFromSmartAccount` /
   `executeSwapFromPasskeyAccount`, parallel to `sendTokenFromSmartAccount`

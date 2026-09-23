@@ -4,9 +4,13 @@ import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import { hashPin } from '@/src/lib/hash-pin';
 import {
+  confirmDeviceOnlyFallback,
+  createDeviceOnlyPasskeyAtIndex,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
+  PasskeyProvisionError,
   provisionPasskeyAtIndex,
+  shouldOfferDeviceOnlyFallback,
 } from '@/src/lib/provision-passkey';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -32,17 +36,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
- * Provision the primary passkey credential (account list index 0).
- *
- * Prefers a real platform passkey — synced via Google Password Manager
- * (Android) or iCloud Keychain (iOS), whichever the OS's own passkey sheet
- * offers — over a SecureStore-only key, and tells the user when it had to
- * settle for the latter. See provision-passkey.ts.
+ * Provision the primary passkey credential (account list index 0) — the real
+ * OS ceremony (Google Password Manager / iCloud Keychain), always. Throws
+ * PasskeyProvisionError on any failure; it never falls back on its own — see
+ * provisionAndContinue for what the screen does with that. See provision-passkey.ts.
  */
 async function provisionPrimaryPasskey(requireBiometric: boolean): Promise<void> {
-  const provisioned = await provisionPasskeyAtIndex(0, { requireBiometric });
-  notifyIfDeviceOnly(provisioned);
-  notifyIfWeakBiometricGate(provisioned);
+  await provisionPasskeyAtIndex(0, { requireBiometric });
 }
 
 const MAX_ATTEMPTS = 5;
@@ -85,13 +85,68 @@ const Biometrics = () => {
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
   const lockoutTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Forgot-PIN reset: 'idle' is the normal unlock keypad; 'set'/'confirm' are
+  // the same two-step "type it twice" flow set-pin.tsx uses during onboarding,
+  // reimplemented locally rather than navigated to — set-pin.tsx's `from`
+  // branches (import-phrase / recovery / default) all lead into (re-)deploying
+  // an account, which is wrong for a device that already has one and just
+  // needs a new local PIN. Reaching 'set' at all requires having already
+  // passed a LocalAuthentication.authenticateAsync check — see handleForgotPin.
+  const [pinResetPhase, setPinResetPhase] = useState<'idle' | 'set' | 'confirm'>('idle');
+  const [newPin, setNewPin] = useState('');
+  const [newPinConfirm, setNewPinConfirm] = useState('');
+  const [newPinError, setNewPinError] = useState(false);
+
   const [biometricLabel, setBiometricLabel] = useState('Biometrics');
   const [biometricIcon, setBiometricIcon] = useState<'scan' | 'finger-print'>('scan');
   const [biometricEnabledForUnlock, setBiometricEnabledForUnlock] = useState(false);
 
   const keySize = (width - theme.spacing.m * 2 - theme.spacing.m * 2) / 3;
 
+  // Consecutive non-cancelled failures for the primary passkey ceremony —
+  // what shouldOfferDeviceOnlyFallback uses to decide when "Try Again" also
+  // needs a "Continue with Device-Only Key" option next to it. A ref, not
+  // state: it only has to be current inside the catch handler below, never
+  // needs to trigger a re-render.
+  const failedAttemptsRef = useRef(0);
+
   // ─── Setup helpers ────────────────────────────────────────────────────────
+
+  /** Record biometric-unlock capability (if any) and move on to PIN setup. */
+  const finishPasskeySetup = useCallback(async () => {
+    // Recorded, not gated on: biometric unlock is offered on device
+    // capability alone. Written only when the device actually has enrolled
+    // biometrics so the flag stays meaningful.
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+    if (hasHardware && isEnrolled) {
+      await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
+    }
+    // set-pin will forward through the rest of onboarding once confirmed.
+    router.replace(
+      from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
+    );
+  }, [from, router]);
+
+  /**
+   * Creates the device-only key and continues — only ever called after
+   * confirmDeviceOnlyFallback has already warned the user what that means and
+   * they chose to continue anyway. Never called automatically.
+   */
+  const continueWithDeviceOnlyKey = useCallback(async () => {
+    setIsProcessing(true);
+    try {
+      const provisioned = await createDeviceOnlyPasskeyAtIndex(0, { requireBiometric: true });
+      notifyIfDeviceOnly(provisioned);
+      notifyIfWeakBiometricGate(provisioned);
+      await finishPasskeySetup();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      Alert.alert('Setup Failed', reason, [{ text: 'OK' }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [finishPasskeySetup]);
 
   /**
    * Provision the primary passkey and move on to PIN setup.
@@ -101,6 +156,14 @@ const Biometrics = () => {
    * single system prompt is the whole gate — there is deliberately no separate
    * LocalAuthentication step, and no app-level "allow biometrics" dialog,
    * ahead of it.
+   *
+   * A dismissed sheet is never shown as a failure — see
+   * PasskeyProvisionError.kind === 'cancelled' below — Continue just sits
+   * there ready to tap again. Any other failure shows "Try Again", and only
+   * once the device is confirmed unsupported, or enough attempts have failed
+   * in a row (shouldOfferDeviceOnlyFallback), also offers "Continue with
+   * Device-Only Key" — which still warns before doing anything
+   * (confirmDeviceOnlyFallback). Never an automatic fallback.
    */
   const provisionAndContinue = useCallback(async () => {
     // Block setup on devices with no lock screen at all. Without a device passcode
@@ -124,32 +187,42 @@ const Biometrics = () => {
       const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
       if (!existingCredId) {
         await provisionPrimaryPasskey(true);
+        failedAttemptsRef.current = 0;
       }
-
-      // Recorded, not gated on: biometric unlock is offered on device
-      // capability alone. Written only when the device actually has enrolled
-      // biometrics so the flag stays meaningful.
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      if (hasHardware && isEnrolled) {
-        await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
-      }
-
-      // set-pin will forward through the rest of onboarding once confirmed.
-      router.replace(
-        from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
-      );
+      await finishPasskeySetup();
     } catch (err) {
+      if (err instanceof PasskeyProvisionError && err.kind === 'cancelled') {
+        // The user backed out of the OS sheet. Nothing went wrong — nothing
+        // to say. Continue is still right there to tap again.
+        return;
+      }
+
+      failedAttemptsRef.current += 1;
+      const kind = err instanceof PasskeyProvisionError ? err.kind : 'other';
       // Bound, not discarded. A swallowed error here produced a bare "try
       // again" with no trace anywhere: metro strips console.* from release
       // builds and EXPO_PUBLIC_SENTRY_DSN is unset, so Sentry.init is a no-op.
       // The message is the diagnosis.
       const reason = err instanceof Error ? err.message : String(err);
-      Alert.alert('Setup Failed', `${reason}`, [{ text: 'OK' }]);
+
+      if (shouldOfferDeviceOnlyFallback(kind, failedAttemptsRef.current)) {
+        Alert.alert("Couldn't Create Passkey", reason, [
+          { text: 'Try Again', style: 'cancel' },
+          {
+            text: 'Continue with Device-Only Key',
+            style: 'destructive',
+            onPress: async () => {
+              if (await confirmDeviceOnlyFallback()) await continueWithDeviceOnlyKey();
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Setup Failed', reason, [{ text: 'Try Again' }]);
+      }
     } finally {
       setIsProcessing(false);
     }
-  }, [from, router]);
+  }, [finishPasskeySetup, continueWithDeviceOnlyKey]);
 
   // Detect biometric type — runs on mount for setup mode; for unlock mode the
   // sequential init effect below handles detection before triggering auth.
@@ -317,6 +390,112 @@ const Biometrics = () => {
     [pin, attempts, lockedUntil, unlockSuccess],
   );
 
+  // Back out of PIN entry to the biometric prompt — only offered when
+  // biometrics are actually available as the alternative; a device with no
+  // biometric unlock has nothing to cancel back to, since PIN is the only
+  // way in. Clears whatever was typed so the keypad's next open is fresh, but
+  // never touches lockedUntil — cancelling isn't a way to dodge a lockout
+  // started on a previous attempt, it just switches which method you're
+  // using while it counts down. Also aborts an in-progress PIN reset, so a
+  // half-typed new PIN never lingers into the next visit.
+  const handleCancelPin = useCallback(() => {
+    setPin('');
+    setPinError(false);
+    setPinResetPhase('idle');
+    setNewPin('');
+    setNewPinConfirm('');
+    setNewPinError(false);
+    setShowPin(false);
+  }, []);
+
+  /**
+   * Forgot PIN. The PIN is a local app-lock, not the wallet's actual signing
+   * credential — device biometrics already unlock the app on their own (see
+   * triggerBiometrics), so a fresh biometric check here is exactly as strong
+   * a proof of "this is the device owner" and is enough to let them set a new
+   * one. No biometrics enrolled means there is no local factor left to prove
+   * identity with at all — the honest answer is to recover the wallet itself
+   * (passkey sign-in elsewhere resolves the account from the chain), not a
+   * local bypass.
+   */
+  // const handleForgotPin = useCallback(async () => {
+  //   if (!biometricEnabledForUnlock) {
+  //     Alert.alert(
+  //       "Can't Reset PIN Here",
+  //       "This device has no biometric unlock enrolled, so there's no other way to confirm it's you locally. Recover your wallet instead, then set a new PIN from there.",
+  //       [
+  //         { text: 'Cancel', style: 'cancel' },
+  //         {
+  //           text: 'Recover Wallet',
+  //           onPress: () => router.push('/(onboarding)/sign-in-passkey'),
+  //         },
+  //       ],
+  //     );
+  //     return;
+  //   }
+
+  //   const result = await LocalAuthentication.authenticateAsync({
+  //     promptMessage: "Verify it's you to reset your PIN",
+  //     disableDeviceFallback: true,
+  //     cancelLabel: 'Cancel',
+  //   });
+  //   if (!result.success) return;
+
+  //   setPin('');
+  //   setPinError(false);
+  //   setNewPin('');
+  //   setNewPinConfirm('');
+  //   setNewPinError(false);
+  //   setPinResetPhase('set');
+  // }, [biometricEnabledForUnlock, router]);
+
+  /**
+   * Keypad handler for the reset flow's two steps (set, then confirm) — the
+   * same "type it twice" shape as set-pin.tsx, reimplemented locally rather
+   * than shared: set-pin.tsx's PIN_LENGTH/handleKey are private to that
+   * module and its confirm step always continues into onboarding
+   * (collect-email → deploy), which is wrong here.
+   */
+  const handleResetPinKey = useCallback(
+    async (key: string) => {
+      const current = pinResetPhase === 'set' ? newPin : newPinConfirm;
+      const setCurrent = pinResetPhase === 'set' ? setNewPin : setNewPinConfirm;
+
+      if (key === 'del') {
+        setCurrent((p) => p.slice(0, -1));
+        setNewPinError(false);
+        return;
+      }
+      if (current.length >= PIN_LENGTH) return;
+
+      const next = current + key;
+      setCurrent(next);
+      if (next.length !== PIN_LENGTH) return;
+
+      if (pinResetPhase === 'set') {
+        setTimeout(() => setPinResetPhase('confirm'), 150);
+        return;
+      }
+
+      // Confirm step.
+      if (next === newPin) {
+        await SecureStore.setItemAsync(PIN_KEY, hashPin(newPin));
+        setAttempts(0);
+        setLockedUntil(null);
+        setPinResetPhase('idle');
+        unlockSuccess();
+      } else {
+        Vibration.vibrate(400);
+        setNewPinError(true);
+        setTimeout(() => {
+          setNewPinConfirm('');
+          setNewPinError(false);
+        }, 500);
+      }
+    },
+    [pinResetPhase, newPin, newPinConfirm, unlockSuccess],
+  );
+
   // ─── Unlock UI ────────────────────────────────────────────────────────────
 
   if (isUnlockMode) {
@@ -332,12 +511,28 @@ const Biometrics = () => {
         <StatusBar style={statusBarStyle} />
         <View style={{ flex: 1 }}>
           {/* Header */}
-          <Box alignItems="center" mt="xxl" mb="m" style={{ paddingTop: insets.top }}>
+          <Box
+            flexDirection="row"
+            justifyContent="space-between"
+            alignItems="center"
+            mt="xxl"
+            mb="m"
+            paddingHorizontal="m"
+            style={{ paddingTop: insets.top }}
+          >
+            {showPin && biometricEnabledForUnlock ? (
+              <TouchableOpacity onPress={handleCancelPin} hitSlop={12}>
+                <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
+              </TouchableOpacity>
+            ) : (
+              <Box width={24} />
+            )}
             <Image
               source={require('@/src/assets/images/logoLoading.png')}
               style={{ width: 35, height: 35 }}
               resizeMode="contain"
             />
+            <Box width={24} />
           </Box>
 
           {showPin ? (
@@ -351,9 +546,26 @@ const Biometrics = () => {
                   textAlign="center"
                   color="textPrimary"
                 >
-                  Welcome Back
+                  {pinResetPhase === 'set'
+                    ? 'Set a New PIN'
+                    : pinResetPhase === 'confirm'
+                      ? 'Confirm New PIN'
+                      : 'Welcome Back'}
                 </Text>
-                {lockedUntil ? (
+                {pinResetPhase !== 'idle' ? (
+                  <Text
+                    variant="body"
+                    color={newPinError ? 'danger900' : 'textSecondary'}
+                    mt="s"
+                    textAlign="center"
+                  >
+                    {newPinError
+                      ? "PINs don't match. Try again."
+                      : pinResetPhase === 'set'
+                        ? 'Choose a new 4-digit PIN'
+                        : 'Enter it once more to confirm'}
+                  </Text>
+                ) : lockedUntil ? (
                   <Text variant="body" color="danger900" mt="s" textAlign="center">
                     Too many attempts. Try again in {lockoutSecondsLeft}s
                   </Text>
@@ -365,23 +577,42 @@ const Biometrics = () => {
               </Box>
 
               {/* PIN dots */}
-              <Box flexDirection="row" justifyContent="center" mt="xl" mb="xxl" gap="l">
-                {Array.from({ length: PIN_LENGTH }).map((_, i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.dot,
-                      i < pin.length
-                        ? {
-                            backgroundColor: pinError
-                              ? theme.colors.danger900
-                              : theme.colors.primary700,
-                          }
-                        : { backgroundColor: theme.colors.gray900, opacity: 0.8 },
-                    ]}
-                  />
-                ))}
+              <Box flexDirection="row" justifyContent="center" mt="xl" mb="l" gap="l">
+                {Array.from({ length: PIN_LENGTH }).map((_, i) => {
+                  const activeLen =
+                    pinResetPhase === 'idle'
+                      ? pin.length
+                      : (pinResetPhase === 'set' ? newPin : newPinConfirm).length;
+                  const activeError = pinResetPhase === 'idle' ? pinError : newPinError;
+                  return (
+                    <View
+                      key={i}
+                      style={[
+                        styles.dot,
+                        i < activeLen
+                          ? {
+                              backgroundColor: activeError
+                                ? theme.colors.danger900
+                                : theme.colors.primary700,
+                            }
+                          : { backgroundColor: theme.colors.gray900, opacity: 0.8 },
+                      ]}
+                    />
+                  );
+                })}
               </Box>
+
+              {/* {pinResetPhase === 'idle' && (
+                <TouchableOpacity
+                  onPress={handleForgotPin}
+                  hitSlop={12}
+                  style={{ alignItems: 'center', marginBottom: theme.spacing.l }}
+                >
+                  <Text variant="p7" color="primary700">
+                    Forgot PIN?
+                  </Text>
+                </TouchableOpacity>
+              )} */}
 
               {/* Keypad */}
               <Box flex={1} justifyContent="flex-end" paddingHorizontal="m" pb="m">
@@ -389,8 +620,10 @@ const Biometrics = () => {
                   <Box key={rIdx} flexDirection="row" justifyContent="space-between" mb="m">
                     {row.map((key, kIdx) => {
                       if (key === '') {
-                        // Show biometric shortcut only when biometric unlock is enabled
-                        return biometricEnabledForUnlock ? (
+                        // Biometric shortcut — only on the normal unlock keypad. Reset
+                        // entry got here BY biometric auth already succeeding, so
+                        // there's nothing to shortcut to.
+                        return pinResetPhase === 'idle' && biometricEnabledForUnlock ? (
                           <TouchableOpacity
                             key={kIdx}
                             activeOpacity={0.6}
@@ -420,7 +653,9 @@ const Biometrics = () => {
                         <TouchableOpacity
                           key={kIdx}
                           activeOpacity={0.6}
-                          onPress={() => handlePinKey(key)}
+                          onPress={() =>
+                            pinResetPhase === 'idle' ? handlePinKey(key) : handleResetPinKey(key)
+                          }
                           style={{ width: keySize, height: 64 }}
                         >
                           <Box

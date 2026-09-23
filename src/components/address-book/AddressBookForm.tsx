@@ -3,7 +3,6 @@ import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
 import * as Clipboard from 'expo-clipboard';
 import { Formik } from 'formik';
-import React from 'react';
 import { TouchableOpacity } from 'react-native';
 import * as Yup from 'yup';
 
@@ -26,14 +25,21 @@ const AddressBookSchema = Yup.object().shape({
 interface AddressBookFormProps {
   onSubmit: (values: { label: string; address: string }, formikHelpers: any) => void;
   initialAddress?: string;
+  initialLabel?: string;
+  isEditing?: boolean;
 }
 
-const AddressBookForm = ({ onSubmit, initialAddress }: AddressBookFormProps) => {
+const AddressBookForm = ({
+  onSubmit,
+  initialAddress,
+  initialLabel,
+  isEditing,
+}: AddressBookFormProps) => {
   const theme = useTheme<Theme>();
 
   return (
     <Formik
-      initialValues={{ label: '', address: initialAddress ?? '' }}
+      initialValues={{ label: initialLabel ?? '', address: initialAddress ?? '' }}
       validationSchema={AddressBookSchema}
       onSubmit={onSubmit}
     >
@@ -105,7 +111,7 @@ const AddressBookForm = ({ onSubmit, initialAddress }: AddressBookFormProps) => 
                         }}
                       >
                         <Box backgroundColor="primary" px="m" py="xs" borderRadius={8}>
-                          <Text variant="p8" color="textPrimary" fontWeight="600">
+                          <Text variant="p8" color="black" fontWeight="600">
                             Paste
                           </Text>
                         </Box>
@@ -139,7 +145,7 @@ const AddressBookForm = ({ onSubmit, initialAddress }: AddressBookFormProps) => 
                     color={isValid && (dirty || !!initialAddress) ? 'black' : 'textSecondary'}
                     fontWeight="700"
                   >
-                    Save Address
+                    {isEditing ? 'Save Changes' : 'Save Address'}
                   </Text>
                 </Box>
               </TouchableOpacity>

@@ -208,7 +208,7 @@ export async function completePairing(
  * read the value. Callers should fall back to re-querying chain state
  * (e.g. via get_context_rule) in that case.
  */
-function extractFirstU32FromMeta(resultMetaXdr: string | undefined, opIndex: number): number | undefined {
+export function extractFirstU32FromMeta(resultMetaXdr: string | undefined, opIndex: number): number | undefined {
   if (!resultMetaXdr) return undefined;
   try {
     const meta = xdr.TransactionMeta.fromXDR(resultMetaXdr, 'base64');

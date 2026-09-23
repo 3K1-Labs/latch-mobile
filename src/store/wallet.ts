@@ -105,6 +105,24 @@ export interface Device {
   isLocal: boolean;
   /** ISO-8601 timestamp of when the device was paired. */
   pairedAt: string;
+  /**
+   * True for a signer enrolled via the solo backup-signer flow
+   * (src/lib/backup-signer-tx.ts) — add_signer on the Default rule only,
+   * never the admin/ThresholdPolicy rule. The account stays 1-of-N no
+   * matter how many of these exist, so any UI computing a multisig signer
+   * count (e.g. PoliciesSheet) must exclude devices with this flag set.
+   * Absent/false for a normal paired (potentially multisig) device.
+   */
+  isBackupSigner?: boolean;
+  /**
+   * Set the moment a backup-signer add/remove lands on-chain, cleared only
+   * once the matching backend confirm call succeeds. Durable so a killed app
+   * can resume confirming later instead of losing the txHash — see
+   * src/lib/backup-signer-tx.ts. `action: 'remove'` marks a device that is
+   * already gone on-chain but still shown (as "Removing…") until its
+   * passkey-credentials row is deregistered.
+   */
+  pendingConfirm?: { txHash: string; contextRuleId: number; action: 'add' | 'remove' };
 }
 
 /**
@@ -746,6 +764,29 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return false;
     }
 
+    // Signer keys that belong to the admin (ThresholdPolicy) rule, if one is
+    // installed. completePairing always installs that rule in the SAME tx
+    // that adds a 2nd multisig-pairing device, so a Default-rule signer that
+    // is NOT in this set (or there's no admin rule at all) can only be a
+    // backup signer — see backup-signer-tx.ts, which never touches this rule.
+    let adminRuleSignerKeys: Set<string> | null = null;
+    if (account.adminRuleId !== undefined && account.adminRuleId !== null) {
+      try {
+        const { fetchContextRuleSigners } = await import('@/src/api/account-admin');
+        const adminSigners = await fetchContextRuleSigners(
+          { rpcUrl, networkPassphrase, factoryAddress },
+          account.smartAccountAddress,
+          account.adminRuleId,
+        );
+        adminRuleSignerKeys = new Set(adminSigners.map((s) => s.signerKey));
+      } catch (e) {
+        // Best-effort: an unreadable admin rule just means newly discovered
+        // signers fall back to "treat as backup signer" below, same as an
+        // account with no admin rule at all.
+        if (__DEV__) console.warn('syncSignersFromChain: could not read admin rule signers:', e);
+      }
+    }
+
     // Reconcile against chain truth. Existing local metadata (label, isLocal,
     // pairedAt, onChainSignerId) is preserved by matching on signerKey; newly
     // discovered signers are added as remote devices.
@@ -759,32 +800,83 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     // credential stored in SecureStore.
     const localKeys = new Set<string>();
     if (account.gAddress && account.publicKeyHex) {
-      localKeys.add(`ed25519:${account.publicKeyHex}`);
+      localKeys.add(`ed25519:${account.publicKeyHex.toLowerCase()}`);
+      localKeys.add(account.publicKeyHex.toLowerCase());
     }
     try {
-      const selfPasskey = await SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX);
-      if (selfPasskey) localKeys.add(`webauthn:${selfPasskey}`);
+      const selfPasskey = await SecureStore.getItemAsync(
+        getPasskeyStorageKeys(accountListIndex).keyDataHex,
+      );
+      if (selfPasskey) {
+        localKeys.add(`webauthn:${selfPasskey.toLowerCase()}`);
+        localKeys.add(selfPasskey.toLowerCase());
+      }
+      const fallbackPasskey = await SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX);
+      if (fallbackPasskey) {
+        localKeys.add(`webauthn:${fallbackPasskey.toLowerCase()}`);
+        localKeys.add(fallbackPasskey.toLowerCase());
+      }
     } catch {
       // best-effort; isLocal labelling degrades gracefully without it
     }
 
-    const reconciled: Device[] = rule.signers.map((s) => {
-      const prev = byKey.get(s.signerKey);
-      if (prev) return prev;
-      const isLocal = !hadLocal && localKeys.has(s.signerKey);
+    const reconciled: Device[] = rule.signers.map((s, idx) => {
+      const isThisSignerLocal =
+        localKeys.has(s.signerKey.toLowerCase()) ||
+        localKeys.has(`webauthn:${s.keyDataHex.toLowerCase()}`) ||
+        localKeys.has(`ed25519:${s.keyDataHex.toLowerCase()}`) ||
+        localKeys.has(s.keyDataHex.toLowerCase()) ||
+        (!hadLocal && idx === 0 && !account.isMultisig);
+
+      const prev = byKey.get(s.signerKey) || byKey.get(s.signerKey.toLowerCase());
+      if (prev) {
+        let updated = prev;
+        if (prev.onChainSignerId === null && s.signerId !== undefined) {
+          updated = { ...updated, onChainSignerId: s.signerId };
+        }
+        // Self-heal: if an earlier sync mislabeled this local device as a backup signer,
+        // restore its proper local designation and remove the backup flag.
+        if (isThisSignerLocal && (updated.isBackupSigner || !updated.isLocal)) {
+          updated = {
+            ...updated,
+            isLocal: true,
+            isBackupSigner: undefined,
+            label: updated.label === 'Backup signer' ? 'This Device' : updated.label,
+          };
+        }
+        return updated;
+      }
+      const isLocal = isThisSignerLocal;
+      // A newly discovered non-local, non-delegated signer is a backup
+      // signer unless it's provably a multisig member (present in the admin
+      // rule). See the adminRuleSignerKeys comment above. Delegated signers
+      // and shared/multisig wallets are a different feature entirely — every
+      // signer there is a legitimate member, never a backup signer.
+      const isBackupSigner =
+        !isLocal &&
+        !account.isMultisig &&
+        s.kind !== 'delegated' &&
+        !(adminRuleSignerKeys?.has(s.signerKey) ?? false);
       const label = isLocal
         ? 'This Device'
         : s.kind === 'delegated'
           ? 'Member wallet'
-          : 'Paired device';
+          : isBackupSigner
+            ? 'Backup signer'
+            : 'Paired device';
       return {
         signerKey: s.signerKey,
         label,
         kind: s.kind,
         keyDataHex: s.keyDataHex,
-        onChainSignerId: null,
+        // Use the array-position signer id returned by fetchDefaultContextRule
+        // (Vec<Signer> index = the u32 remove_signer consumes). Without this,
+        // chain-discovered signers that were never locally persisted land here
+        // with onChainSignerId=null and the remove button is permanently blocked.
+        onChainSignerId: s.signerId ?? null,
         isLocal,
         pairedAt: new Date().toISOString(),
+        ...(isBackupSigner ? { isBackupSigner: true } : {}),
       };
     });
 
@@ -794,7 +886,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     const changed =
       reconciled.length !== existing.length ||
       reconciled.some(
-        (d, i) => existing[i]?.signerKey !== d.signerKey || existing[i]?.isLocal !== d.isLocal,
+        (d, i) =>
+          existing[i]?.signerKey !== d.signerKey ||
+          existing[i]?.isLocal !== d.isLocal ||
+          // A null→number backfill of onChainSignerId must be persisted too.
+          (existing[i]?.onChainSignerId === null && d.onChainSignerId !== null),
       );
     if (__DEV__) {
       console.log(

@@ -16,17 +16,26 @@
  *
  * The OS ceremony fails for reasons the user cannot see — a dismissed sheet, a
  * device with no passkey provider, an app whose associated domain was never
- * registered. This module used to fall back to a local key so setup never
- * dead-ended, but that silently handed someone a wallet they believed was
- * synced and was not; they found out on the device where they could not sign
- * in. The fallback is now disabled: a synced platform passkey is the only
- * supported way to back a wallet, and a failed ceremony surfaces as an error.
- * The `local` path and its helpers are kept commented out below for reference.
+ * registered. This module used to fall back to a local key on ANY ceremony
+ * failure, which silently handed someone a wallet they believed was synced
+ * and was not; they found out on the device where they could not sign in.
+ * Worse, a capable device only had to hit one flaky ceremony (a dismissed
+ * sheet, a slow Android chooser) to get downgraded — "capable" and "actually
+ * used platform" quietly drifted apart.
+ *
+ * The fix is not "no fallback" but "no *automatic* fallback":
+ *   - provisionPasskeyAtIndex only ever attempts the platform ceremony, and
+ *     throws a PasskeyProvisionError (classified cancelled / unsupported /
+ *     other) on failure — it never silently downgrades.
+ *   - A cancelled sheet is not a failure to report; the caller just lets the
+ *     user tap the create button again (see classifyPasskeyFailure).
+ *   - createDeviceOnlyPasskeyAtIndex creates a local key, but only a caller
+ *     that has already gotten explicit, informed consent (confirmDeviceOnlyFallback)
+ *     may call it — never automatically, and never from inside a catch block.
  */
 
 import * as Sentry from '@sentry/react-native';
-// Local-key fallback disabled — see provisionPasskeyAtIndex.
-// import * as LocalAuthentication from 'expo-local-authentication';
+import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
 import QuickCrypto from 'react-native-quick-crypto';
@@ -36,9 +45,8 @@ import { getPasskeyStorageKeys, SECURE_KEYS } from '@/src/store/wallet';
 
 import { describePasskeyFailure } from './passkey-failure';
 import {
-  // Local-key fallback disabled — see provisionPasskeyAtIndex.
-  // createPasskeyCredential,
-  // storePasskeyCredentialAtIndex,
+  createPasskeyCredential,
+  storePasskeyCredentialAtIndex,
   storePlatformPasskeyCredentialAtIndex,
 } from './passkey-webauthn';
 import { createPlatformPasskeyCredential, isPlatformPasskeySupported } from './platform-passkey';
@@ -95,6 +103,76 @@ export interface ProvisionPasskeyOptions {
 export { describePasskeyFailure };
 
 /**
+ * How a failed platform-passkey attempt should be handled. The distinction
+ * that matters: a cancelled sheet is not evidence the device can't do
+ * platform passkeys — it's the user backing out of one attempt. Only
+ * `unsupported` (or enough `other` failures in a row) is grounds to even
+ * offer a device-only key; `cancelled` should just let them try again.
+ */
+export type PasskeyFailureKind = 'cancelled' | 'unsupported' | 'other';
+
+/** Classifies a failed ceremony's raw error. Built on the same codes describePasskeyFailure reads. */
+export function classifyPasskeyFailure(err: unknown): PasskeyFailureKind {
+  const code = (err as { error?: string })?.error;
+  if (code === 'UserCancelled') return 'cancelled';
+  if (code === 'NotSupported' || code === 'NoCreateOption') return 'unsupported';
+  // Android's Credential Manager reports a dismissed sheet and a sheet with
+  // nothing to show identically (see describePasskeyFailure) — treat both as
+  // cancelled, the safer read: it means "let them try again", never "this
+  // device can't do platform passkeys", so a real capability problem still
+  // surfaces on the next attempt rather than being masked here.
+  const message = (err as { message?: string })?.message;
+  if (
+    message &&
+    /cancell?ed the selector|activity is cancell?ed|CancellationException/i.test(message)
+  ) {
+    return 'cancelled';
+  }
+  return 'other';
+}
+
+/**
+ * Thrown by provisionPasskeyAtIndex on any ceremony failure. Carries `kind`
+ * so a caller can decide what to show without re-deriving it from the raw
+ * error — see classifyPasskeyFailure.
+ */
+export class PasskeyProvisionError extends Error {
+  kind: PasskeyFailureKind;
+  constructor(message: string, kind: PasskeyFailureKind, cause?: unknown) {
+    super(message);
+    this.name = 'PasskeyProvisionError';
+    this.kind = kind;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/**
+ * After how many non-cancelled failures in a row a caller should start
+ * offering the device-only key as a fallback, rather than just "try again"
+ * indefinitely. A single `unsupported` failure always offers it immediately
+ * (see PasskeyProvisionError.kind) — this constant is only for the "the
+ * ceremony keeps failing for some other reason" case.
+ */
+export const OFFER_DEVICE_ONLY_AFTER_ATTEMPTS = 2;
+
+/**
+ * Whether a caller should offer the device-only fallback for a failure of
+ * this kind + how many have failed in a row so far. Takes the already-
+ * classified kind (PasskeyProvisionError.kind, or classifyPasskeyFailure(err)
+ * for a raw error) rather than an error itself, so it works the same whether
+ * the failure came from provisionPasskeyAtIndex or anywhere else a raw
+ * ceremony error is classified.
+ */
+export function shouldOfferDeviceOnlyFallback(
+  kind: PasskeyFailureKind,
+  failedAttempts: number,
+): boolean {
+  if (kind === 'cancelled') return false;
+  if (kind === 'unsupported') return true;
+  return failedAttempts >= OFFER_DEVICE_ONLY_AFTER_ATTEMPTS;
+}
+
+/**
  * Whether the OS can bind a stored key to a biometric.
  *
  * expo-secure-store's `requireAuthentication` maps to Android Keystore's
@@ -113,29 +191,25 @@ export { describePasskeyFailure };
  * `biometricGate` and said out loud by notifyIfWeakBiometricGate, never
  * silently downgraded.
  */
-// Local-key fallback disabled — see provisionPasskeyAtIndex. These probes only
-// ever mattered for how a SecureStore-backed local key was gated; a platform
-// passkey's user verification is owned by the OS ceremony.
-//
-// async function hasStrongBiometrics(): Promise<boolean> {
-//   try {
-//     return (
-//       (await LocalAuthentication.getEnrolledLevelAsync()) ===
-//       LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG
-//     );
-//   } catch {
-//     // Never let a capability probe be the thing that fails provisioning.
-//     return false;
-//   }
-// }
-//
-// /** Which protection a local key can actually get on this device. */
-// async function resolveBiometricGate(
-//   requireBiometric: boolean,
-// ): Promise<'keystore' | 'app' | 'none'> {
-//   if (!requireBiometric) return 'none';
-//   return (await hasStrongBiometrics()) ? 'keystore' : 'app';
-// }
+async function hasStrongBiometrics(): Promise<boolean> {
+  try {
+    return (
+      (await LocalAuthentication.getEnrolledLevelAsync()) ===
+      LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG
+    );
+  } catch {
+    // Never let a capability probe be the thing that fails provisioning.
+    return false;
+  }
+}
+
+/** Which protection a local key can actually get on this device. */
+async function resolveBiometricGate(
+  requireBiometric: boolean,
+): Promise<'keystore' | 'app' | 'none'> {
+  if (!requireBiometric) return 'none';
+  return (await hasStrongBiometrics()) ? 'keystore' : 'app';
+}
 
 /**
  * The next passkey number to show in the OS credential manager — computed, not
@@ -249,8 +323,13 @@ export async function clearProvisionedPasskeyAtIndex(listIndex: number): Promise
 }
 
 /**
- * Create and store the passkey credential for an account list index, preferring
- * a real platform passkey and falling back to a local key.
+ * Run the real OS passkey ceremony for an account list index. This is the
+ * ONLY path provisioning takes by default — it never falls back to a local
+ * key itself. A failure throws PasskeyProvisionError; the caller decides what
+ * to do with `.kind` (see classifyPasskeyFailure / shouldOfferDeviceOnlyFallback)
+ * — typically: silently let the user retry on 'cancelled', show a "Try Again"
+ * error on 'other', and only ever call createDeviceOnlyPasskeyAtIndex after
+ * explicit, informed consent (confirmDeviceOnlyFallback).
  *
  * Index 0 writes the same SecureStore keys the non-indexed helpers use, so this
  * is a drop-in for both onboarding and additional accounts.
@@ -266,87 +345,117 @@ export async function provisionPasskeyAtIndex(
   const passkeyName = buildPasskeyName(seq, options.accountLabel);
   const keys = getPasskeyStorageKeys(listIndex);
 
-  if (isPlatformPasskeySupported()) {
-    try {
-      const credential = await createPlatformPasskeyCredential({
-        rpId: PASSKEY_RP_ID,
-        rpName: 'Latch',
-        userId: new Uint8Array(QuickCrypto.randomBytes(16)),
-        userName: passkeyName,
-        userDisplayName: passkeyName,
-        challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
-      });
-      await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
-      await storePasskeyLabel(keys, passkeyName, seq);
-      await commitPasskeySeq(seq);
-      return { ...credential, kind: 'platform', passkeyName, seq };
-    } catch (err) {
-      const deviceOnlyReason = describePasskeyFailure(err, PASSKEY_RP_ID);
-      // Warn, not log-in-__DEV__-only: on a real build this line is the only
-      // way to tell a dismissed sheet from a misconfigured associated domain.
-      console.warn('[passkey] platform ceremony failed, no fallback:', deviceOnlyReason);
-      // react-native-passkey rejects with a plain `{ error, message }` object, not
-      // an Error — passing that straight to captureException logs it as "Object
-      // captured as exception with keys: error, message" and buries the reason.
-      // Wrap it so the issue title is the actual failure.
+  if (!isPlatformPasskeySupported()) {
+    throw new PasskeyProvisionError(
+      'This device has no passkey provider (iCloud Keychain or Google Password Manager).',
+      'unsupported',
+    );
+  }
+
+  try {
+    const credential = await createPlatformPasskeyCredential({
+      rpId: PASSKEY_RP_ID,
+      rpName: 'Latch',
+      userId: new Uint8Array(QuickCrypto.randomBytes(16)),
+      userName: passkeyName,
+      userDisplayName: passkeyName,
+      challenge: new Uint8Array(QuickCrypto.randomBytes(32)),
+    });
+    await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
+    await storePasskeyLabel(keys, passkeyName, seq);
+    await commitPasskeySeq(seq);
+    return { ...credential, kind: 'platform', passkeyName, seq };
+  } catch (err) {
+    const kind = classifyPasskeyFailure(err);
+    const reason = describePasskeyFailure(err, PASSKEY_RP_ID);
+
+    // A cancelled sheet is the user backing out, not a failure worth a log —
+    // only report what might actually be a bug (a real ceremony/config error).
+    if (kind !== 'cancelled') {
+      console.warn('[passkey] platform ceremony failed:', kind, reason);
+      // react-native-passkey rejects with a plain `{ error, message }` object,
+      // not an Error — passing that straight to captureException logs it as
+      // "Object captured as exception with keys: error, message" and buries
+      // the reason. Wrap it so the issue title is the actual failure.
       Sentry.captureException(
-        err instanceof Error
-          ? err
-          : new Error(`platform passkey ceremony failed: ${deviceOnlyReason}`),
+        err instanceof Error ? err : new Error(`platform passkey ceremony failed: ${reason}`),
         {
-          tags: { scope: 'platform-passkey-fallback' },
+          tags: { scope: 'platform-passkey-failure', kind },
           extra: {
-            deviceOnlyReason,
+            reason,
             rawError: err,
             errorCode: (err as { error?: string })?.error,
             errorMessage: (err as { message?: string })?.message,
           },
         },
       );
-
-      // Local-key fallback disabled: a synced platform passkey (iCloud Keychain
-      // / Google Password Manager) is the only supported way to back a wallet,
-      // so a failed OS ceremony surfaces as an error instead of silently
-      // handing the user a device-only key. Kept here for reference.
-      //
-      // const local = createPasskeyCredential();
-      // const gate = await resolveBiometricGate(options.requireBiometric);
-      // await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
-      // await storePasskeyLabel(keys, passkeyName, seq);
-      // return {
-      //   credentialId: local.credentialId,
-      //   publicKeyHex: local.publicKeyHex,
-      //   keyDataHex: local.publicKeyHex + local.credentialId,
-      //   kind: 'local',
-      //   deviceOnlyReason,
-      //   biometricGate: gate,
-      //   passkeyName,
-      //   seq,
-      // };
-      throw new Error(`Couldn't create a passkey: ${deviceOnlyReason}`);
     }
-  }
 
-  // Local-key fallback disabled — see the catch block above. A device with no
-  // passkey provider can no longer provision a wallet.
-  //
-  // const local = createPasskeyCredential();
-  // const gate = await resolveBiometricGate(options.requireBiometric);
-  // await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
-  // await storePasskeyLabel(keys, passkeyName, seq);
-  // return {
-  //   credentialId: local.credentialId,
-  //   publicKeyHex: local.publicKeyHex,
-  //   keyDataHex: local.publicKeyHex + local.credentialId,
-  //   kind: 'local',
-  //   deviceOnlyReason: 'this device does not support passkeys',
-  //   biometricGate: gate,
-  //   passkeyName,
-  //   seq,
-  // };
-  throw new Error(
-    "Couldn't create a passkey: this device has no passkey provider (iCloud Keychain or Google Password Manager).",
-  );
+    throw new PasskeyProvisionError(`Couldn't create a passkey: ${reason}`, kind, err);
+  }
+}
+
+/**
+ * Create and store a device-only passkey — a hand-rolled P-256 key in
+ * SecureStore (passkey-webauthn.ts), gated by whatever biometric protection
+ * this device can give it. Exists on exactly this device, forever; never
+ * syncs anywhere.
+ *
+ * Callers must have already gotten explicit, informed consent — see
+ * confirmDeviceOnlyFallback — before calling this. It is never invoked
+ * automatically from provisionPasskeyAtIndex's failure path.
+ */
+export async function createDeviceOnlyPasskeyAtIndex(
+  listIndex: number,
+  options: ProvisionPasskeyOptions,
+): Promise<ProvisionedPasskey> {
+  const seq = await peekNextPasskeySeq();
+  const passkeyName = buildPasskeyName(seq, options.accountLabel);
+  const keys = getPasskeyStorageKeys(listIndex);
+
+  const local = createPasskeyCredential();
+  const gate = await resolveBiometricGate(options.requireBiometric);
+  await storePasskeyCredentialAtIndex(local, listIndex, gate === 'keystore');
+  await storePasskeyLabel(keys, passkeyName, seq);
+  await commitPasskeySeq(seq);
+  return {
+    credentialId: local.credentialId,
+    publicKeyHex: local.publicKeyHex,
+    keyDataHex: local.publicKeyHex + local.credentialId,
+    kind: 'local',
+    deviceOnlyReason: 'you chose a device-only key',
+    biometricGate: gate,
+    passkeyName,
+    seq,
+  };
+}
+
+/**
+ * The one place the device-only warning is worded — every call site shows
+ * the same text before the same choice, rather than each screen writing (and
+ * inevitably drifting from) its own copy.
+ *
+ * Resolves true only if the user tapped through to continue. Never call
+ * createDeviceOnlyPasskeyAtIndex without this (or an equivalent explicit
+ * confirmation) returning true first.
+ */
+export function confirmDeviceOnlyFallback(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Use a device-only key?',
+      "This key will only exist on this device and won't sync to iCloud Keychain or Google Password Manager. " +
+        "If you lose this device without a backup, this wallet can't be recovered on another one.\n\n" +
+        "You'll be prompted to set up recovery right after.",
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        {
+          text: 'Continue with Device-Only Key',
+          style: 'destructive',
+          onPress: () => resolve(true),
+        },
+      ],
+    );
+  });
 }
 
 /**
