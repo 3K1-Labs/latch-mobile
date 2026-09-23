@@ -1,33 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { Formik } from 'formik';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Dimensions,
-  Modal,
-  StyleSheet,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import * as Yup from 'yup';
 
-import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
+import SheetHeader from '@/src/components/profile/SheetHeader';
+import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Input from '@/src/components/shared/Input';
 import Text from '@/src/components/shared/Text';
-import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { usePermissions } from '@/src/store/permissions';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import SessionKeyTokenPicker, { largestBalanceCode, useHeldTokens } from './SessionKeyTokenPicker';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface Props {
   visible: boolean;
@@ -41,7 +30,6 @@ interface PolicyFormValues {
 }
 
 const PoliciesSheet = ({ visible, onClose }: Props) => {
-  const insets = useSafeAreaInsets();
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
 
@@ -76,26 +64,9 @@ const PoliciesSheet = ({ visible, onClose }: Props) => {
     spendAsset: policies?.spendLimit?.asset ?? largestBalanceCode(tokens),
   };
 
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-
   useEffect(() => {
-    if (visible) {
-      rehydrate();
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        damping: 25,
-        mass: 1,
-        stiffness: 150,
-      }).start();
-    } else {
-      Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [visible, translateY, rehydrate]);
+    if (visible) rehydrate();
+  }, [visible, rehydrate]);
 
   const handleSave = (values: PolicyFormValues) => {
     if (!isMultisig) setThreshold(accountAddress, values.threshold);
@@ -108,46 +79,19 @@ const PoliciesSheet = ({ visible, onClose }: Props) => {
   };
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.backdrop} />
-      </TouchableWithoutFeedback>
-
-      <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
-        <Animated.View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-              paddingBottom: Math.max(insets.bottom, 16),
-              transform: [{ translateY }],
-              height: SHEET_HEIGHT,
-            },
-          ]}
-        >
-          <BottomSheetHandle />
-
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            justifyContent="space-between"
-            paddingHorizontal="m"
-            py="m"
-            mb="m"
-          >
-            <TouchableOpacity
-              onPress={onClose}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="chevron-back" size={20} color={theme.colors.textPrimary} />
-            </TouchableOpacity>
-            <Text variant="h10" color="textPrimary" fontWeight="700">
-              Policies
-            </Text>
-            <Box width={20} />
-          </Box>
-
-          <Formik
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      snapPoints={['92%']}
+      keyboardBehavior="extend"
+      android_keyboardInputMode="adjustResize"
+      backgroundStyle={{
+        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
+      }}
+      header={<SheetHeader title="Policies" onBack={onClose} />}
+      contentContainerStyle={{ flex: 1 }}
+    >
+      <Formik
             enableReinitialize
             initialValues={initialValues}
             validationSchema={validationSchema}
@@ -336,28 +280,9 @@ const PoliciesSheet = ({ visible, onClose }: Props) => {
                 </>
               );
             }}
-          </Formik>
-        </Animated.View>
-      </View>
-    </Modal>
+      </Formik>
+    </BottomSheet>
   );
 };
-
-const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    width: '100%',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 20,
-  },
-});
 
 export default PoliciesSheet;

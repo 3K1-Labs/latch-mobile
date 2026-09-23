@@ -17,8 +17,11 @@
  * can tell the user exactly which case they're in instead of guessing.
  */
 
+import * as Sentry from '@sentry/react-native';
+
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import {
+  getNetworkId,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -34,7 +37,19 @@ export interface AuthFailureDiagnosis {
   /** True if the presented key_data matches a registered signer on the default rule. */
   presentedKeyRegistered: boolean;
   /** Decoded registered signers, summarized for logging. */
-  registered: { kind: string; keyDataHex?: string; address?: string }[];
+  registered: {
+    kind: string;
+    keyDataHex?: string;
+    address?: string;
+    /** Verifier contract this External signer is registered under. */
+    verifierAddress?: string;
+    /** True when that verifier isn't one the current factory publishes. */
+    foreignVerifier?: boolean;
+  }[];
+  /** On-chain id of the Default rule, when the read succeeded. */
+  ruleId?: number;
+  /** Message from the on-chain rule read when it threw (kind === 'unknown'). */
+  ruleReadError?: string;
 }
 
 function looksLikeAuthFailure(message: string): boolean {
@@ -77,6 +92,8 @@ export async function diagnoseAuthFailure(
       kind: s.kind,
       keyDataHex: s.keyDataHex || undefined,
       address: s.address,
+      verifierAddress: s.verifierAddress,
+      foreignVerifier: s.foreignVerifier,
     }));
 
     if (__DEV__) {
@@ -111,9 +128,20 @@ export async function diagnoseAuthFailure(
       console.log('[tx-diagnostics] verdict:', { kind, presentedKeyRegistered, hasDelegated });
     }
 
-    return { kind, presentedKeyRegistered, registered };
+    return { kind, presentedKeyRegistered, registered, ruleId: rule.ruleId };
   } catch (err) {
     if (__DEV__) console.log('[tx-diagnostics] could not read on-chain rule:', err);
-    return { kind: 'unknown', presentedKeyRegistered: false, registered: [] };
+    // A failed rule read makes every downstream verdict "unknown" and also
+    // means resolveRegisteredWebAuthnVerifier fell back to the factory's
+    // current verifier — which is exactly how a correct signer still fails
+    // #3016 on a device that can't reach the RPC. Capture it so that case is
+    // distinguishable from a genuine key/threshold mismatch.
+    const ruleReadError = err instanceof Error ? err.message : String(err);
+    Sentry.captureMessage('diagnoseAuthFailure: on-chain rule read failed', {
+      level: 'warning',
+      tags: { scope: 'tx-diagnostics', network: getNetworkId() },
+      extra: { accountAddress, ruleReadError, rpcUrl: STELLAR_RPC_URL },
+    });
+    return { kind: 'unknown', presentedKeyRegistered: false, registered: [], ruleReadError };
   }
 }

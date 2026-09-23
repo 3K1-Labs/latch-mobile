@@ -5,6 +5,7 @@ import {
   type ChainSigner,
 } from '@/src/api/account-admin';
 import { deploySmartAccount as deploySmartAccountPasskey } from '@/src/api/passkey';
+import { lookupWalletByPasskey } from '@/src/api/passkey-credential';
 import {
   deployMultiSigSmartAccount,
   deploySmartAccount as deploySmartAccountEd25519,
@@ -25,27 +26,37 @@ import CreateWalletButton from '@/src/components/shared-wallet-review/CreateWall
 import MemberReviewList from '@/src/components/shared-wallet-review/MemberReviewList';
 import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard';
 import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
-import AppToast from '@/src/components/toast/AppToast';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import AppToast from '@/src/components/toast/AppToast';
 import {
+  getNetworkId,
+  MAINNET_NETWORK,
+  PASSKEY_RP_ID,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
+  TESTNET_NETWORK,
 } from '@/src/constants/config';
 import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 import { addSharedWalletByAddress } from '@/src/lib/add-shared-wallet';
 import { announceMembership } from '@/src/lib/membership';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
+import { switchActiveNetwork } from '@/src/lib/network-switch';
+import { storePlatformPasskeyCredentialAtIndex } from '@/src/lib/passkey-webauthn';
+import { isPlatformPasskeySupported } from '@/src/lib/platform-passkey';
 import {
   getStoredPasskeyLabel,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
   provisionPasskeyAtIndex,
+  storePasskeyLabel,
 } from '@/src/lib/provision-passkey';
+import { signInToExistingWalletWithPlatformPasskey } from '@/src/lib/wallet-auth';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
+  accountUsableOnNetwork,
   getPasskeyStorageKeys,
   SECURE_KEYS,
   useWalletStore,
@@ -54,10 +65,11 @@ import {
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -77,11 +89,24 @@ import AccountSectionHeader from './AccountSectionHeader';
 import AccountSheetHeader from './AccountSheetHeader';
 import AddAccountInfo from './AddAccountInfo';
 import AddAccountPrompt from './AddAccountPrompt';
+import AddPasskeyAccount from './AddPasskeyAccount';
 import AddSharedWalletForm from './AddSharedWalletForm';
 import MultisigSignersSection from './MultisigSignersSection';
 import SharedWalletResultModal from './SharedWalletResultModal';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+export type SheetStep =
+  | 'list'
+  | 'add-prompt'
+  | 'add-info'
+  | 'add-shared'
+  | 'add-passkey'
+  | 'signers'
+  | 'multisig-name'
+  | 'multisig-members'
+  | 'multisig-threshold'
+  | 'multisig-review';
 
 interface Props {
   visible: boolean;
@@ -91,18 +116,17 @@ interface Props {
    * it up (e.g. by opening BackupSheet) — uploadBackup() can't do this
    * itself post-onboarding, since the password session is gone by then. */
   onNeedsBackup?: () => void;
+  /** Step to land on when the sheet opens. Defaults to the account list; pass
+   * e.g. 'add-info' to open straight into account creation. */
+  initialStep?: SheetStep;
+  /** When true the sheet can't be dismissed — no back chevron, no backdrop tap,
+   * no Android back. The only ways out are creating the account or `onSwitchBack`.
+   * Used when the active network has no usable account. */
+  mandatory?: boolean;
+  /** The escape hatch shown in `mandatory` mode: revert to the previous network. */
+  onSwitchBack?: () => void;
+  switchBackLabel?: string;
 }
-
-type SheetStep =
-  | 'list'
-  | 'add-prompt'
-  | 'add-info'
-  | 'add-shared'
-  | 'signers'
-  | 'multisig-name'
-  | 'multisig-members'
-  | 'multisig-threshold'
-  | 'multisig-review';
 
 interface MultisigResult {
   success: boolean;
@@ -132,7 +156,15 @@ function describeMemberReadError(message: string): string {
   return 'could not read account';
 }
 
-const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
+const AccountSwitcherSheet = ({
+  visible,
+  onClose,
+  onNeedsBackup,
+  initialStep,
+  mandatory = false,
+  onSwitchBack,
+  switchBackLabel,
+}: Props) => {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -140,6 +172,7 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
   const {
     accounts,
     activeAccountIndex,
+    activeNetwork,
     avatars,
     mnemonic,
     switchAccount,
@@ -149,14 +182,20 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
     removeAccount,
     renameAccount,
     setAccountImage,
+    resolveUnknownAccountNetworks,
   } = useWalletStore();
 
-  const [step, setStep] = useState<SheetStep>('list');
+  const [step, setStep] = useState<SheetStep>(initialStep ?? 'list');
   const [deployingIndex, setDeployingIndex] = useState<number | null>(null);
   const [isAddingAccount, setIsAddingAccount] = useState(false);
   const [createAccountError, setCreateAccountError] = useState<string | null>(null);
   const [isAddingShared, setIsAddingShared] = useState(false);
+  const [isAddingPasskey, setIsAddingPasskey] = useState(false);
+  const [addPasskeyError, setAddPasskeyError] = useState<string | null>(null);
   const [signersFor, setSignersFor] = useState<{ name: string; address: string } | null>(null);
+  const [switchingNetwork, setSwitchingNetwork] = useState(false);
+
+  const platformPasskeySupported = isPlatformPasskeySupported();
 
   // Multisig wizard state
   const [walletName, setWalletName] = useState('');
@@ -189,9 +228,16 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
 
   // Slide-up animation
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  // Tracks whether the sheet is currently open, so the close-branch reset only
+  // runs on a real open→close transition — not when `initialStep` changes while
+  // the sheet is still closed, which would schedule a stray setStep('list') that
+  // clobbers the initialStep the sheet then opens with.
+  const wasVisible = useRef(false);
 
   useEffect(() => {
     if (visible) {
+      wasVisible.current = true;
+      setStep(initialStep ?? 'list');
       Animated.spring(translateY, {
         toValue: 0,
         useNativeDriver: true,
@@ -202,7 +248,11 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
       SecureStore.getItemAsync(SECURE_KEYS.USER_EMAIL)
         .then(setSelfEmail)
         .catch(() => setSelfEmail(null));
-    } else {
+      // Stamp the network on any older account records so they fall into the
+      // right (this-network / other-network) bucket below.
+      void resolveUnknownAccountNetworks();
+    } else if (wasVisible.current) {
+      wasVisible.current = false;
       Animated.timing(translateY, {
         toValue: SCREEN_HEIGHT,
         duration: 300,
@@ -210,10 +260,11 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
       }).start();
       setTimeout(() => {
         setStep('list');
+        setAddPasskeyError(null);
         resetMultisigState();
       }, 300);
     }
-  }, [visible, translateY]);
+  }, [visible, initialStep, translateY, resolveUnknownAccountNetworks]);
 
   const resetMultisigState = () => {
     setWalletName('');
@@ -476,6 +527,21 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
     });
   };
 
+  // Jump to the network the hidden accounts live on. reconcileActiveAccountForNetwork
+  // (fired inside switchActiveNetwork) re-points the active account and updates
+  // activeNetwork, so this sheet re-renders with the other network's list.
+  const handleSwitchToOtherNetwork = async () => {
+    if (switchingNetwork) return;
+    setSwitchingNetwork(true);
+    try {
+      await switchActiveNetwork(activeNetwork === 'testnet' ? MAINNET_NETWORK : TESTNET_NETWORK);
+    } catch (err) {
+      if (__DEV__) console.error('[account] network switch failed:', err);
+    } finally {
+      setSwitchingNetwork(false);
+    }
+  };
+
   const handleCreateAccount = async (name: string, image: string | null) => {
     if (isAddingAccount) return;
     const currentLength = accounts.length;
@@ -562,6 +628,100 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
       });
     } finally {
       setIsAddingShared(false);
+    }
+  };
+
+  /**
+   * Add a Latch account this user already has a synced passkey for — the
+   * in-app equivalent of the onboarding sign-in-passkey screen. One discovery
+   * ceremony (no address, no allowCredentials) resolves whichever synced Latch
+   * passkey answers to its wallet via latch-api's passkey-credentials index;
+   * a second ceremony proves control and reads the account's on-chain webauthn
+   * signer. The account is only ever trusted from the chain — never from
+   * anything this device claims locally.
+   *
+   * Mirrors completeSignIn in app/(onboarding)/sign-in-passkey.tsx, minus the
+   * onboarding-complete flag and the router.replace: here the wallet already
+   * exists on the device and this just appends another account to the list.
+   */
+  const handleAddPasskeyAccount = async () => {
+    if (isAddingPasskey) return;
+    setIsAddingPasskey(true);
+    setAddPasskeyError(null);
+    try {
+      const found = await lookupWalletByPasskey();
+
+      // Already in the list — switch to it instead of running a second
+      // ceremony and letting appendAccount's dedupe silently no-op.
+      const existingIndex = accounts.findIndex(
+        (a) => a.smartAccountAddress === found.smartAccountAddress,
+      );
+      if (existingIndex >= 0) {
+        Toast.show({
+          type: 'info',
+          text1: 'Already added',
+          text2: accounts[existingIndex].name,
+        });
+        handleSwitch(existingIndex);
+        return;
+      }
+
+      const result = await signInToExistingWalletWithPlatformPasskey(found.smartAccountAddress);
+
+      const listIndex = accounts.length;
+      // signInToExistingWalletWithPlatformPasskey ran under PASSKEY_RP_ID, so
+      // that is the RP this credential answers to.
+      await storePlatformPasskeyCredentialAtIndex(
+        { credentialId: result.credentialId, keyDataHex: result.keyDataHex },
+        listIndex,
+        PASSKEY_RP_ID,
+      );
+      if (found.label) {
+        await storePasskeyLabel(getPasskeyStorageKeys(listIndex), found.label, found.seq);
+      }
+
+      const appended = await useWalletStore.getState().appendAccount(
+        {
+          index: -1,
+          name: found.label || `Account ${listIndex + 1}`,
+          gAddress: '',
+          publicKeyHex: '',
+          smartAccountAddress: found.smartAccountAddress,
+          image: null,
+          credentialId: result.credentialId,
+          network: result.network,
+        },
+        true,
+      );
+
+      // The account is added stamped with the network it's actually deployed
+      // on (result.network). If that isn't the network the app is on, it won't
+      // show in the list until the user switches — say so rather than leaving
+      // them looking for it.
+      const addedOnOtherNetwork = result.network && result.network !== activeNetwork;
+      Toast.show({
+        type: 'success',
+        text1: 'Account added',
+        text2: addedOnOtherNetwork
+          ? `${appended.name} is on ${result.network === 'testnet' ? 'Testnet' : 'Public Network'} — switch networks to view it`
+          : appended.name,
+      });
+      setStep('list');
+      onClose();
+    } catch (e: any) {
+      // Every discovery/sign-in failure — no synced credential, expired nonce,
+      // bad signature — is reported identically by latch-api on purpose, so the
+      // message here stays generic. The C-address is a public identifier and is
+      // what makes a Sentry report actionable.
+      Sentry.captureException(e instanceof Error ? e : new Error(String(e?.message ?? e)), {
+        tags: { scope: 'account-switcher-add-passkey', network: getNetworkId() },
+      });
+      setAddPasskeyError(
+        e?.message ??
+          "Couldn't add that account. Make sure you're signed in to the same Google or iCloud account.",
+      );
+    } finally {
+      setIsAddingPasskey(false);
     }
   };
 
@@ -738,6 +898,11 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
             onCreatePress={() => setStep('add-info')}
             onAddSharedPress={() => setStep('add-shared')}
             onCreateMultisigPress={() => setStep('multisig-name')}
+            onAddPasskeyPress={() => {
+              setAddPasskeyError(null);
+              setStep('add-passkey');
+            }}
+            platformPasskeySupported={platformPasskeySupported}
           />
         );
       case 'add-shared':
@@ -746,6 +911,19 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
             onBack={() => setStep('add-prompt')}
             onSubmit={handleAddSharedWallet}
             isSubmitting={isAddingShared}
+          />
+        );
+      case 'add-passkey':
+        return (
+          <AddPasskeyAccount
+            onBack={() => {
+              setAddPasskeyError(null);
+              setStep('add-prompt');
+            }}
+            onFind={handleAddPasskeyAccount}
+            isSubmitting={isAddingPasskey}
+            errorMessage={addPasskeyError}
+            platformSupported={platformPasskeySupported}
           />
         );
       case 'signers':
@@ -760,13 +938,26 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
         return (
           <AddAccountInfo
             defaultName={`Account ${accounts.length + 1}`}
-            onBack={() => {
-              setCreateAccountError(null);
-              setStep('add-prompt');
-            }}
+            onBack={
+              mandatory
+                ? undefined
+                : () => {
+                    setCreateAccountError(null);
+                    setStep('add-prompt');
+                  }
+            }
             onSubmit={handleCreateAccount}
             isSubmitting={isAddingAccount}
             errorMessage={createAccountError}
+            secondaryAction={
+              mandatory && onSwitchBack
+                ? {
+                    label: switchBackLabel ?? 'Switch back',
+                    onPress: onSwitchBack,
+                    disabled: isAddingAccount,
+                  }
+                : undefined
+            }
           />
         );
 
@@ -800,14 +991,25 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
         );
 
       default: {
-        // Split into regular and multisig groups while preserving each
-        // account's ORIGINAL array position — handleSwitch/handleDeploy/isActive
-        // all key off listIndex, so the index must survive the grouping.
+        // Only show accounts that live on the network the app is pointed at —
+        // a smart account on the other network can't be read or spent from
+        // here. Unknown-network (older records, probe pending) and not-yet-
+        // deployed accounts stay visible on both. Split into regular and
+        // multisig groups while preserving each account's ORIGINAL array
+        // position — handleSwitch/handleDeploy/isActive all key off listIndex,
+        // so the index must survive the filter + grouping.
         const regular: { account: WalletAccount; listIndex: number }[] = [];
         const multisig: { account: WalletAccount; listIndex: number }[] = [];
         accounts.forEach((account, listIndex) => {
+          if (!accountUsableOnNetwork(account, activeNetwork)) return;
           (account.isMultisig ? multisig : regular).push({ account, listIndex });
         });
+
+        const offNetworkCount = accounts.filter(
+          (a) => a.smartAccountAddress && a.network && a.network !== activeNetwork,
+        ).length;
+        const thisNetworkLabel = activeNetwork === 'testnet' ? 'Testnet' : 'Public Network';
+        const otherNetworkLabel = activeNetwork === 'testnet' ? 'Public Network' : 'Testnet';
 
         const renderAccount = ({
           account,
@@ -840,7 +1042,11 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
 
         return (
           <>
-            <AccountSheetHeader onClose={onClose} onAdd={() => setStep('add-prompt')} />
+            <AccountSheetHeader
+              onClose={onClose}
+              onAdd={() => setStep('add-prompt')}
+              label={activeNetwork === 'testnet' ? 'Testnet' : 'Mainnet '}
+            />
             <KeyboardAwareScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
@@ -858,6 +1064,43 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
                   <AccountSectionHeader label="Multisig accounts" count={multisig.length} />
                   {multisig.map(renderAccount)}
                 </>
+              )}
+
+              {regular.length === 0 && multisig.length === 0 && (
+                <Box py="l" alignItems="center">
+                  <Text variant="p7" color="textSecondary" textAlign="center">
+                    No accounts on {thisNetworkLabel}
+                  </Text>
+                </Box>
+              )}
+
+              {offNetworkCount > 0 && (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={switchingNetwork}
+                  onPress={handleSwitchToOtherNetwork}
+                >
+                  <Box
+                    flexDirection="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    backgroundColor="bg11"
+                    borderRadius={16}
+                    padding="m"
+                    mt="s"
+                  >
+                    <Box flex={1} pr="s">
+                      <Text variant="p7" color="textPrimary" fontWeight="600">
+                        {offNetworkCount} account{offNetworkCount === 1 ? '' : 's'} on{' '}
+                        {otherNetworkLabel}
+                      </Text>
+                      <Text variant="p8" color="textSecondary" mt="xs">
+                        {switchingNetwork ? 'Switching…' : `Tap to switch to ${otherNetworkLabel}`}
+                      </Text>
+                    </Box>
+                    <Ionicons name="swap-horizontal" size={18} color={theme.colors.textSecondary} />
+                  </Box>
+                </TouchableOpacity>
               )}
             </KeyboardAwareScrollView>
           </>
@@ -878,9 +1121,12 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
         transparent
         visible={visible && multisigResult === null}
         animationType="none"
-        onRequestClose={onClose}
+        // In mandatory mode the wallet has no account on this network, so nothing
+        // dismisses the sheet — not the backdrop, not Android back. The only ways
+        // out are creating the account or the explicit "switch back" button.
+        onRequestClose={mandatory ? () => {} : onClose}
       >
-        <TouchableWithoutFeedback onPress={onClose}>
+        <TouchableWithoutFeedback onPress={mandatory ? undefined : onClose} disabled={mandatory}>
           <View style={styles.backdrop} />
         </TouchableWithoutFeedback>
 
@@ -904,6 +1150,7 @@ const AccountSwitcherSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
               text="Creating Account..."
               subText="Deploying your new Smart Account to the Stellar network. This only takes a moment."
             />
+            <LoadingBlur visible={isAddingPasskey} text="Adding your account…" />
           </Animated.View>
         </View>
 

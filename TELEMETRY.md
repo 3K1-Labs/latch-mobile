@@ -60,12 +60,26 @@ The `update:*` scripts therefore export, upload, and publish that same export:
 eas env:exec <env> "npm run export:sourcemaps" && eas update … --skip-bundler
 ```
 
-Three things are load-bearing. `env:exec` runs the export under the EAS
-environment, because `expo export` on its own reads local `.env` and would ship
-a developer's values. `--skip-bundler` republishes the `dist/` that was just
-uploaded rather than re-bundling — a second bundle would have different hashes
-and the maps would not match it. And the upload happens before the publish, so
-a failed upload stops the release instead of shipping an untraceable one.
+Four things are load-bearing, each of which failed in a different way when it
+was missing:
+
+- **`env:exec`** runs the export under the EAS environment. `expo export` on its
+  own reads local `.env` and would ship a developer's values.
+- **`--platform android --platform ios`** on the export. The default is `all`,
+  which includes web, and `web.output: 'static'` server-renders every route
+  under Node — where importing a native module throws `__fbBatchedBridgeConfig
+  is not set`. `eas update` never bundled web, so this only appears once you
+  export by hand.
+- **`--source-maps external`**. Source maps are off by default
+  (`sourceMaps = !!args['--source-maps']`), and the upload step does not object
+  to finding none — so omitting this leaves the release *looking* instrumented
+  while Sentry still has nothing to resolve frames against.
+- **`--skip-bundler`** republishes the `dist/` that was just uploaded instead of
+  re-bundling. A second bundle would have different hashes and the maps would
+  not match it.
+
+The upload also happens before the publish, so a failed upload stops the release
+rather than shipping an untraceable one.
 
 ## The backend
 

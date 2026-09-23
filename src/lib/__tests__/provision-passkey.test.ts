@@ -10,6 +10,7 @@ import { Alert } from 'react-native';
 import { Passkey } from 'react-native-passkey';
 
 import {
+  clearProvisionedPasskeyAtIndex,
   describePasskeyFailure,
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
@@ -43,6 +44,10 @@ jest.mock('expo-secure-store', () => ({
     mockSecureStore.set(key, value);
     return Promise.resolve();
   }),
+  deleteItemAsync: jest.fn((key: string) => {
+    mockSecureStore.delete(key);
+    return Promise.resolve();
+  }),
 }));
 
 jest.mock('@/src/store/wallet', () => ({
@@ -52,6 +57,12 @@ jest.mock('@/src/store/wallet', () => ({
     PASSKEY_LABEL_SEQ: 'latch_passkey_label_seq',
   },
   getPasskeyStorageKeys: (listIndex: number) => ({
+    credentialId: `latch_credential_id_${listIndex}`,
+    keyDataHex: `latch_key_data_hex_${listIndex}`,
+    privateKey: `latch_passkey_private_key_${listIndex}`,
+    requiresBiometric: `latch_passkey_requires_biometric_${listIndex}`,
+    kind: `latch_passkey_kind_${listIndex}`,
+    rpId: `latch_passkey_rp_id_${listIndex}`,
     label: `latch_passkey_label_${listIndex}`,
     labelSeq: `latch_passkey_label_seq_${listIndex}`,
   }),
@@ -148,6 +159,25 @@ describe('provisionPasskeyAtIndex', () => {
     });
   });
 
+  it('does not advance the passkey counter when the ceremony fails', async () => {
+    (platformModule.createPlatformPasskeyCredential as jest.Mock)
+      .mockRejectedValueOnce({
+        error: 'UserCancelled',
+        message: 'The user cancelled the request.',
+      })
+      .mockResolvedValueOnce(platformCredential);
+
+    await expect(provisionPasskeyAtIndex(0, { requireBiometric: true })).rejects.toThrow();
+    // A dismissed sheet must not burn a number — the next real passkey is still
+    // "Latch Wallet 1", and the counter only persists once a credential exists.
+    expect(mockSecureStore.has('latch_passkey_seq')).toBe(false);
+
+    const result = await provisionPasskeyAtIndex(0, { requireBiometric: true });
+    expect(result.seq).toBe(1);
+    expect(result.passkeyName).toBe('Latch Wallet 1');
+    expect(mockSecureStore.get('latch_passkey_seq')).toBe('1');
+  });
+
   it('still names the passkey when the seq counter cannot be read', async () => {
     (platformModule.createPlatformPasskeyCredential as jest.Mock).mockResolvedValue(
       platformCredential,
@@ -184,6 +214,36 @@ describe('provisionPasskeyAtIndex', () => {
     expect(platformModule.createPlatformPasskeyCredential).not.toHaveBeenCalled();
     expect(Passkey.create).not.toHaveBeenCalled();
     expect(stored.local).toBeUndefined();
+  });
+});
+
+describe('clearProvisionedPasskeyAtIndex', () => {
+  it('wipes every stored key for the slot so the next run reprovisions', async () => {
+    const keys = [
+      'latch_credential_id_0',
+      'latch_key_data_hex_0',
+      'latch_passkey_private_key_0',
+      'latch_passkey_requires_biometric_0',
+      'latch_passkey_kind_0',
+      'latch_passkey_rp_id_0',
+      'latch_passkey_label_0',
+      'latch_passkey_label_seq_0',
+    ];
+    keys.forEach((k) => mockSecureStore.set(k, 'stale'));
+
+    await clearProvisionedPasskeyAtIndex(0);
+
+    keys.forEach((k) => expect(mockSecureStore.has(k)).toBe(false));
+  });
+
+  it('leaves another account slot untouched', async () => {
+    mockSecureStore.set('latch_credential_id_0', 'stale');
+    mockSecureStore.set('latch_credential_id_1', 'keep');
+
+    await clearProvisionedPasskeyAtIndex(0);
+
+    expect(mockSecureStore.has('latch_credential_id_0')).toBe(false);
+    expect(mockSecureStore.get('latch_credential_id_1')).toBe('keep');
   });
 });
 

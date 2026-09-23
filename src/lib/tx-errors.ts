@@ -20,9 +20,34 @@ function raw(err: unknown): string {
   }
 }
 
+/**
+ * The transfer trapped reading the account contract's own instance storage —
+ * `Error(Auth, InvalidAction)` wrapping an inner `Error(Storage, MissingValue)`
+ * ("trying to get non-existing value for contract instance"). That happens when
+ * the account isn't deployed on the network the app is currently pointed at:
+ * its C-address resolves to nothing, so `__check_auth` has no storage to read.
+ * Distinct from a signer/threshold rejection, which the caller handles
+ * differently (it should offer "switch networks", not "re-initialize").
+ */
+export function isWrongNetworkError(err: unknown): boolean {
+  const m = raw(err).toLowerCase();
+  return (
+    m.includes('non-existing value for contract instance') ||
+    (m.includes('missingvalue') && m.includes('invalidaction'))
+  );
+}
+
 export function friendlyTxError(err: unknown): string {
   const msg = raw(err);
   const lower = msg.toLowerCase();
+
+  // Wrong-network account — its contract doesn't exist on the active network.
+  if (isWrongNetworkError(err)) {
+    return (
+      "This account isn't deployed on the current network. If you created it on the " +
+      'other network, switch under Profile → Network.'
+    );
+  }
 
   // Passkey credential drift — caller may special-case this, but map it too.
   if (msg.startsWith('PASSKEY_KEY_MISMATCH') || lower.includes('passkey_key_mismatch')) {

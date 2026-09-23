@@ -7,6 +7,7 @@ import {
 import type { BottomSheetBackdropProps, BottomSheetModalProps, BottomSheetScrollView as BottomSheetScrollViewType } from '@gorhom/bottom-sheet';
 import { useTheme } from '@shopify/restyle';
 import React, { useCallback, useEffect, useRef } from 'react';
+import { View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,6 +20,11 @@ interface Props extends Omit<BottomSheetModalProps, 'onDismiss' | 'children' | '
   snapPoints?: string[];
   /** Render content inside a ScrollView instead of a plain View. */
   scrollable?: boolean;
+  /**
+   * Rendered above the content, outside the scroll area, so it stays pinned
+   * while the body scrolls. Sits below the drag handle.
+   */
+  header?: React.ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
   /** Extra props forwarded to BottomSheetScrollView (only used when scrollable=true). */
   scrollViewProps?: Omit<React.ComponentProps<typeof BottomSheetScrollViewType>, 'children' | 'contentContainerStyle'>;
@@ -30,6 +36,7 @@ const BottomSheet = ({
   onClose,
   snapPoints,
   scrollable = false,
+  header,
   contentContainerStyle,
   scrollViewProps,
   children,
@@ -67,8 +74,11 @@ const BottomSheet = ({
     [],
   );
 
+  // With explicit snap points, keep dynamic sizing off — otherwise gorhom adds a
+  // content-height snap point, which measures wrong when a fixed `header` sits
+  // as a sibling above the scroll/content view.
   const modalProps: Partial<BottomSheetModalProps> = snapPoints
-    ? { snapPoints }
+    ? { snapPoints, enableDynamicSizing: false }
     : { enableDynamicSizing: true };
 
   const defaultContentStyle: StyleProp<ViewStyle> = {
@@ -85,16 +95,30 @@ const BottomSheet = ({
       handleIndicatorStyle={{ backgroundColor: theme.colors.gray800, width: 36, height: 4 }}
       {...rest}
     >
+      {header}
       {scrollable ? (
         <BottomSheetScrollView
           showsVerticalScrollIndicator={false}
           bounces={false}
+          // A pinned header is a sibling above this view, so it must flex to fill
+          // the rest of the sheet rather than grow to its content height.
+          style={header ? { flex: 1 } : undefined}
           {...scrollViewProps}
           contentContainerStyle={contentContainerStyle ?? defaultContentStyle}
         >
           {children}
         </BottomSheetScrollView>
+      ) : snapPoints ? (
+        // Fixed-height sheet: gorhom gives the content wrapper a definite height,
+        // so a plain flex View fills it. BottomSheetView can't be used here — it
+        // renders `position: absolute` and sizes to its content, which ignores
+        // `flex: 1` and overlaps the pinned header.
+        <View style={[{ flex: 1, paddingBottom: Math.max(insets.bottom, 16) }, contentContainerStyle]}>
+          {children}
+        </View>
       ) : (
+        // Dynamic-sizing sheet: BottomSheetView measures its content so the sheet
+        // grows to fit.
         <BottomSheetView style={contentContainerStyle ?? defaultContentStyle}>
           {children}
         </BottomSheetView>

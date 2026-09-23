@@ -279,3 +279,7 @@ if (!result.success) {
 }
 
 module.exports = result.data;
+// Attached rather than re-derived in app.config.js: "is this an artifact
+// someone else will run" gates build-only entitlements too, and two copies of
+// the predicate would drift.
+module.exports.isShippingBuild = isShippingBuild;

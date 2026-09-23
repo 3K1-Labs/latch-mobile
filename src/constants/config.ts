@@ -159,9 +159,16 @@ function applyNetworkDetails(details: NetworkDetails): void {
 export async function hydrateActiveNetwork(): Promise<void> {
   try {
     const stored = await AsyncStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
-    if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
+    // Honor whichever choice was persisted. The module default is testnet, so
+    // the mainnet branch is the one that actually matters — without it a
+    // persisted 'mainnet' choice is silently dropped on every cold start and
+    // the app reverts to testnet. Applying testnet explicitly is harmless
+    // (idempotent) and keeps the two cases symmetric.
+    if (stored === 'mainnet') applyNetworkDetails(MAINNET_NETWORK);
+    else if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
+    // No stored choice → keep the module default (testnet).
   } catch {
-    // Storage unavailable — keep the mainnet default rather than blocking launch.
+    // Storage unavailable — keep the testnet default rather than blocking launch.
   }
 }
 

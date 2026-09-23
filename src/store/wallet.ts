@@ -5,6 +5,7 @@ import {
   STELLAR_RPC_URL,
   getNetworkId,
 } from '@/src/constants/config';
+import { findDeployedNetwork, type NetworkId } from '@/src/lib/account-network';
 import { clearSacTransferCache } from '@/src/lib/sac-transfer-cache';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -232,6 +233,14 @@ interface WalletStore {
   /** Index into `accounts` for the currently active account */
   activeAccountIndex: number;
 
+  /**
+   * The network the app is currently pointed at, mirrored into the store so
+   * the account switcher (and anything else) re-renders on a live switch —
+   * `getNetworkId()` reads a module `let` and is not reactive. Kept in sync by
+   * `reconcileActiveAccountForNetwork` and `rehydrateWallet`.
+   */
+  activeNetwork: NetworkId;
+
   // ─── Derived shortcuts (backward-compatible with existing screens) ────────
   /** Full keypair for the active account (null for passkey users) */
   activeWallet: StellarWallet | null;
@@ -288,6 +297,24 @@ interface WalletStore {
    * account rather than on every sign-in.
    */
   setAccountNetwork: (smartAddress: string, network: 'testnet' | 'mainnet') => Promise<void>;
+
+  /**
+   * Re-point the app at `net`: update `activeNetwork`, and if the active
+   * account's smart account doesn't live on `net`, switch to the first account
+   * that does (an exact match, else an unknown/undeployed one). Leaves the
+   * active account untouched when the list has nothing for `net` — the switcher
+   * surfaces an "accounts on the other network" row for that case. Called from
+   * `switchActiveNetwork` after the network config has been applied.
+   */
+  reconcileActiveAccountForNetwork: (net: NetworkId) => Promise<void>;
+
+  /**
+   * Probe the chain for every account that has a deployed smart account but no
+   * recorded `network`, and stamp the result. Best-effort — a failed probe
+   * leaves the account unresolved (still shown on the current network). Fired
+   * when the account switcher opens and after a network switch.
+   */
+  resolveUnknownAccountNetworks: () => Promise<void>;
 
   /**
    * Remove an account by its BIP-44/passkey index. Used to roll back an
@@ -375,11 +402,40 @@ function getCachedWallet(mnemonic: string, bip44Index: number): StellarWallet {
   return wallet;
 }
 
+/**
+ * Whether an account can be the active one while the app is pointed at `net`.
+ * A deployed smart account is a contract on exactly one network — but an
+ * account with no `network` yet (older record, probe pending/failed) or one
+ * not deployed anywhere is treated as usable on either, so a bad RPC read
+ * never hides a wallet.
+ */
+export function accountUsableOnNetwork(
+  account: WalletAccount | undefined,
+  net: NetworkId,
+): boolean {
+  if (!account) return false;
+  if (!account.smartAccountAddress) return true;
+  if (!account.network) return true;
+  return account.network === net;
+}
+
+/**
+ * First list position to make active on `net`: an exact network match wins,
+ * then any account that's usable (unknown/undeployed). -1 when the list has
+ * nothing for this network.
+ */
+function firstUsableIndexForNetwork(accounts: WalletAccount[], net: NetworkId): number {
+  const exact = accounts.findIndex((a) => a.smartAccountAddress && a.network === net);
+  if (exact >= 0) return exact;
+  return accounts.findIndex((a) => accountUsableOnNetwork(a, net));
+}
+
 export const useWalletStore = create<WalletStore>((set, get) => ({
   pendingWallet: null,
   mnemonic: null,
   accounts: [],
   activeAccountIndex: 0,
+  activeNetwork: getNetworkId(),
   activeWallet: null,
   smartAccountAddress: null,
   avatars: {},
@@ -591,6 +647,39 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     );
     await persistAccounts(updated);
     set({ accounts: updated });
+  },
+
+  reconcileActiveAccountForNetwork: async (net) => {
+    const { accounts, activeAccountIndex } = get();
+    set({ activeNetwork: net });
+
+    // Stamp any unknown-network accounts in the background so the switcher's
+    // buckets settle; never block the switch on an RPC round-trip.
+    void get().resolveUnknownAccountNetworks();
+
+    if (accountUsableOnNetwork(accounts[activeAccountIndex], net)) return;
+
+    const nextIndex = firstUsableIndexForNetwork(accounts, net);
+    // Nothing on this network — keep the current selection. The switcher shows
+    // the off-network accounts under a "tap to switch" row, and the send guard
+    // still blocks a transfer from the wrong-network account.
+    if (nextIndex < 0 || nextIndex === activeAccountIndex) return;
+
+    await get().switchAccount(nextIndex);
+  },
+
+  resolveUnknownAccountNetworks: async () => {
+    const pending = get().accounts.filter((a) => a.smartAccountAddress && !a.network);
+    for (const account of pending) {
+      const address = account.smartAccountAddress as string;
+      try {
+        const found = await findDeployedNetwork(address);
+        if (found) await get().setAccountNetwork(address, found);
+      } catch {
+        // Best-effort — an unresolved account stays visible on the current
+        // network until the next probe succeeds.
+      }
+    }
   },
 
   markAccountMultisig: async (listIndex, threshold, signers) => {
@@ -816,6 +905,23 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         persistAccounts(accounts).catch(() => {});
       }
 
+      // Keep the active account coherent with the network the app booted on:
+      // a smart account deployed on the other network can't be read or spent
+      // from here. Repoint to the first account that lives on this network
+      // (falling back to an unknown/undeployed one); if the list has nothing
+      // for it, keep the persisted choice — the switcher surfaces that case.
+      const bootNetwork = getNetworkId();
+      if (!accountUsableOnNetwork(accounts[activeAccountIndex], bootNetwork)) {
+        const repointed = firstUsableIndexForNetwork(accounts, bootNetwork);
+        if (repointed >= 0 && repointed !== activeAccountIndex) {
+          activeAccountIndex = repointed;
+          await SecureStore.setItemAsync(
+            SECURE_KEYS.ACTIVE_ACCOUNT_INDEX,
+            String(activeAccountIndex),
+          );
+        }
+      }
+
       // Derive the in-memory keypair for the active account
       const activeAccount = accounts[activeAccountIndex] ?? accounts[0];
       const activeWallet =
@@ -829,6 +935,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         mnemonic,
         accounts,
         activeAccountIndex,
+        activeNetwork: bootNetwork,
         activeWallet,
         smartAccountAddress: activeAccount.smartAccountAddress,
         avatars: storedAvatars,
@@ -858,6 +965,8 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           SecureStore.deleteItemAsync(keys.requiresBiometric),
           SecureStore.deleteItemAsync(keys.kind),
           SecureStore.deleteItemAsync(keys.rpId),
+          SecureStore.deleteItemAsync(keys.label),
+          SecureStore.deleteItemAsync(keys.labelSeq),
         ];
       });
 
@@ -877,6 +986,16 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       SecureStore.deleteItemAsync(SECURE_KEYS.KEY_DATA_HEX),
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_KIND),
+      // Slot-0 credential metadata that used to be left behind on a full reset,
+      // so the next wallet inherited a stale RP, biometric flag, OS-sheet name,
+      // and deploy fingerprint. PASSKEY_SEQ is deliberately NOT cleared: it is a
+      // monotonic counter whose whole job is to keep OS credential names unique
+      // even across a wipe, since a synced passkey outlives local storage.
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_RP_ID),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_LABEL),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_LABEL_SEQ),
+      SecureStore.deleteItemAsync(SECURE_KEYS.DEPLOYED_KEY_DATA),
       AsyncStorage.removeItem(ASYNC_KEYS.AVATARS),
       AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING),
       clearSacTransferCache(),
@@ -887,6 +1006,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       mnemonic: null,
       accounts: [],
       activeAccountIndex: 0,
+      activeNetwork: getNetworkId(),
       activeWallet: null,
       smartAccountAddress: null,
       avatars: {},

@@ -1,6 +1,7 @@
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
 import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
+  getNetworkId,
   HORIZON_URL,
   PASSKEY_RP_ID,
   STELLAR_AUTH_PREFIX,
@@ -27,6 +28,8 @@ import {
   TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
+
+import * as Sentry from '@sentry/react-native';
 
 import { createLogger } from '@/src/lib/logger';
 
@@ -511,53 +514,90 @@ export async function sendTokenFromPasskeyAccount(
   const { smartAccountAddress, listIndex, sacContractId, destinationAddress, amount } = params;
 
   const amountInBaseUnits = toBaseUnits(amount);
-  const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-  const account = await loadAccount(await bundlerAddress());
 
-  const contract = new Contract(sacContractId);
-  const tx = new TransactionBuilder(account, {
-    fee: '1000000',
-    networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-  })
-    .addOperation(
-      contract.call(
-        'transfer',
-        new Address(smartAccountAddress).toScVal(),
-        new Address(destinationAddress).toScVal(),
-        nativeToScVal(amountInBaseUnits, { type: 'i128' }),
-      ),
-    )
-    .setTimeout(300)
-    .build();
+  // Breadcrumbs for the Sentry capture below: a passkey transfer that fails
+  // only on a physical build reaches us as one flattened message, and these
+  // are the values needed to tell a stale verifier from an expired signature
+  // from a signer the account never had. No key material — verifier and
+  // account are contract addresses, ledgers are public.
+  let stage = 'resolve-verifier';
+  let webAuthnVerifier: string | undefined;
+  let latestLedger: number | undefined;
+  let validUntilLedger: number | undefined;
 
-  const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(tx),
-  });
-  if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
+  try {
+    webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
+    const account = await loadAccount(await bundlerAddress());
 
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
+    const contract = new Contract(sacContractId);
+    const tx = new TransactionBuilder(account, {
+      fee: '1000000',
+      networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        contract.call(
+          'transfer',
+          new Address(smartAccountAddress).toScVal(),
+          new Address(destinationAddress).toScVal(),
+          nativeToScVal(amountInBaseUnits, { type: 'i128' }),
+        ),
+      )
+      .setTimeout(300)
+      .build();
 
-  for (const entry of simResult.result?.auth ?? []) {
-    const creds = entry.credentials();
-    if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
-    const credAddr = Address.fromScAddress(creds.address().address()).toString();
-    if (credAddr === smartAccountAddress) {
-      await signPasskeyAuthEntry(entry, listIndex, validUntilLedger, webAuthnVerifier);
+    stage = 'simulate';
+    const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
+      transaction: txToBase64(tx),
+    });
+    if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
+
+    const simResult = parseSimResult(simRaw);
+    const ledgerNow: number = simRaw.latestLedger ?? 0;
+    latestLedger = ledgerNow;
+    validUntilLedger = ledgerNow + 100;
+
+    stage = 'sign-auth';
+    for (const entry of simResult.result?.auth ?? []) {
+      const creds = entry.credentials();
+      if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
+      const credAddr = Address.fromScAddress(creds.address().address()).toString();
+      if (credAddr === smartAccountAddress) {
+        await signPasskeyAuthEntry(entry, listIndex, validUntilLedger, webAuthnVerifier);
+      }
     }
+
+    const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
+
+    stage = 're-simulate';
+    const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
+      transaction: txToBase64(txWithSignedAuth),
+    });
+    if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
+    const simResult2 = parseSimResult(simRaw2);
+
+    const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
+
+    // Outer signing and submission happen server-side — see the note above.
+    stage = 'submit';
+    const { hash } = await submitViaBundler(prepared);
+    return { hash };
+  } catch (err) {
+    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      tags: {
+        scope: 'send-token-passkey',
+        network: getNetworkId(),
+        stage,
+      },
+      extra: {
+        smartAccountAddress,
+        listIndex,
+        sacContractId,
+        resolvedWebAuthnVerifier: webAuthnVerifier ?? null,
+        latestLedger: latestLedger ?? null,
+        validUntilLedger: validUntilLedger ?? null,
+        rawError: err instanceof Error ? err.message : String(err),
+      },
+    });
+    throw err;
   }
-
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
-
-  const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
-  const simResult2 = parseSimResult(simRaw2);
-
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-
-  // Outer signing and submission happen server-side — see the note above.
-  const { hash } = await submitViaBundler(prepared);
-  return { hash };
 }

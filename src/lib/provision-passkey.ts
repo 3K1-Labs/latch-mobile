@@ -138,22 +138,38 @@ export { describePasskeyFailure };
 // }
 
 /**
- * Next value of the passkey number shown in the OS credential manager.
+ * The next passkey number to show in the OS credential manager — computed, not
+ * yet consumed.
  *
  * A standalone monotonic counter, not accounts.length: removing an account and
  * adding another reuses the list index, and two passkeys numbered the same are
- * indistinguishable in the system sign-in sheet. Reads, increments, persists.
- * A read failure falls back to 1 rather than blocking provisioning — a
- * duplicate number is cosmetic; a thrown error here is a dead end.
+ * indistinguishable in the system sign-in sheet. A read failure falls back to 1
+ * rather than blocking provisioning — a duplicate number is cosmetic; a thrown
+ * error here is a dead end.
+ *
+ * Split from the persist step (commitPasskeySeq) so a dismissed or failed
+ * ceremony no longer burns a number: previously "Latch Wallet 4" could be the
+ * first passkey a user ever kept, because 1–3 were spent on cancelled sheets.
  */
-async function nextPasskeySeq(): Promise<number> {
+async function peekNextPasskeySeq(): Promise<number> {
   try {
-    const current = Number(await SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_SEQ)) || 0;
-    const next = current + 1;
-    await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_SEQ, String(next));
-    return next;
+    return (Number(await SecureStore.getItemAsync(SECURE_KEYS.PASSKEY_SEQ)) || 0) + 1;
   } catch {
     return 1;
+  }
+}
+
+/**
+ * Persist the counter so the next provisioning call gets the following number.
+ * Called only once the credential it names is safely in SecureStore. Never
+ * throws — a lost write just risks one duplicate name, same tolerance as
+ * peekNextPasskeySeq's read failure.
+ */
+async function commitPasskeySeq(seq: number): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(SECURE_KEYS.PASSKEY_SEQ, String(seq));
+  } catch {
+    // ignore — see peekNextPasskeySeq
   }
 }
 
@@ -207,6 +223,32 @@ export async function getStoredPasskeyLabel(
 }
 
 /**
+ * Wipe every SecureStore key for a passkey slot so the next provisioning call
+ * runs a fresh OS ceremony instead of reusing what is there.
+ *
+ * Onboarding's "already have a credential" check keys on CREDENTIAL_ID alone,
+ * and a platform passkey survives an app reinstall (it lives in the iCloud
+ * Keychain / Google Password Manager entry, not just app storage). Without
+ * this, a credential left behind by an earlier run makes "Create a New Wallet"
+ * silently skip the passkey sheet. Call it when the user explicitly restarts
+ * new-wallet onboarding — at that point no smart account is deployed against
+ * this slot, so nothing reachable is lost.
+ */
+export async function clearProvisionedPasskeyAtIndex(listIndex: number): Promise<void> {
+  const keys = getPasskeyStorageKeys(listIndex);
+  await Promise.all([
+    SecureStore.deleteItemAsync(keys.credentialId),
+    SecureStore.deleteItemAsync(keys.keyDataHex),
+    SecureStore.deleteItemAsync(keys.privateKey),
+    SecureStore.deleteItemAsync(keys.requiresBiometric),
+    SecureStore.deleteItemAsync(keys.kind),
+    SecureStore.deleteItemAsync(keys.rpId),
+    SecureStore.deleteItemAsync(keys.label),
+    SecureStore.deleteItemAsync(keys.labelSeq),
+  ]);
+}
+
+/**
  * Create and store the passkey credential for an account list index, preferring
  * a real platform passkey and falling back to a local key.
  *
@@ -217,9 +259,10 @@ export async function provisionPasskeyAtIndex(
   listIndex: number,
   options: ProvisionPasskeyOptions,
 ): Promise<ProvisionedPasskey> {
-  // Computed before the ceremony so storePasskeyLabel can persist it alongside
-  // the credential the moment the OS returns one.
-  const seq = await nextPasskeySeq();
+  // Computed before the ceremony so the OS sheet can show the name, but only
+  // committed (commitPasskeySeq) after the credential is stored — a dismissed
+  // sheet must not advance the counter.
+  const seq = await peekNextPasskeySeq();
   const passkeyName = buildPasskeyName(seq, options.accountLabel);
   const keys = getPasskeyStorageKeys(listIndex);
 
@@ -235,6 +278,7 @@ export async function provisionPasskeyAtIndex(
       });
       await storePlatformPasskeyCredentialAtIndex(credential, listIndex, PASSKEY_RP_ID);
       await storePasskeyLabel(keys, passkeyName, seq);
+      await commitPasskeySeq(seq);
       return { ...credential, kind: 'platform', passkeyName, seq };
     } catch (err) {
       const deviceOnlyReason = describePasskeyFailure(err, PASSKEY_RP_ID);

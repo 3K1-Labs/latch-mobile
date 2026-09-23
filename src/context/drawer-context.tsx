@@ -1,3 +1,4 @@
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import {
   Animated,
@@ -7,6 +8,8 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import AppToast from '@/src/components/toast/AppToast';
 
@@ -83,21 +86,34 @@ export function DrawerProvider({
         onRequestClose={closeDrawer}
         statusBarTranslucent
       >
-        <View style={StyleSheet.absoluteFill}>
-          <TouchableWithoutFeedback onPress={closeDrawer}>
-            <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
-          </TouchableWithoutFeedback>
-          <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
-            {drawerContent}
-          </Animated.View>
-          {/* A React Native Modal is its own native window above the root view,
-              so the <Toast/> in app/_layout.tsx can never paint over this
-              drawer. Mount one inside, after the panel. react-native-toast-
-              message keeps a stack of refs and shows on the most recently
-              mounted, restoring the previous on unmount — gated on `visible` so
-              a closed drawer never sits on top of that stack. */}
-          {visible && <AppToast />}
-        </View>
+        {/* This Modal is its own native window above the root view, so the
+            GestureHandlerRootView, KeyboardProvider and BottomSheetModalProvider
+            in the app root don't reach into it. Bottom sheets opened from
+            `drawerContent` (the Profile settings sheets) portal to the nearest
+            provider — without these, that provider is outside the window and the
+            sheets render behind the drawer. KeyboardProvider is what lets
+            KeyboardAwareScrollView work for the form sheets in here. */}
+        <GestureHandlerRootView style={StyleSheet.absoluteFill}>
+          <KeyboardProvider>
+            <BottomSheetModalProvider>
+              <View style={StyleSheet.absoluteFill}>
+                <TouchableWithoutFeedback onPress={closeDrawer}>
+                  <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
+                </TouchableWithoutFeedback>
+                <Animated.View style={[styles.panel, { transform: [{ translateX }] }]}>
+                  {drawerContent}
+                </Animated.View>
+                {/* A React Native Modal is its own native window above the root view,
+                    so the <Toast/> in app/_layout.tsx can never paint over this
+                    drawer. Mount one inside, after the panel. react-native-toast-
+                    message keeps a stack of refs and shows on the most recently
+                    mounted, restoring the previous on unmount — gated on `visible` so
+                    a closed drawer never sits on top of that stack. */}
+                {visible && <AppToast />}
+              </View>
+            </BottomSheetModalProvider>
+          </KeyboardProvider>
+        </GestureHandlerRootView>
       </Modal>
     </DrawerContext.Provider>
   );

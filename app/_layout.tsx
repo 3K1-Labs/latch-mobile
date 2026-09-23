@@ -41,9 +41,9 @@ if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     environment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1.0,
-    integrations: [Sentry.mobileReplayIntegration()],
+    // replaysSessionSampleRate: 0.1,
+    // replaysOnErrorSampleRate: 1.0,
+    // integrations: [Sentry.mobileReplayIntegration()],
     // Any non-dev build, not just production: a TestFlight/preview build is
     // precisely the case that can't be debugged locally, and console.* is
     // stripped there (metro.config.js drop_console), so Sentry is the only

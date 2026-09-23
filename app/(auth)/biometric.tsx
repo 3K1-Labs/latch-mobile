@@ -2,6 +2,7 @@ import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
+import { hashPin } from '@/src/lib/hash-pin';
 import {
   notifyIfDeviceOnly,
   notifyIfWeakBiometricGate,
@@ -17,20 +18,18 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
   Image,
   Linking,
-  Modal,
   StyleSheet,
   TouchableOpacity,
   Vibration,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { hashPin } from '@/src/lib/hash-pin';
 
 /**
  * Provision the primary passkey credential (account list index 0).
@@ -72,7 +71,6 @@ const Biometrics = () => {
   const isUnlockMode = mode === 'unlock';
 
   // setup mode state
-  const [showModal, setShowModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   // Gate setup rendering until we know whether the device has biometrics. Avoids
   // flashing the biometric screen on devices that will be redirected to PIN.
@@ -93,6 +91,66 @@ const Biometrics = () => {
 
   const keySize = (width - theme.spacing.m * 2 - theme.spacing.m * 2) / 3;
 
+  // ─── Setup helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Provision the primary passkey and move on to PIN setup.
+   *
+   * The passkey ceremony inside provisionPrimaryPasskey runs the OS sheet,
+   * which does its own user verification (userVerification: 'required'). That
+   * single system prompt is the whole gate — there is deliberately no separate
+   * LocalAuthentication step, and no app-level "allow biometrics" dialog,
+   * ahead of it.
+   */
+  const provisionAndContinue = useCallback(async () => {
+    // Block setup on devices with no lock screen at all. Without a device passcode
+    // the private key cannot be stored with WHEN_PASSCODE_SET_THIS_DEVICE_ONLY on
+    // iOS, and there is no hardware-backed auth boundary on either platform.
+    const securityLevel = await LocalAuthentication.getEnrolledLevelAsync();
+    if (securityLevel === LocalAuthentication.SecurityLevel.NONE) {
+      Alert.alert(
+        'Device Passcode Required',
+        'To keep your wallet secure, please set a PIN, password, or pattern on your device first, then return to Latch.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
+      if (!existingCredId) {
+        await provisionPrimaryPasskey(true);
+      }
+
+      // Recorded, not gated on: biometric unlock is offered on device
+      // capability alone. Written only when the device actually has enrolled
+      // biometrics so the flag stays meaningful.
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (hasHardware && isEnrolled) {
+        await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
+      }
+
+      // set-pin will forward through the rest of onboarding once confirmed.
+      router.replace(
+        from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
+      );
+    } catch (err) {
+      // Bound, not discarded. A swallowed error here produced a bare "try
+      // again" with no trace anywhere: metro strips console.* from release
+      // builds and EXPO_PUBLIC_SENTRY_DSN is unset, so Sentry.init is a no-op.
+      // The message is the diagnosis.
+      const reason = err instanceof Error ? err.message : String(err);
+      Alert.alert('Setup Failed', `${reason}`, [{ text: 'OK' }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [from, router]);
+
   // Detect biometric type — runs on mount for setup mode; for unlock mode the
   // sequential init effect below handles detection before triggering auth.
   useEffect(() => {
@@ -107,13 +165,14 @@ const Biometrics = () => {
         setBiometricIcon('finger-print');
       }
 
-      // If the device can't do biometrics, skip this screen and go straight to
-      // PIN setup. proceedToPin handles the device-passcode gate + navigation;
-      // if it returns without navigating, fall through and reveal the screen.
+      // If the device can't do biometrics, skip this screen and go straight
+      // ahead. provisionAndContinue handles the device-passcode gate +
+      // navigation; if it returns without navigating, fall through and reveal
+      // the screen.
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
       if (!hasHardware || !isEnrolled) {
-        await proceedToPin();
+        await provisionAndContinue();
       }
       setCheckingSetup(false);
     };
@@ -257,98 +316,6 @@ const Biometrics = () => {
     },
     [pin, attempts, lockedUntil, unlockSuccess],
   );
-
-  // ─── Setup helpers ────────────────────────────────────────────────────────
-
-  const proceedToPin = async () => {
-    // Block setup on devices with no lock screen at all. Without a device passcode
-    // the private key cannot be stored with WHEN_PASSCODE_SET_THIS_DEVICE_ONLY on
-    // iOS, and there is no hardware-backed auth boundary on either platform.
-    const securityLevel = await LocalAuthentication.getEnrolledLevelAsync();
-    if (securityLevel === LocalAuthentication.SecurityLevel.NONE) {
-      Alert.alert(
-        'Device Passcode Required',
-        'To keep your wallet secure, please set a PIN, password, or pattern on your device first, then return to Latch.',
-        [
-          { text: 'Not Now', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ],
-      );
-      return;
-    }
-
-    setIsProcessing(true);
-    try {
-      const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
-      if (!existingCredId) {
-        await provisionPrimaryPasskey(false);
-      }
-      router.replace(
-        from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
-      );
-    } catch {
-      Alert.alert('Setup Failed', 'Could not save your secure credential. Please try again.', [
-        { text: 'OK' },
-      ]);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleAllow = async () => {
-    setShowModal(false);
-
-    const hasHardware = await LocalAuthentication.hasHardwareAsync();
-    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-    if (!hasHardware || !isEnrolled) {
-      Alert.alert(
-        'Biometrics Not Available',
-        "Your device doesn't support biometrics or none are enrolled.",
-        [{ text: 'OK', onPress: proceedToPin }],
-      );
-      return;
-    }
-
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: `Register passkey with ${biometricLabel}`,
-      disableDeviceFallback: true,
-      cancelLabel: 'Cancel',
-    });
-
-    if (!result.success) {
-      return;
-    }
-
-    setIsProcessing(true);
-    try {
-      // Generate credential first — only write the biometric flag after it's
-      // safely stored. If storePasskeyCredential throws, the flag stays unset
-      // and the user is not left in a broken state on next launch.
-      const existingCredId = await SecureStore.getItemAsync(SECURE_KEYS.CREDENTIAL_ID);
-      if (!existingCredId) {
-        await provisionPrimaryPasskey(true);
-      }
-      await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
-
-      // Navigate to PIN setup so biometric users have a PIN as emergency fallback.
-      // set-pin will forward to deploy-account once the PIN is confirmed.
-      router.replace(
-        from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
-      );
-    } catch (err) {
-      // Bound, not discarded. This catch used to swallow the error whole, so a
-      // Class 2-only device produced a bare "try again" with no trace anywhere:
-      // metro strips console.* from release builds and EXPO_PUBLIC_SENTRY_DSN
-      // is unset, so Sentry.init is a no-op. The message is the diagnosis.
-      const reason = err instanceof Error ? err.message : String(err);
-      Alert.alert('Setup Failed', `Could not save your biometric credential.\n\n${reason}`, [
-        { text: 'OK' },
-      ]);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   // ─── Unlock UI ────────────────────────────────────────────────────────────
 
@@ -589,7 +556,13 @@ const Biometrics = () => {
         <Text variant="h7" fontSize={32} textAlign="center">
           Secure Your Account
         </Text>
-        <Text variant="p5" color="textSecondary" mt="m" textAlign="center" style={{ width: '80%' }}>
+        <Text
+          variant="p5"
+          color="textSecondary"
+          mt="xs"
+          textAlign="center"
+          style={{ width: '80%' }}
+        >
           Gain quick and secure access to your account using biometrics.
         </Text>
       </Box>
@@ -619,82 +592,14 @@ const Biometrics = () => {
       {/* Buttons */}
       <Box pb="xl" gap={'m'}>
         <Button
-          label="Enable Biometrics"
+          label="Continue"
           variant="primary"
-          onPress={() => setShowModal(true)}
+          onPress={provisionAndContinue}
           bg="primary700"
           labelColor="black"
-          // shadowColor="gradientDark"
-          disabled={isProcessing}
-        />
-        <Button
-          label="Maybe Later"
-          onPress={proceedToPin}
-          // mt="s"
-          bg={'btnDisabled'}
-          shadowOffset={{ width: 0, height: 4 }}
-          shadowColor="gradientDark"
-          shadowRadius={15}
-          shadowOpacity={0.12}
-          labelColor={statusBarStyle === 'light' ? 'textWhite' : 'black'}
           disabled={isProcessing}
         />
       </Box>
-
-      {/* iOS-style permission modal */}
-      <Modal visible={showModal} transparent animationType="fade">
-        <Box
-          flex={1}
-          justifyContent="center"
-          alignItems="center"
-          paddingHorizontal="m"
-          style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}
-        >
-          <Box
-            backgroundColor="bg900"
-            py="xl"
-            px="l"
-            borderRadius={32}
-            width="100%"
-            style={{ borderWidth: 1, borderColor: theme.colors.bg800 }}
-          >
-            <Image
-              source={require('@/src/assets/images/face_id_green.png')}
-              style={{ width: 80, height: 80 }}
-              resizeMode="contain"
-            />
-            <Text variant="h8" color="text200" fontSize={24} mt="l">
-              Do you want to allow &quot;Latch&quot; to use biometric?
-            </Text>
-            <Text variant="p5" color="textTertiary" mt="xs">
-              Allow Latch to access your biometric data..
-            </Text>
-            <Box flexDirection="row" gap="m" mt="xl" width="100%">
-              <Button
-                flex={1}
-                height={52}
-                label="Don't Allow"
-                bg="bg800"
-                labelColor="white"
-                variant="secondary"
-                onPress={() => {
-                  setShowModal(false);
-                  proceedToPin();
-                }}
-              />
-              <Button
-                flex={1}
-                height={52}
-                label="Allow"
-                variant="secondary"
-                bg="blue"
-                labelColor="white"
-                onPress={handleAllow}
-              />
-            </Box>
-          </Box>
-        </Box>
-      </Modal>
     </Box>
   );
 };
