@@ -1,10 +1,11 @@
 /**
  * backup-signer-tx.ts — orchestration for enrolling or removing a solo
  * backup signer: a second WebAuthn passkey added to a smart account's
- * Default context rule WITHOUT installing or touching the admin
- * (ThresholdPolicy) rule. The account stays 1-of-N forever — either passkey
- * can sign alone, and adding a backup signer never raises the bar for
- * spending.
+ * Default context rule WITHOUT installing or touching the admin rule. The
+ * Default rule is kept 1-of-N by a ThresholdPolicy of 1, installed before the
+ * first backup signer is added — without a policy the contract requires every
+ * signer on the rule, which would make a backup signer a second lock rather
+ * than a spare key. Either passkey can sign alone.
  *
  * This is deliberately NOT built on top of `completePairing`
  * (src/lib/admin-tx.ts): that flow unconditionally installs a ⌈N/2⌉-of-N
@@ -47,9 +48,12 @@ import { Address, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 import QuickCrypto from 'react-native-quick-crypto';
 
 import {
+  addPolicyOp,
   addSignerOp,
+  encodeThresholdPolicyParams,
   fetchDefaultContextRule,
   fetchFactoryVerifiers,
+  fetchRuleThreshold,
   liftToRuntimeSigner,
   removeSignerOp,
 } from '@/src/api/account-admin';
@@ -59,7 +63,7 @@ import { PASSKEY_RP_ID, STELLAR_FACTORY_ADDRESS, STELLAR_NETWORK_PASSPHRASE, STE
 import { AccountSigner } from '@/src/lib/account-signers';
 import { extractFirstU32FromMeta } from '@/src/lib/admin-tx';
 import { createLogger } from '@/src/lib/logger';
-import { encodeWebAuthnSigData, getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
+import { getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
 import {
   classifyPasskeyFailure,
   describePasskeyFailure,
@@ -68,13 +72,9 @@ import {
 import {
   createPlatformPasskeyCredential,
   isPlatformPasskeySupported,
-  signWithPlatformPasskey,
   type PlatformPasskeyCredential,
 } from '@/src/lib/platform-passkey';
-import { aggregateAuthEntries } from '@/src/lib/soroban-auth-payload';
 import {
-  authDigestFor,
-  buildContextRuleIds,
   loadAccount,
   resolveRegisteredWebAuthnVerifier,
   signPasskeyAuthEntry,
@@ -144,6 +144,66 @@ export async function createBackupSignerPasskey(label: string): Promise<Platform
   }
 }
 
+// ─── Submission ─────────────────────────────────────────────────────────
+
+/**
+ * Build, simulate, sign and submit a single self-mutation op on the smart
+ * account. Only auth entries whose credentials address IS the smart account
+ * are signed — the same guard send-token.ts applies — and they're signed with
+ * the existing device's own passkey (rule 0 — see signSmartAccountAuthEntry's
+ * comment in send-token.ts), never with a bundler key. Submission goes via the
+ * relay, never with a bundler key held on-device.
+ */
+async function submitSelfAuthOp(
+  cfg: RpcConfig,
+  smartAccountAddress: string,
+  initiatorListIndex: number,
+  op: xdr.Operation,
+  label: string,
+): Promise<{ txHash: string; resultMetaXdr?: string }> {
+  const bundlerG = await bundlerAddress();
+  const account = await loadAccount(bundlerG);
+  const tx = new TransactionBuilder(account, {
+    fee: '1000000',
+    networkPassphrase: cfg.networkPassphrase,
+  })
+    .addOperation(op)
+    .setTimeout(300)
+    .build();
+
+  const simRaw = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', { transaction: txToBase64(tx) });
+  if (simRaw.error) throw new Error(`${label} simulation failed: ${simRaw.error}`);
+  const simResult = parseSimResult(simRaw);
+  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
+
+  const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(
+    smartAccountAddress,
+    initiatorListIndex,
+  );
+
+  for (const entry of simResult.result?.auth ?? []) {
+    const creds = entry.credentials();
+    if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
+    const credAddr = Address.fromScAddress(creds.address().address()).toString();
+    if (credAddr !== smartAccountAddress) continue;
+    await signPasskeyAuthEntry(entry, initiatorListIndex, validUntilLedger, webAuthnVerifier);
+  }
+
+  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
+
+  const simRaw2 = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', {
+    transaction: txToBase64(txWithSignedAuth),
+  });
+  if (simRaw2.error) throw new Error(`${label} re-simulation failed: ${simRaw2.error}`);
+  const prepared = rpc.assembleTransaction(txWithSignedAuth, parseSimResult(simRaw2)).build();
+
+  const { hash: txHash, status, resultMetaXdr } = await submitViaBundler(prepared);
+  if (status !== 'SUCCESS') {
+    throw new Error(`${label} transaction status: ${status}`);
+  }
+  return { txHash, resultMetaXdr };
+}
+
 // ─── Add ────────────────────────────────────────────────────────────────
 
 export interface AddBackupSignerInput {
@@ -164,9 +224,11 @@ export interface AddBackupSignerChainResult {
 }
 
 /**
- * Add a WebAuthn backup signer on-chain. The ONLY operation is
- * `add_signer(defaultRuleId, newSigner)` — never `add_context_rule`, never a
- * threshold change, never branches on how many signers already exist.
+ * Add a WebAuthn backup signer on-chain: `add_signer(defaultRuleId, newSigner)`,
+ * preceded — only when the Default rule has no ThresholdPolicy yet — by
+ * `add_policy(defaultRuleId, thresholdPolicy, {threshold: 1})`. Never
+ * `add_context_rule`, never raises an existing threshold. The returned
+ * txHash is the add_signer transaction's.
  *
  * Does not call the backend confirm-add endpoint — see the module doc.
  * Persist a pending `Device` (via updateAccountDevices) immediately after
@@ -194,51 +256,41 @@ export async function addBackupSignerOnChain(
   }
 
   const verifiers = await fetchFactoryVerifiers(cfg);
+
+  // A rule with no policies requires EVERY signer, so adding a second signer
+  // to a bare Default rule would silently turn the account 2-of-2. Install a
+  // threshold of 1 first, while this device is still the only signer. It's a
+  // separate transaction because Soroban allows one contract call per tx; if
+  // the add below fails, the account is left 1-of-1 with the policy, and a
+  // retry skips this step.
+  if (!before.policies.includes(verifiers.thresholdPolicy)) {
+    if (before.signers.length > 1) {
+      throw new Error(
+        'This account already has several signers and no approval threshold, so every one of them must approve changes. Adding a backup signer from this device alone isn’t possible.',
+      );
+    }
+    await submitSelfAuthOp(
+      cfg,
+      input.smartAccountAddress,
+      input.initiatorListIndex,
+      addPolicyOp(
+        input.smartAccountAddress,
+        input.defaultRuleId,
+        verifiers.thresholdPolicy,
+        encodeThresholdPolicyParams(1),
+      ),
+      'backup signer threshold policy',
+    );
+  }
+
   const runtimeSigner = liftToRuntimeSigner(input.newSigner, verifiers);
-  const op = addSignerOp(input.smartAccountAddress, input.defaultRuleId, runtimeSigner);
-
-  const bundlerG = await bundlerAddress();
-  const account = await loadAccount(bundlerG);
-  const tx = new TransactionBuilder(account, {
-    fee: '1000000',
-    networkPassphrase: cfg.networkPassphrase,
-  })
-    .addOperation(op)
-    .setTimeout(300)
-    .build();
-
-  const simRaw = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', { transaction: txToBase64(tx) });
-  if (simRaw.error) throw new Error(`backup signer add simulation failed: ${simRaw.error}`);
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
-
-  const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(
+  const { txHash, resultMetaXdr } = await submitSelfAuthOp(
+    cfg,
     input.smartAccountAddress,
     input.initiatorListIndex,
+    addSignerOp(input.smartAccountAddress, input.defaultRuleId, runtimeSigner),
+    'backup signer add',
   );
-
-  // Sign the resulting Soroban auth entry with the existing device's own
-  // key. Adding a self-mutation op is authorized the same way an ordinary
-  // spend is (rule 0 — see signSmartAccountAuthEntry's comment in
-  // send-token.ts), never with a bundler key.
-  for (const entry of simResult.result?.auth ?? []) {
-    if (entry.credentials().switch().name !== 'sorobanCredentialsAddress') continue;
-    await signPasskeyAuthEntry(entry, input.initiatorListIndex, validUntilLedger, webAuthnVerifier);
-  }
-
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
-
-  const simRaw2 = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`backup signer add re-simulation failed: ${simRaw2.error}`);
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, parseSimResult(simRaw2)).build();
-
-  // Submit via the relay, never with a bundler key held on-device.
-  const { hash: txHash, status, resultMetaXdr } = await submitViaBundler(prepared);
-  if (status !== 'SUCCESS') {
-    throw new Error(`backup signer add transaction status: ${status}`);
-  }
 
   // Read the new signer id from resultMetaXdr; this is single-op, so only
   // opIndex 0 is relevant.
@@ -308,95 +360,34 @@ export async function removeBackupSignerOnChain(
     );
   }
 
-  const op = removeSignerOp(input.smartAccountAddress, input.defaultRuleId, input.signerId);
+  // With no threshold policy the rule is N-of-N, and this device alone can't
+  // authorize the removal. remove_signer doesn't re-check the threshold, so
+  // also make sure the remaining signers can still meet it.
+  const verifiers = await fetchFactoryVerifiers(cfg);
+  if (!rule.policies.includes(verifiers.thresholdPolicy)) {
+    throw new Error(
+      'This account has no approval threshold, so every signer must approve removing one. It can’t be done from this device alone.',
+    );
+  }
+  const threshold = await fetchRuleThreshold(
+    cfg,
+    input.smartAccountAddress,
+    input.defaultRuleId,
+    verifiers,
+  );
+  if (threshold > rule.signers.length - 1) {
+    throw new Error(
+      `Removing this signer would leave fewer signers than the account's approval threshold (${threshold}).`,
+    );
+  }
 
-  const bundlerG = await bundlerAddress();
-  const account = await loadAccount(bundlerG);
-  const tx = new TransactionBuilder(account, {
-    fee: '1000000',
-    networkPassphrase: cfg.networkPassphrase,
-  })
-    .addOperation(op)
-    .setTimeout(300)
-    .build();
-
-  const simRaw = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', { transaction: txToBase64(tx) });
-  if (simRaw.error) throw new Error(`backup signer remove simulation failed: ${simRaw.error}`);
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
-
-  const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(
+  const { txHash } = await submitSelfAuthOp(
+    cfg,
     input.smartAccountAddress,
     input.initiatorListIndex,
+    removeSignerOp(input.smartAccountAddress, input.defaultRuleId, input.signerId),
+    'backup signer remove',
   );
-
-  for (const entry of simResult.result?.auth ?? []) {
-    if (entry.credentials().switch().name !== 'sorobanCredentialsAddress') continue;
-    await signPasskeyAuthEntry(entry, input.initiatorListIndex, validUntilLedger, webAuthnVerifier);
-
-    // If the contract rule currently has multiple signers and no threshold policy,
-    // OpenZeppelin's stellar-accounts contract enforces unanimous approval (N-of-N).
-    // In that case, removing a signer requires both the initiator AND the backup signer
-    // being removed to co-sign the auth entry.
-    if (rule.signers.length > 1) {
-      const backupSigner = rule.signers.find(
-        (s) => s.keyDataHex.toLowerCase() === input.keyDataHex.toLowerCase(),
-      );
-      const backupVerifier = backupSigner?.verifierAddress ?? webAuthnVerifier;
-      const authDigest = authDigestFor(entry, input.defaultRuleId);
-
-      // Extract credentialId from keyDataHex if present (keyDataHex = 65-byte uncompressed point + credentialId)
-      const credIdHex =
-        input.keyDataHex.length > 130 ? input.keyDataHex.slice(130) : undefined;
-
-      const passkeySig = await signWithPlatformPasskey({
-        rpId: PASSKEY_RP_ID,
-        challenge: new Uint8Array(authDigest),
-        allowCredentialIdHex: credIdHex,
-      });
-
-      const backupSigXdr = encodeWebAuthnSigData(passkeySig);
-
-      const backupEntry = xdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR());
-      const ruleIdsScVal = buildContextRuleIds(entry, input.defaultRuleId);
-      const backupPayload = xdr.ScVal.scvMap([
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('context_rule_ids'),
-          val: ruleIdsScVal,
-        }),
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('signers'),
-          val: xdr.ScVal.scvMap([
-            new xdr.ScMapEntry({
-              key: xdr.ScVal.scvVec([
-                xdr.ScVal.scvSymbol('External'),
-                xdr.ScVal.scvAddress(Address.fromString(backupVerifier).toScAddress()),
-                xdr.ScVal.scvBytes(Buffer.from(input.keyDataHex, 'hex')),
-              ]),
-              val: xdr.ScVal.scvBytes(Buffer.from(backupSigXdr)),
-            }),
-          ]),
-        }),
-      ]);
-      backupEntry.credentials().address().signature(backupPayload);
-
-      const merged = aggregateAuthEntries([entry, backupEntry]);
-      entry.credentials().address().signature(merged.credentials().address().signature());
-    }
-  }
-
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
-
-  const simRaw2 = await sorobanCall(cfg.rpcUrl, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`backup signer remove re-simulation failed: ${simRaw2.error}`);
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, parseSimResult(simRaw2)).build();
-
-  const { hash: txHash, status } = await submitViaBundler(prepared);
-  if (status !== 'SUCCESS') {
-    throw new Error(`backup signer remove transaction status: ${status}`);
-  }
 
   return { txHash };
 }

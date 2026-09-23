@@ -109,7 +109,7 @@ function encodeContextRuleType(t: ContextRuleType): xdr.ScVal {
 }
 
 /** SimpleThresholdAccountParams ScVal — the install payload for ThresholdPolicy. */
-function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
+export function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
   return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
       key: xdr.ScVal.scvSymbol('threshold'),
@@ -194,6 +194,21 @@ export function batchAddSignerOp(
     'batch_add_signer',
     xdr.ScVal.scvU32(ruleId),
     xdr.ScVal.scvVec(signers.map(encodeRuntimeSigner)),
+  );
+}
+
+/** `add_policy(rule_id, policy, install_param)` — returns the policy's u32 id on-chain. */
+export function addPolicyOp(
+  accountAddress: string,
+  ruleId: number,
+  policyAddress: string,
+  installParam: xdr.ScVal,
+): xdr.Operation {
+  return new Contract(accountAddress).call(
+    'add_policy',
+    xdr.ScVal.scvU32(ruleId),
+    new Address(policyAddress).toScVal(),
+    installParam,
   );
 }
 
@@ -358,6 +373,11 @@ export interface DefaultContextRule {
   ruleId: number;
   /** Signers currently attached to the Default rule. */
   signers: ChainSigner[];
+  /**
+   * Policy contract addresses attached to the Default rule. With none, the
+   * contract requires EVERY signer on the rule (N-of-N).
+   */
+  policies: string[];
 }
 
 function bytesToHex(value: unknown): string {
@@ -453,7 +473,8 @@ export async function fetchDefaultContextRule(
         ...decodeChainSigner(s, verifiers),
         signerId: idx,
       }));
-      return { ruleId, signers };
+      const policies = ((rule.policies as any[]) ?? []).map(String);
+      return { ruleId, signers, policies };
     }
   }
   throw new Error('no Default context rule found on account');
@@ -496,8 +517,10 @@ export async function fetchRuleThreshold(
   p: SimulationParams,
   accountAddress: string,
   ruleId: number,
+  /** Pass an already-fetched result to skip fetchFactoryVerifiers' own RPC round-trip. */
+  knownVerifiers?: FactoryVerifiers,
 ): Promise<number> {
-  const verifiers = await fetchFactoryVerifiers(p);
+  const verifiers = knownVerifiers ?? (await fetchFactoryVerifiers(p));
   const threshold = await simulateRead(p, verifiers.thresholdPolicy, 'get_threshold', [
     xdr.ScVal.scvU32(ruleId),
     new Address(accountAddress).toScVal(),
