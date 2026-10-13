@@ -10,7 +10,6 @@ import HelpSupportSheet from '@/src/components/profile/HelpSupportSheet';
 import LogoutItem from '@/src/components/profile/LogoutItem';
 import LogoutPromptSheet from '@/src/components/profile/LogoutPromptSheet';
 import NetworkSheet from '@/src/components/profile/NetworkSheet';
-import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
 // import PoliciesSheet from '@/src/components/profile/PoliciesSheet';
 import { logout } from '@/src/api/latch-auth';
@@ -23,13 +22,17 @@ import Text from '@/src/components/shared/Text';
 import { ACTIVE_NETWORK, MAINNET_NETWORK, TESTNET_NETWORK } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
+import { NOTIFICATIONS_QUERY_KEY } from '@/src/hooks/use-notifications';
 import { switchActiveNetwork } from '@/src/lib/network-switch';
+import { unregisterPush } from '@/src/lib/push-registration';
+import { useNotificationStore } from '@/src/store/notification-store';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
@@ -41,8 +44,10 @@ const Profile = () => {
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { clearAll, accounts, activeAccountIndex, avatars } = useWalletStore();
   const { closeDrawer } = useDrawer();
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   // const { isDark, toggleTheme } = useAppTheme();
   const [accountInfoVisible, setAccountInfoVisible] = useState(false);
   // const [biometricsEnabled, setBiometricsEnabled] = useState(false);
@@ -66,7 +71,6 @@ const Profile = () => {
   const [networkLabel, setNetworkLabel] = useState(
     ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network',
   );
-  const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [helpSupportVisible, setHelpSupportVisible] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
@@ -84,6 +88,9 @@ const Profile = () => {
   if (!activeAccount) return null;
 
   const handleLogout = async () => {
+    await unregisterPush();
+    queryClient.removeQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+    useNotificationStore.getState().reset();
     await logout();
     await clearAll();
     await AsyncStorage.multiRemove([BIOMETRIC_ENABLED_KEY, 'latch_onboarding_complete']);
@@ -180,10 +187,6 @@ const Profile = () => {
           }}
         />
         <CurrencySheet visible={currencyVisible} onClose={() => setCurrencyVisible(false)} />
-        <NotificationSheet
-          visible={notificationsVisible}
-          onClose={() => setNotificationsVisible(false)}
-        />
         <HelpSupportSheet
           visible={helpSupportVisible}
           onClose={() => setHelpSupportVisible(false)}
@@ -335,7 +338,28 @@ const Profile = () => {
             <SettingItem
               icon="notifications-outline"
               label="Notifications"
-              onPress={() => setNotificationsVisible(true)}
+              rightElement={
+                unreadCount > 0 ? (
+                  <Box
+                    minWidth={20}
+                    height={20}
+                    borderRadius={10}
+                    paddingHorizontal="xs"
+                    mr="s"
+                    justifyContent="center"
+                    alignItems="center"
+                    backgroundColor="primary700"
+                  >
+                    <Text variant="p8" color="textWhite" fontWeight="700">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </Text>
+                  </Box>
+                ) : undefined
+              }
+              onPress={() => {
+                closeDrawer();
+                setTimeout(() => router.push('/notification'), 250);
+              }}
             />
           </Box>
 

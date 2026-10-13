@@ -18,6 +18,7 @@ import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { discoverMigration } from '@/src/lib/migration';
+import { useNotificationStore } from '@/src/store/notification-store';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -273,6 +274,7 @@ const Home = () => {
   const activeAccountImage = activeAccount ? avatars[activeAccount.publicKeyHex] : undefined;
 
   const { openDrawer } = useDrawer();
+  const unreadNotifications = useNotificationStore((s) => s.unreadCount);
 
   const { tokens: trackedTokens } = useTrackedTokens();
 
@@ -419,6 +421,16 @@ const Home = () => {
               {activeAccountName}
             </Text>
             <Ionicons name="chevron-down" size={14} color={theme.colors.textPrimary} />
+            {unreadNotifications > 0 && (
+              <Box
+                position="absolute"
+                width={10}
+                height={10}
+                borderRadius={5}
+                backgroundColor="primary700"
+                style={{ top: 0, left: 0, borderWidth: 2, borderColor: theme.colors.mainBackground }}
+              />
+            )}
           </Box>
         </TouchableOpacity>
 

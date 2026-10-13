@@ -16,7 +16,6 @@ import * as SecureStore from 'expo-secure-store';
 import { deployPasskeyAccount } from '@/src/api/smart-account-deploy';
 import {
   getNetworkId,
-  HORIZON_URL,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -29,7 +28,6 @@ import { SECURE_KEYS } from '../store/wallet';
 
 const getConfig = () => ({
   rpcUrl: STELLAR_RPC_URL,
-  horizonUrl: HORIZON_URL,
   networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
   factoryAddress: STELLAR_FACTORY_ADDRESS,
 });

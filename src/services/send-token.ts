@@ -1,8 +1,8 @@
+import { loadRpcAccount } from '@/src/api/soroban-rpc';
 import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
 import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
   getNetworkId,
-  HORIZON_URL,
   PASSKEY_RP_ID,
   STELLAR_AUTH_PREFIX,
   STELLAR_FACTORY_ADDRESS,
@@ -171,10 +171,7 @@ export function signSmartAccountAuthEntry(
 }
 
 export async function loadAccount(gAddress: string): Promise<Account> {
-  const res = await fetch(`${HORIZON_URL}/accounts/${gAddress}`);
-  if (!res.ok) throw new Error(`Horizon ${res.status}: account not found (${gAddress})`);
-  const data = await res.json();
-  return new Account(gAddress, data.sequence);
+  return loadRpcAccount(STELLAR_RPC_URL, gAddress);
 }
 
 // Convert a human-readable token amount (e.g. "1.5") to SAC base units (7 decimals).

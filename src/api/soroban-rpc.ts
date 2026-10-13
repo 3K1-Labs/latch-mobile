@@ -13,7 +13,7 @@
  * under plain Node, which is what lets the encoding tests exist.
  */
 
-import { rpc, SorobanDataBuilder, xdr } from '@stellar/stellar-sdk';
+import { Account, Keypair, rpc, SorobanDataBuilder, xdr } from '@stellar/stellar-sdk';
 
 // ─── XHR-based JSON-RPC ───────────────────────────────────────────────────────
 // The stellar SDK uses Axios internally, which fails with "Network Error" on
@@ -70,6 +70,112 @@ export function sorobanCall(rpcUrl: string, method: string, params: object): Pro
     };
     xhr.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }));
   });
+}
+
+export interface RpcAccount {
+  sequence: string;
+  balanceStroops: bigint;
+  subentryCount: number;
+}
+
+export function accountLedgerKey(gAddress: string): xdr.LedgerKey {
+  return xdr.LedgerKey.account(
+    new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(gAddress).xdrAccountId() }),
+  );
+}
+
+export function parseAccountEntry(entryXdr: string): RpcAccount {
+  const account = xdr.LedgerEntryData.fromXDR(entryXdr, 'base64').account();
+  return {
+    sequence: account.seqNum().toString(),
+    balanceStroops: BigInt(account.balance().toString()),
+    subentryCount: account.numSubEntries(),
+  };
+}
+
+/**
+ * Reads a classic account straight from ledger state. Resolves null when the
+ * entry does not exist (unfunded account) and rejects on any transport or RPC
+ * failure, so "unfunded" and "RPC unreachable" stay distinguishable.
+ */
+export async function fetchRpcAccount(
+  rpcUrl: string,
+  gAddress: string,
+): Promise<RpcAccount | null> {
+  const result = await sorobanCall(rpcUrl, 'getLedgerEntries', {
+    keys: [ledgerKeyToBase64(accountLedgerKey(gAddress))],
+  });
+  const entry = result?.entries?.[0];
+  return entry ? parseAccountEntry(entry.xdr) : null;
+}
+
+export async function loadRpcAccount(rpcUrl: string, gAddress: string): Promise<Account> {
+  const account = await fetchRpcAccount(rpcUrl, gAddress);
+  if (!account) throw new Error(`Account not found on ledger (${gAddress})`);
+  return new Account(gAddress, account.sequence);
+}
+
+export interface RpcTransactionSummary {
+  ledger: number;
+  createdAt: string;
+  feeCharged: string;
+}
+
+export function summarizeRpcTransaction(raw: any): RpcTransactionSummary | null {
+  if (!raw || raw.status === 'NOT_FOUND') return null;
+  const result = xdr.TransactionResult.fromXDR(raw.resultXdr, 'base64');
+  return {
+    ledger: Number(raw.ledger),
+    createdAt: new Date(Number(raw.createdAt) * 1000).toISOString(),
+    feeCharged: result.feeCharged().toString(),
+  };
+}
+
+export async function fetchRpcTransaction(
+  rpcUrl: string,
+  hash: string,
+): Promise<RpcTransactionSummary | null> {
+  return summarizeRpcTransaction(await sorobanCall(rpcUrl, 'getTransaction', { hash }));
+}
+
+export function txResultCode(resultXdr: string): string {
+  const name = xdr.TransactionResult.fromXDR(resultXdr, 'base64').result().switch().name;
+  return name.replace(/([A-Z])/g, '_$1').toLowerCase();
+}
+
+export interface SubmitOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+}
+
+/**
+ * Submits a signed envelope and waits for it to land. sendTransaction only
+ * acknowledges receipt; unlike Horizon's POST /transactions it does not block
+ * until inclusion, so success is only reported once getTransaction says so.
+ * Rejects with the Horizon-style result code (e.g. tx_bad_seq) on failure.
+ */
+export async function submitAndConfirm(
+  rpcUrl: string,
+  signedXdr: string,
+  { timeoutMs = 30_000, intervalMs = 1_000 }: SubmitOptions = {},
+): Promise<string> {
+  const sent = await sorobanCall(rpcUrl, 'sendTransaction', { transaction: signedXdr });
+
+  if (sent.status === 'ERROR') {
+    throw new Error(sent.errorResultXdr ? txResultCode(sent.errorResultXdr) : 'tx_rejected');
+  }
+  if (sent.status === 'TRY_AGAIN_LATER') throw new Error('try_again_later');
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const tx = await sorobanCall(rpcUrl, 'getTransaction', { hash: sent.hash });
+    if (tx.status === 'SUCCESS') return sent.hash;
+    if (tx.status === 'FAILED') {
+      throw new Error(tx.resultXdr ? txResultCode(tx.resultXdr) : 'tx_failed');
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Timed out waiting for confirmation');
 }
 
 export function parseSimResult(raw: any): rpc.Api.SimulateTransactionSuccessResponse {

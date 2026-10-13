@@ -13,21 +13,91 @@
  * so removed wallets fall off without bookkeeping.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { replacePushRegistrations, type PushRegistration } from '@/src/api/push-tokens';
+import { deleteDevice, registerDevice } from '@/src/api/devices';
+import {
+  deletePushRegistrations,
+  replacePushRegistrations,
+  type PushRegistration,
+} from '@/src/api/push-tokens';
 import { blindSignerId, queueIndexFor } from '@/src/lib/cosign-crypto';
 import { getMySignerKey, pickSigner } from '@/src/lib/cosign-packet-flow';
-import { ensureWalletSession } from '@/src/lib/wallet-auth';
+import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
 import { getWalletCosignKey } from '@/src/lib/wallet-cosign-key';
 import { useWalletStore } from '@/src/store/wallet';
 
 const log = (...args: unknown[]) => {
   if (__DEV__) console.log('[push-registration]', ...args);
 };
+
+const PUSH_TOKEN_KEY = 'latch_expo_push_token';
+
+async function getExpoPushToken(): Promise<string | null> {
+  if (!Device.isDevice) {
+    log('skipped: not a physical device');
+    return null;
+  }
+
+  let perm = await Notifications.getPermissionsAsync();
+  if (!perm.granted) perm = await Notifications.requestPermissionsAsync();
+  if (!perm.granted) {
+    log('skipped: permission not granted');
+    return null;
+  }
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Approvals',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  }
+
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
+  const { data } = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+  await AsyncStorage.setItem(PUSH_TOKEN_KEY, data);
+  return data;
+}
+
+/**
+ * Register this device for activity notifications. Independent of multisig: a
+ * solo wallet still wants backup-signer / recovery / funding pushes. Uses the
+ * cached session only — never signs in, so no unexpected biometric prompt.
+ */
+export async function registerDevicePushToken(): Promise<boolean> {
+  const jwt = await getWalletSessionWithoutSignIn();
+  if (!jwt) {
+    log('device registration deferred: no cached session');
+    return false;
+  }
+  const pushToken = await getExpoPushToken();
+  if (!pushToken) return false;
+  await registerDevice(jwt, pushToken, 'expo');
+  log('device registered');
+  return true;
+}
+
+/** Logout hygiene: best-effort removal of this device's server-side registrations. */
+export async function unregisterPush(): Promise<void> {
+  try {
+    const pushToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    if (!pushToken) return;
+    const jwt = await getWalletSessionWithoutSignIn();
+    if (jwt) {
+      await Promise.allSettled([
+        deleteDevice(jwt, pushToken),
+        deletePushRegistrations(jwt, pushToken),
+      ]);
+    }
+    await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+  } catch (err) {
+    log('unregister failed', err instanceof Error ? err.message : err);
+  }
+}
 
 /**
  * Register (or refresh) this device's push token for every shared wallet whose
@@ -63,24 +133,8 @@ export async function registerPushToken(): Promise<boolean> {
     return false;
   }
 
-  let perm = await Notifications.getPermissionsAsync();
-  if (!perm.granted) perm = await Notifications.requestPermissionsAsync();
-  if (!perm.granted) {
-    log('skipped: permission not granted');
-    return false;
-  }
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'Approvals',
-      importance: Notifications.AndroidImportance.DEFAULT,
-    });
-  }
-
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
-  const { data: pushToken } = await Notifications.getExpoPushTokenAsync(
-    projectId ? { projectId } : undefined,
-  );
+  const pushToken = await getExpoPushToken();
+  if (!pushToken) return false;
 
   await replacePushRegistrations(await ensureWalletSession(me.account), pushToken, registrations);
   log('registered', registrations.length, 'queue(s)');
