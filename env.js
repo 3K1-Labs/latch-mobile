@@ -98,6 +98,7 @@ const optionalEnv = {
   // ─── Wallet backend ─────────────────────────────────────────────────────────
   EXPO_PUBLIC_WALLET_BACKEND_URL: z.string().optional(),
   EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: z.string().optional(),
+  EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY: z.string().optional(),
   EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: z.string().optional(),
   EXPO_PUBLIC_RELAYER_NETWORKS: z.string().optional(),
   // Which network the deposit relayer (latch-relayer) is deployed against —
@@ -183,6 +184,7 @@ const envObject = {
 
   EXPO_PUBLIC_WALLET_BACKEND_URL: process.env.EXPO_PUBLIC_WALLET_BACKEND_URL,
   EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES,
+  EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY: process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY,
   EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: process.env.EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED,
   EXPO_PUBLIC_RELAYER_NETWORKS: process.env.EXPO_PUBLIC_RELAYER_NETWORKS,
   EXPO_PUBLIC_RELAYER_NETWORK: process.env.EXPO_PUBLIC_RELAYER_NETWORK,
