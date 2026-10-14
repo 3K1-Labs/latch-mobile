@@ -67,6 +67,20 @@ export function formatFiat(input: FiatFormatInput): FiatFormatResult {
   const digits = input.maximumFractionDigits ?? 2;
   const prefix = input.approx ? '≈' : '';
   const suffix = resolved.usedFallback ? ' (USD)' : '';
+
+  // A nonzero amount that rounds to 0 at `digits` precision (e.g. $0.003 at
+  // 2dp) is indistinguishable from an empty wallet. Say so explicitly instead
+  // of printing the same "$0.00" a real zero balance would show.
+  const roundingFloor = 1 / 10 ** digits;
+  if (amount > 0 && amount < roundingFloor) {
+    const symbol = getFiatCurrency(resolved.currency).symbol;
+    return {
+      text: `${prefix}<${symbol}${roundingFloor.toFixed(digits)}${suffix}`,
+      currency: resolved.currency,
+      usedFallback: resolved.usedFallback,
+    };
+  }
+
   return {
     text: `${prefix}${formatCurrencyNumber(amount, resolved.currency, digits)}${suffix}`,
     currency: resolved.currency,

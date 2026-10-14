@@ -77,9 +77,13 @@ function TokenRow({
 }) {
   const iconUrl = useTokenIcon(token.code, token.issuer);
   const amount = parseFloat(token.amount);
+  // 7dp for every token, not just XLM — a non-native balance under 0.01 (e.g.
+  // dust left over from a swap) otherwise rounds to the same "0.00" shown for
+  // an empty wallet. minimumFractionDigits still pads a round number to 2dp,
+  // so this is a no-op for ordinary balances.
   const formattedAmount = amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: token.code === 'XLM' ? 7 : 2,
+    maximumFractionDigits: 7,
   });
 
   return (
