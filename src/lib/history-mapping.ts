@@ -38,6 +38,9 @@ export function mapHistoryToPayments(
     const info = assetInfoFor(change.tokenId);
 
     out.push({
+      // A swap or path payment debits one token and credits another in the
+      // same operation, so both state changes share operation.id — suffix
+      // with tokenId/reason to keep each row's FlatList key unique.
       id: `${change.operation?.id?.toString() ?? change.transaction.hash}_${change.tokenId ?? 'native'}_${reason}`,
       transactionHash: change.transaction.hash,
       type: change.operation?.operationType ?? 'unknown',

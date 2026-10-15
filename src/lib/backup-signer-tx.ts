@@ -41,7 +41,7 @@
  * WebAuthn-only. Ed25519 backup signers are a small, separate follow-up.
  *
  * This module does no store mutation — callers persist the resulting Device
- * via `useWalletStore.updateAccountDevices`.
+ * via `useWalletStore.updateAccountDevicesAt`.
  */
 
 import { Address, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
@@ -208,8 +208,6 @@ async function submitSelfAuthOp(
 
 export interface AddBackupSignerInput {
   smartAccountAddress: string;
-  /** The account's Default rule id, read via fetchDefaultContextRule — never assumed to be 0. */
-  defaultRuleId: number;
   /** The freshly created backup passkey. Must be WebAuthn (it always is — createBackupSignerPasskey only produces one). */
   newSigner: AccountSigner;
   /** This device's (the authorizer's) position in the accounts array. */
@@ -218,6 +216,8 @@ export interface AddBackupSignerInput {
 
 export interface AddBackupSignerChainResult {
   txHash: string;
+  /** The account's Default rule id, read via fetchDefaultContextRule — never assumed to be 0. */
+  ruleId: number;
   /** Best-effort — undefined if resultMetaXdr couldn't be parsed. The confirm-add response is authoritative. */
   signerId?: number;
   keyDataHex: string;
@@ -231,7 +231,7 @@ export interface AddBackupSignerChainResult {
  * txHash is the add_signer transaction's.
  *
  * Does not call the backend confirm-add endpoint — see the module doc.
- * Persist a pending `Device` (via updateAccountDevices) immediately after
+ * Persist a pending `Device` (via updateAccountDevicesAt) immediately after
  * this resolves and before calling `confirmAddBackupSigner`
  * (src/api/backup-signer.ts), so a killed app can retry confirm alone later.
  */
@@ -275,7 +275,7 @@ export async function addBackupSignerOnChain(
       input.initiatorListIndex,
       addPolicyOp(
         input.smartAccountAddress,
-        input.defaultRuleId,
+        before.ruleId,
         verifiers.thresholdPolicy,
         encodeThresholdPolicyParams(1),
       ),
@@ -288,7 +288,7 @@ export async function addBackupSignerOnChain(
     cfg,
     input.smartAccountAddress,
     input.initiatorListIndex,
-    addSignerOp(input.smartAccountAddress, input.defaultRuleId, runtimeSigner),
+    addSignerOp(input.smartAccountAddress, before.ruleId, runtimeSigner),
     'backup signer add',
   );
 
@@ -309,14 +309,13 @@ export async function addBackupSignerOnChain(
     log.warn('could not read new signer id from resultMetaXdr; on-chain presence:', landed);
   }
 
-  return { txHash, signerId, keyDataHex: input.newSigner.keyDataHex };
+  return { txHash, ruleId: before.ruleId, signerId, keyDataHex: input.newSigner.keyDataHex };
 }
 
 // ─── Remove ─────────────────────────────────────────────────────────────
 
 export interface RemoveBackupSignerInput {
   smartAccountAddress: string;
-  defaultRuleId: number;
   /** The backup signer's stable on-chain id (Device.onChainSignerId). */
   signerId: number;
   /** The backup signer's key_data hex, for the confirm-remove call. */
@@ -327,6 +326,8 @@ export interface RemoveBackupSignerInput {
 
 export interface RemoveBackupSignerChainResult {
   txHash: string;
+  /** The account's Default rule id, read via fetchDefaultContextRule — never assumed to be 0. */
+  ruleId: number;
 }
 
 /**
@@ -350,11 +351,18 @@ export async function removeBackupSignerOnChain(
     throw new Error("Can't remove the account's only remaining signer.");
   }
 
+  // Resolve input.signerId against the chain's current signer set rather than
+  // trusting the caller's keyDataHex outright: remove_signer below acts on
+  // signerId alone, so if that id is stale it could silently target a
+  // different signer — including this device's own — than the one the
+  // caller thinks it's removing.
+  const target = rule.signers.find((s) => s.signerId === input.signerId);
+  if (!target || target.keyDataHex.toLowerCase() !== input.keyDataHex.toLowerCase()) {
+    throw new Error('This signer has changed on-chain. Refresh the Signers list and try again.');
+  }
+
   const initiatorKeyDataHex = await getStoredKeyDataHex(input.initiatorListIndex);
-  if (
-    initiatorKeyDataHex &&
-    initiatorKeyDataHex.toLowerCase() === input.keyDataHex.toLowerCase()
-  ) {
+  if (initiatorKeyDataHex && target.keyDataHex.toLowerCase() === initiatorKeyDataHex.toLowerCase()) {
     throw new Error(
       "Can't remove this device's own signer from here — it would lock this device out of managing the account.",
     );
@@ -369,12 +377,7 @@ export async function removeBackupSignerOnChain(
       'This account has no approval threshold, so every signer must approve removing one. It can’t be done from this device alone.',
     );
   }
-  const threshold = await fetchRuleThreshold(
-    cfg,
-    input.smartAccountAddress,
-    input.defaultRuleId,
-    verifiers,
-  );
+  const threshold = await fetchRuleThreshold(cfg, input.smartAccountAddress, rule.ruleId, verifiers);
   if (threshold > rule.signers.length - 1) {
     throw new Error(
       `Removing this signer would leave fewer signers than the account's approval threshold (${threshold}).`,
@@ -385,9 +388,9 @@ export async function removeBackupSignerOnChain(
     cfg,
     input.smartAccountAddress,
     input.initiatorListIndex,
-    removeSignerOp(input.smartAccountAddress, input.defaultRuleId, input.signerId),
+    removeSignerOp(input.smartAccountAddress, rule.ruleId, input.signerId),
     'backup signer remove',
   );
 
-  return { txHash };
+  return { txHash, ruleId: rule.ruleId };
 }

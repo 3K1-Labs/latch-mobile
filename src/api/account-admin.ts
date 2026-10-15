@@ -359,9 +359,12 @@ export interface ChainSigner {
    */
   foreignVerifier?: boolean;
   /**
-   * The signer's stable on-chain id — its array index in the rule's Vec<Signer>,
-   * which is the u32 that `add_signer` returns and `remove_signer(rule_id, signer_id)`
-   * consumes. Populated whenever signers are read via `fetchDefaultContextRule` or
+   * The signer's stable on-chain id, from the rule's `signer_ids` (aligned with
+   * `signers`) — the same account-global u32 that `add_signer` returns and
+   * `remove_signer(rule_id, signer_id)` consumes. This is NOT the signer's
+   * position in the Vec: ids come from a never-reused counter (`NextSignerId`),
+   * so positions drift from ids as soon as any signer is removed. Populated
+   * whenever signers are read via `fetchDefaultContextRule` or
    * `fetchContextRuleSigners` so that chain-discovered signers that were never
    * locally persisted (e.g. added on another device) can still be removed.
    */
@@ -467,7 +470,9 @@ export async function fetchDefaultContextRule(
       const ruleId = typeof rule.id === 'number' ? rule.id : i;
       // get_context_rule returns `signer_ids`, aligned with `signers`. These are the
       // account-global ids remove_signer consumes (never reused after removal),
-      // NOT positions in the Vec.
+      // NOT positions in the Vec. Attach them so callers (syncSignersFromChain)
+      // can populate Device.onChainSignerId for signers discovered here that
+      // were never locally persisted.
       const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
       const signers = (rule.signers as any[]).map((s, idx) => ({
         ...decodeChainSigner(s, verifiers),

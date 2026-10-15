@@ -26,16 +26,11 @@ import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Yup from 'yup';
 
-import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import { confirmAddBackupSigner } from '@/src/api/backup-signer';
 import Box from '@/src/components/shared/Box';
 import Input from '@/src/components/shared/Input';
 import Text from '@/src/components/shared/Text';
-import {
-  STELLAR_FACTORY_ADDRESS,
-  STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL,
-} from '@/src/constants/config';
+import { STELLAR_FACTORY_ADDRESS } from '@/src/constants/config';
 import {
   addBackupSignerOnChain,
   BackupSignerAlreadyPresentError,
@@ -47,6 +42,7 @@ import { PasskeyProvisionError } from '@/src/lib/provision-passkey';
 import { Device, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
+import { summarizeError } from '@/src/utils/summarize-error';
 
 const log = createLogger('add-backup-signer');
 
@@ -63,24 +59,11 @@ const NameSchema = Yup.object().shape({
   label: Yup.string().trim().min(1, 'Give this backup a name').required('Give this backup a name'),
 });
 
-/**
- * A chain failure's message can be a full Soroban diagnostic dump (event log,
- * contract addresses, hex payloads — hundreds of lines). That's for the log,
- * not the screen: shown raw, it pushes the CTA button off-screen with no way
- * to scroll to it (see the ScrollView below, which is the other half of this
- * fix) and reads as an unresponsive app. Show a short summary; the full
- * message still reaches the logger/Sentry via `log.error` at the call site.
- */
-function summarizeError(message: string, max = 240): string {
-  const firstLine = message.split('\n')[0]?.trim() || message.trim();
-  return firstLine.length > max ? `${firstLine.slice(0, max).trimEnd()}…` : firstLine;
-}
-
 export default function AddBackupSigner() {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { accounts, activeAccountIndex, updateAccountDevices } = useWalletStore();
+  const { accounts, activeAccountIndex, updateAccountDevicesAt } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
 
   const [step, setStep] = useState<Step>({ kind: 'name' });
@@ -97,15 +80,9 @@ export default function AddBackupSigner() {
       const credential = await createBackupSignerPasskey(label);
 
       setStep({ kind: 'ceremony', busyLabel: 'Authorizing on-chain…' });
-      const defaultRule = await fetchDefaultContextRule(
-        { rpcUrl: STELLAR_RPC_URL, networkPassphrase: STELLAR_NETWORK_PASSPHRASE, factoryAddress },
-        smartAccountAddress,
-      );
-
       const newSigner = { kind: 'webauthn' as const, keyDataHex: credential.keyDataHex };
       const chainResult = await addBackupSignerOnChain({
         smartAccountAddress,
-        defaultRuleId: defaultRule.ruleId,
         newSigner,
         initiatorListIndex: activeAccountIndex,
       });
@@ -118,24 +95,27 @@ export default function AddBackupSigner() {
         isBackupSigner: true,
         pendingConfirm: {
           txHash: chainResult.txHash,
-          contextRuleId: defaultRule.ruleId,
+          contextRuleId: chainResult.ruleId,
           action: 'add',
         },
       };
-      await updateAccountDevices(activeAccount.index, [...existingDevices, pendingDevice]);
+      // By array position, not activeAccount.index — passkey/deployed/shared
+      // accounts all share index: -1, so updating by that index would also
+      // overwrite every other such account's device list.
+      await updateAccountDevicesAt(activeAccountIndex, [...existingDevices, pendingDevice]);
 
       setStep({ kind: 'ceremony', busyLabel: 'Confirming with Latch…' });
       const backupCount = existingDevices.filter((d) => d.isBackupSigner).length;
       try {
         const { signerId } = await confirmAddBackupSigner({
           smartAccountAddress,
-          contextRuleId: defaultRule.ruleId,
+          contextRuleId: chainResult.ruleId,
           keyDataHex: chainResult.keyDataHex,
           txHash: chainResult.txHash,
           label,
           seq: backupCount + 1,
         });
-        await updateAccountDevices(activeAccount.index, [
+        await updateAccountDevicesAt(activeAccountIndex, [
           ...existingDevices,
           { ...pendingDevice, onChainSignerId: signerId, pendingConfirm: undefined },
         ]);

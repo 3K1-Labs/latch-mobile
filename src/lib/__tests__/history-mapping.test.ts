@@ -68,7 +68,7 @@ describe('mapHistoryToPayments', () => {
   it('maps a credit with the debiting account as sender', () => {
     const [p] = mapHistoryToPayments([change('CREDIT', USDC, { reason: 'DEBIT' })], ME, lookup);
     expect(p).toMatchObject({
-      id: '77',
+      id: '77_CUSDC_CREDIT',
       transactionHash: 'hash1',
       from: OTHER,
       to: ME,
@@ -128,13 +128,20 @@ describe('mapHistoryToPayments', () => {
     expect(out).toHaveLength(1);
   });
 
+  it('gives each side of a same-operation swap a distinct id', () => {
+    const debit = change('DEBIT', USDC, { reason: 'CREDIT', tokenId: 'CXLM' });
+    const credit = change('CREDIT', 'CXLM', { reason: 'DEBIT', tokenId: USDC });
+    const [a, b] = mapHistoryToPayments([debit, credit], ME, lookup);
+    expect(a.id).not.toBe(b.id);
+  });
+
   it('falls back to the hash as id when there is no operation', () => {
     const [p] = mapHistoryToPayments(
       [change('CREDIT', USDC, undefined, { operation: null })],
       ME,
       lookup,
     );
-    expect(p.id).toBe('hash1');
+    expect(p.id).toBe('hash1_CUSDC_CREDIT');
     expect(p.type).toBe('unknown');
   });
 });
