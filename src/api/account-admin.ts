@@ -495,9 +495,10 @@ export async function fetchContextRuleSigners(
   const rule: any = await simulateRead(p, accountAddress, 'get_context_rule', [
     xdr.ScVal.scvU32(ruleId),
   ]);
+  const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
   return (rule.signers as any[]).map((s, idx) => ({
     ...decodeChainSigner(s, verifiers),
-    signerId: idx,
+    signerId: signerIds[idx],
   }));
 }
 
