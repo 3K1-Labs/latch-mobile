@@ -880,6 +880,17 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       };
     });
 
+    // A pending removal is already gone on-chain, but its txHash is still needed
+    // to retry confirm-remove — keep it until that call succeeds.
+    for (const d of existing) {
+      if (
+        d.pendingConfirm?.action === 'remove' &&
+        !reconciled.some((r) => r.signerKey === d.signerKey)
+      ) {
+        reconciled.push(d);
+      }
+    }
+
     // Stable order: local device(s) first, then the rest.
     reconciled.sort((a, b) => Number(b.isLocal) - Number(a.isLocal));
 
