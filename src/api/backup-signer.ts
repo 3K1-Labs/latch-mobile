@@ -13,10 +13,8 @@
  * independently re-verified server-side, never from the client's own read of
  * resultMetaXdr.
  *
- * See docs/discussion-32... / LATCH_MOBILE_BACKUP_SIGNERS.md §5. As of this
- * writing the backend routes described there are not implemented — this
- * client is ready for them but will 404 until latch-api adds the two
- * handlers on the existing `/v1/smart-account` group.
+ * See docs/discussion-32... / LATCH_MOBILE_BACKUP_SIGNERS.md §5. Served by
+ * latch-api's BackupSignerHandler on the `/v1/smart-account` group.
  *
  * Callers must treat a failed confirm-add/confirm-remove as retryable on its
  * own: the on-chain call already succeeded by the time either of these is

@@ -162,6 +162,9 @@ export default {
       [
         'expo-build-properties',
         {
+          ios: {
+            enableSceneSupport: true,
+          },
           android: {
             compileSdkVersion: 36,
             // Play rejects an upload whose target API is below the level it

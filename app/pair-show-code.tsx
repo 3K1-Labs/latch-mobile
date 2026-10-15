@@ -56,7 +56,7 @@ export default function PairShowCode() {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { accounts, activeAccountIndex, updateAccountDevices } = useWalletStore();
+  const { accounts, activeAccountIndex, updateAccountDevicesAt } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
 
   const [stage, setStage] = useState<Stage>({ kind: 'loading' });
@@ -113,7 +113,7 @@ export default function PairShowCode() {
         }
 
         const newSigner = accountSignerFromSigned(signed);
-        await runAdminTx(activeAccount!, activeAccountIndex, ctx, newSigner, updateAccountDevices);
+        await runAdminTx(activeAccount!, activeAccountIndex, ctx, newSigner, updateAccountDevicesAt);
 
         if (cancelled) return;
         setStage({ kind: 'done' });
@@ -251,7 +251,7 @@ async function runAdminTx(
   activeAccountIndex: number,
   ctx: Awaited<ReturnType<typeof buildPairingContext>>,
   newSigner: AccountSigner,
-  updateAccountDevices: ReturnType<typeof useWalletStore.getState>['updateAccountDevices'],
+  updateAccountDevicesAt: ReturnType<typeof useWalletStore.getState>['updateAccountDevicesAt'],
 ): Promise<void> {
   const rpcUrl = STELLAR_RPC_URL;
   const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
@@ -327,8 +327,8 @@ async function runAdminTx(
   };
 
   const devices = [localDevice, ...existingDevices.filter((d) => !d.isLocal), newDevice];
-  await updateAccountDevices(
-    activeAccount.index,
+  await updateAccountDevicesAt(
+    activeAccountIndex,
     devices,
     result.newAdminRuleId ?? activeAccount.adminRuleId ?? null,
   );

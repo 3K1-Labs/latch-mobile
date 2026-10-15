@@ -20,6 +20,7 @@ module.exports = {
         '<rootDir>/src/utils/**/*.test.ts',
         '<rootDir>/src/api/**/*.test.ts',
         '<rootDir>/src/services/**/*.test.ts',
+        '<rootDir>/src/store/**/*.test.ts',
       ],
       transform: {
         // dynamic-import-node rewrites `await import(...)` to a promise-wrapped

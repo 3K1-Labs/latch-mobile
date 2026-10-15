@@ -31,7 +31,6 @@ import { deployMultisigAccount, deploySeedWalletAccount } from '@/src/api/smart-
 import { AccountSigner, encodeAccountInitParams } from '@/src/lib/account-signers';
 import {
   ACTIVE_NETWORK,
-  HORIZON_URL,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -42,6 +41,7 @@ import {
   sortSignersCanonical,
 } from '@/src/lib/multisig-address';
 import {
+  fetchRpcAccount,
   ledgerKeyToBase64,
   parseSimResult,
   sorobanCall,
@@ -109,8 +109,7 @@ function deriveGAddressFromPubkey(pubkeyHex: string): string {
 
 async function fundAccountIfNeeded(gAddress: string): Promise<void> {
   try {
-    const horizonResponse = await fetch(`${HORIZON_URL}/accounts/${gAddress}`);
-    if (horizonResponse.ok) return;
+    if (await fetchRpcAccount(STELLAR_RPC_URL, gAddress)) return;
   } catch {}
 
   // Friendbot only exists on testnet — on mainnet an unfunded account means

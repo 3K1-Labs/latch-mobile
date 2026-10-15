@@ -9,6 +9,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
+import { API_BASE_URL } from '../constants/api-host';
 import { getNetworkId } from '../constants/config';
 import {
   ensureWalletSession,
@@ -22,8 +23,7 @@ import {
   type WalletAccount,
 } from '../store/wallet';
 
-const API_ROOT = process.env.EXPO_PUBLIC_WALLET_BACKEND_URL ?? '';
-const API_BASE = `${API_ROOT}/v1`;
+const API_BASE = `${API_BASE_URL}/v1`;
 
 // Raw XHR — resolves with { status, body } so callers can inspect the status
 // before deciding whether to throw. Never rejects on HTTP errors; only rejects

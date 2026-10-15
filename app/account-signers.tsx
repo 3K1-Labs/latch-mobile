@@ -11,42 +11,30 @@
  * by redoing the on-chain call.
  */
 
-import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import { confirmAddBackupSigner, confirmRemoveBackupSigner } from '@/src/api/backup-signer';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import {
-  STELLAR_FACTORY_ADDRESS,
-  STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL,
-} from '@/src/constants/config';
 import { removeBackupSignerOnChain } from '@/src/lib/backup-signer-tx';
 import { createLogger } from '@/src/lib/logger';
 import { Device, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
+import { summarizeError } from '@/src/utils/summarize-error';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const log = createLogger('account-signers');
-
-// A chain failure's message can be a full Soroban diagnostic dump (hundreds
-// of lines) — see add-backup-signer.tsx's summarizeError for why that must
-// never go straight into a fixed-height error banner: it starves the rest of
-// the screen of space and reads as an unresponsive app.
-function summarizeError(message: string, max = 240): string {
-  const firstLine = message.split('\n')[0]?.trim() || message.trim();
-  return firstLine.length > max ? `${firstLine.slice(0, max).trimEnd()}…` : firstLine;
-}
 
 export default function AccountSigners() {
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
-  const { accounts, activeAccountIndex, updateAccountDevices, syncSignersFromChain } =
+  const insets = useSafeAreaInsets();
+  const { accounts, activeAccountIndex, updateAccountDevicesAt, syncSignersFromChain } =
     useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
   const devices = activeAccount?.devices ?? [];
@@ -79,7 +67,10 @@ export default function AccountSigners() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountIndex]);
 
-  const persist = (next: Device[]) => updateAccountDevices(activeAccount.index, next);
+  // By array position, not activeAccount.index — passkey/deployed/shared
+  // accounts all share index: -1, so updating by that index would also
+  // overwrite every other such account's device list.
+  const persist = (next: Device[]) => updateAccountDevicesAt(activeAccountIndex, next);
 
   const retryConfirmAdd = async (device: Device) => {
     const smartAccountAddress = activeAccount?.smartAccountAddress;
@@ -149,29 +140,17 @@ export default function AccountSigners() {
 
   const removeDevice = async (device: Device) => {
     const smartAccountAddress = activeAccount?.smartAccountAddress;
-    const factoryAddress = STELLAR_FACTORY_ADDRESS;
-    if (!smartAccountAddress || !factoryAddress) return;
+    if (!smartAccountAddress) return;
     setBusyKey(device.signerKey);
     setError(null);
     try {
-      const defaultRule = await fetchDefaultContextRule(
-        { rpcUrl: STELLAR_RPC_URL, networkPassphrase: STELLAR_NETWORK_PASSPHRASE, factoryAddress },
+      // removeBackupSignerOnChain resolves the signer id itself from
+      // keyDataHex (one fetch, shared with its own safety checks) — fetching
+      // the rule here too would just be a second round-trip for the same id.
+      const { txHash, ruleId, signerId } = await removeBackupSignerOnChain({
         smartAccountAddress,
-      );
-      const signerId =
-        device.onChainSignerId ??
-        defaultRule.signers.find(
-          (s) => s.keyDataHex.toLowerCase() === device.keyDataHex.toLowerCase(),
-        )?.signerId ??
-        null;
-      if (signerId === null) {
-        throw new Error('Could not find this signer on-chain.');
-      }
-      const { txHash } = await removeBackupSignerOnChain({
-        smartAccountAddress,
-        defaultRuleId: defaultRule.ruleId,
-        signerId,
         keyDataHex: device.keyDataHex,
+        fallbackSignerId: device.onChainSignerId ?? undefined,
         initiatorListIndex: activeAccountIndex,
       });
 
@@ -180,13 +159,13 @@ export default function AccountSigners() {
       const pendingRemoval: Device = {
         ...device,
         onChainSignerId: signerId,
-        pendingConfirm: { txHash, contextRuleId: defaultRule.ruleId, action: 'remove' },
+        pendingConfirm: { txHash, contextRuleId: ruleId, action: 'remove' },
       };
       await persist(devices.map((d) => (d.signerKey === device.signerKey ? pendingRemoval : d)));
 
       await confirmRemoveBackupSigner({
         smartAccountAddress,
-        contextRuleId: defaultRule.ruleId,
+        contextRuleId: ruleId,
         signerId,
         keyDataHex: device.keyDataHex,
         txHash,
@@ -201,7 +180,7 @@ export default function AccountSigners() {
   };
 
   return (
-    <Box flex={1} backgroundColor="mainBackground" style={{ paddingTop: 30 }}>
+    <Box flex={1} backgroundColor="mainBackground" style={{ paddingTop: insets.top }}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       <Box height={56} flexDirection="row" alignItems="center" paddingHorizontal="m">

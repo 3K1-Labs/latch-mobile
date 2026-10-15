@@ -18,6 +18,7 @@ import React from 'react';
 import { ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { fetchTxDetails } from '@/src/api/tx-details';
 import TransactionStatusHeaderMultisig from '@/src/components/cosign/TransactionStatusHeaderMultisig';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
@@ -25,38 +26,8 @@ import UtilityHeader from '@/src/components/shared/UtilityHeader';
 import TransactionDetailCard from '@/src/components/transaction/TransactionDetailCard';
 import TransactionHashBox from '@/src/components/transaction/TransactionHashBox';
 import TransactionTimeline from '@/src/components/transaction/TransactionTimeline';
-import { ACTIVE_NETWORK, HORIZON_URL } from '@/src/constants/config';
+import { ACTIVE_NETWORK } from '@/src/constants/config';
 import { useAppTheme } from '@/src/theme/ThemeContext';
-
-// The tx may not be indexed on Horizon for a moment after submit; each field
-// degrades to '—' until it is.
-async function fetchTxDetails(
-  hash: string,
-): Promise<{ fee: string; ledger: string; date: string }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', `${HORIZON_URL}/transactions/${encodeURIComponent(hash)}`, true);
-    xhr.setRequestHeader('Accept', 'application/json');
-    xhr.timeout = 12000;
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        const feeStroops = parseInt(data.fee_charged ?? '0', 10);
-        const feeXLM = String(parseFloat((feeStroops / 10_000_000).toFixed(7)));
-        resolve({
-          fee: `${feeXLM} XLM`,
-          ledger: String(data.ledger ?? '—'),
-          date: data.created_at ?? '',
-        });
-      } catch {
-        resolve({ fee: '—', ledger: '—', date: '' });
-      }
-    };
-    xhr.onerror = () => resolve({ fee: '—', ledger: '—', date: '' });
-    xhr.ontimeout = () => resolve({ fee: '—', ledger: '—', date: '' });
-    xhr.send();
-  });
-}
 
 const CosignSuccess = () => {
   const insets = useSafeAreaInsets();

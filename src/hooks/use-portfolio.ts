@@ -17,8 +17,9 @@
 //     function fetchAllSacBalancesViaWalletBackend, and the conditional at
 //     the call site around line `chooseSacBalanceFetcher`).
 //
-// History (use-stellar-transactions.ts) is on wallet-backend GraphQL with no
-// fallback. See docs/phase-3-wallet-auth-and-history.md for the rationale.
+// Trustline discovery follows the same flag. History has its own flag,
+// EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY (see use-stellar-transactions.ts and
+// docs/phase-3-wallet-auth-and-history.md).
 
 import { Address, Asset, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { useQuery } from '@tanstack/react-query';
@@ -137,6 +138,23 @@ function fetchAllSacBalances(cAddress: string, sacIds: string[]): Promise<Record
  * Requires a wallet-scope JWT; uses ensureWalletSession from
  * src/lib/wallet-auth.ts and re-signs in on 401.
  */
+async function fetchWalletBackendBalances(address: string) {
+  const account = useWalletStore.getState().accounts[useWalletStore.getState().activeAccountIndex];
+  if (!account) throw new Error('wallet-backend balances: no active account');
+
+  const token = await ensureWalletSession(account);
+  try {
+    return await fetchAccountBalances(address, token);
+  } catch (err) {
+    if (err instanceof GraphQLError && err.code === 'UNAUTHORIZED') {
+      return fetchAccountBalances(address, await reSignInWallet(account));
+    }
+    // Same reasoning as the RPC fetcher: a failed request is not a zero
+    // balance, and must not be cached or rendered as one.
+    throw err;
+  }
+}
+
 async function fetchAllSacBalancesViaWalletBackend(
   cAddress: string,
   sacIds: string[],
@@ -144,23 +162,7 @@ async function fetchAllSacBalancesViaWalletBackend(
   const zero = Object.fromEntries(sacIds.map((id) => [id, '0']));
   if (sacIds.length === 0) return zero;
 
-  const account = useWalletStore.getState().accounts[useWalletStore.getState().activeAccountIndex];
-  if (!account) throw new Error('wallet-backend balances: no active account');
-
-  let token = await ensureWalletSession(account);
-  let balances;
-  try {
-    balances = await fetchAccountBalances(cAddress, token);
-  } catch (err) {
-    if (err instanceof GraphQLError && err.code === 'UNAUTHORIZED') {
-      token = await reSignInWallet(account);
-      balances = await fetchAccountBalances(cAddress, token);
-    } else {
-      // Same reasoning as the RPC fetcher: a failed request is not a zero
-      // balance, and must not be cached or rendered as one.
-      throw err;
-    }
-  }
+  const balances = await fetchWalletBackendBalances(cAddress);
 
   const result = { ...zero };
   for (const b of balances) {
@@ -216,6 +218,25 @@ function fetchTrustlineTokens(gAddress: string): Promise<TokenConfig[]> {
 }
 
 /**
+ * Wallet-backend variant of fetchTrustlineTokens, for when Horizon is not
+ * wanted. Soroban RPC cannot enumerate an account's trustlines, so the indexer
+ * is the only non-Horizon source. fetchAccountBalances reads the first page
+ * only, so an account holding more than 50 balances is truncated here.
+ */
+async function fetchTrustlineTokensViaWalletBackend(gAddress: string): Promise<TokenConfig[]> {
+  const balances = await fetchWalletBackendBalances(gAddress);
+  return balances.flatMap((b) =>
+    b.tokenType === 'CLASSIC' && b.code && b.issuer
+      ? [{ code: b.code, issuer: b.issuer, name: b.code }]
+      : [],
+  );
+}
+
+const chooseTrustlineFetcher = USE_WB_BALANCES
+  ? fetchTrustlineTokensViaWalletBackend
+  : fetchTrustlineTokens;
+
+/**
  * G-address trustline discovery, cached separately from balances.
  *
  * Trustlines change rarely, so this is refetched far less often than balances
@@ -226,7 +247,7 @@ function fetchTrustlineTokens(gAddress: string): Promise<TokenConfig[]> {
 export function useTrustlineTokens(gAddress?: string | null) {
   return useQuery({
     queryKey: ['trustline-tokens', gAddress],
-    queryFn: () => fetchTrustlineTokens(gAddress!),
+    queryFn: () => chooseTrustlineFetcher(gAddress!),
     enabled: !!gAddress,
     staleTime: 5 * 60_000,
   });

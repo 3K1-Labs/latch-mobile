@@ -359,9 +359,12 @@ export interface ChainSigner {
    */
   foreignVerifier?: boolean;
   /**
-   * The signer's stable on-chain id — its array index in the rule's Vec<Signer>,
-   * which is the u32 that `add_signer` returns and `remove_signer(rule_id, signer_id)`
-   * consumes. Populated whenever signers are read via `fetchDefaultContextRule` or
+   * The signer's stable on-chain id, from the rule's `signer_ids` (aligned with
+   * `signers`) — the same account-global u32 that `add_signer` returns and
+   * `remove_signer(rule_id, signer_id)` consumes. This is NOT the signer's
+   * position in the Vec: ids come from a never-reused counter (`NextSignerId`),
+   * so positions drift from ids as soon as any signer is removed. Populated
+   * whenever signers are read via `fetchDefaultContextRule` or
    * `fetchContextRuleSigners` so that chain-discovered signers that were never
    * locally persisted (e.g. added on another device) can still be removed.
    */
@@ -465,13 +468,15 @@ export async function fetchDefaultContextRule(
     }
     if (rule && isDefaultRuleType(rule.context_type)) {
       const ruleId = typeof rule.id === 'number' ? rule.id : i;
-      // The Vec<Signer> array index IS the stable signer id used by remove_signer —
-      // the same u32 that add_signer returns in its resultMetaXdr. Attach it so
-      // callers (syncSignersFromChain) can populate Device.onChainSignerId for
-      // signers discovered here that were never locally persisted.
+      // get_context_rule returns `signer_ids`, aligned with `signers`. These are the
+      // account-global ids remove_signer consumes (never reused after removal),
+      // NOT positions in the Vec. Attach them so callers (syncSignersFromChain)
+      // can populate Device.onChainSignerId for signers discovered here that
+      // were never locally persisted.
+      const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
       const signers = (rule.signers as any[]).map((s, idx) => ({
         ...decodeChainSigner(s, verifiers),
-        signerId: idx,
+        signerId: signerIds[idx],
       }));
       const policies = ((rule.policies as any[]) ?? []).map(String);
       return { ruleId, signers, policies };
@@ -495,9 +500,10 @@ export async function fetchContextRuleSigners(
   const rule: any = await simulateRead(p, accountAddress, 'get_context_rule', [
     xdr.ScVal.scvU32(ruleId),
   ]);
+  const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
   return (rule.signers as any[]).map((s, idx) => ({
     ...decodeChainSigner(s, verifiers),
-    signerId: idx,
+    signerId: signerIds[idx],
   }));
 }
 

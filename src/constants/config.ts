@@ -57,16 +57,14 @@ export const MAINNET_NETWORK: NetworkDetails = {
 // (hook, event handler, render), never a module-top-level computation, so the
 // live binding is picked up on the next call/render — see network-switch.ts.
 //
-// Starts on testnet and is corrected by hydrateActiveNetwork() during startup
+// Starts on mainnet and is corrected by hydrateActiveNetwork() during startup
 // from the user's persisted choice. The app root gates rendering on that
 // hydration, so nothing reads a network value before it is applied.
 //
-// Testnet is the default deliberately. A fresh install has no persisted choice,
-// so whatever sits here is what a first run uses — and a first run that lands
-// on mainnet deploys a real account and spends real bundler XLM before the user
-// has chosen anything. The safe default is the one that costs nothing when it
-// is wrong.
-export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
+// Mainnet is the default: account creation is mainnet-first, so a fresh
+// install with no persisted choice deploys a real account on mainnet rather
+// than testnet.
+export let ACTIVE_NETWORK: NetworkDetails = MAINNET_NETWORK;
 
 // Convenience shortcuts derived from the active network
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
@@ -176,16 +174,16 @@ function applyNetworkDetails(details: NetworkDetails): void {
 export async function hydrateActiveNetwork(): Promise<void> {
   try {
     const stored = await AsyncStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
-    // Honor whichever choice was persisted. The module default is testnet, so
-    // the mainnet branch is the one that actually matters — without it a
-    // persisted 'mainnet' choice is silently dropped on every cold start and
-    // the app reverts to testnet. Applying testnet explicitly is harmless
+    // Honor whichever choice was persisted. The module default is mainnet, so
+    // the testnet branch is the one that actually matters — without it a
+    // persisted 'testnet' choice is silently dropped on every cold start and
+    // the app reverts to mainnet. Applying mainnet explicitly is harmless
     // (idempotent) and keeps the two cases symmetric.
     if (stored === 'mainnet') applyNetworkDetails(MAINNET_NETWORK);
     else if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
-    // No stored choice → keep the module default (testnet).
+    // No stored choice → keep the module default (mainnet).
   } catch {
-    // Storage unavailable — keep the testnet default rather than blocking launch.
+    // Storage unavailable — keep the mainnet default rather than blocking launch.
   }
 }
 

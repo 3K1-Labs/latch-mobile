@@ -344,9 +344,25 @@ interface WalletStore {
    * Replace the devices list and (optionally) the admin rule id for an
    * account. Used after a pair flow completes to persist the new device
    * set + freshly installed admin rule.
+   *
+   * Matches by `bip44Index`, which is NOT unique: passkey, deployed and
+   * shared/multisig accounts are all created with `index: -1`. Calling this
+   * for one of them writes every account sharing that sentinel. Use
+   * `updateAccountDevicesAt` (by array position) for those account kinds.
    */
   updateAccountDevices: (
     bip44Index: number,
+    devices: Device[],
+    adminRuleId?: number | null,
+  ) => Promise<void>;
+
+  /**
+   * Same as `updateAccountDevices`, but targets the account by its array
+   * position instead of `bip44Index` — the only safe way to update a
+   * passkey/deployed/shared account, since those all share `index: -1`.
+   */
+  updateAccountDevicesAt: (
+    listIndex: number,
     devices: Device[],
     adminRuleId?: number | null,
   ) => Promise<void>;
@@ -726,6 +742,22 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     set({ accounts: updated });
   },
 
+  updateAccountDevicesAt: async (listIndex, devices, adminRuleId) => {
+    const { accounts } = get();
+    if (!accounts[listIndex]) return;
+    const updated = accounts.map((a, i) =>
+      i === listIndex
+        ? {
+            ...a,
+            devices,
+            ...(adminRuleId !== undefined ? { adminRuleId } : {}),
+          }
+        : a,
+    );
+    await persistAccounts(updated);
+    set({ accounts: updated });
+  },
+
   syncSignersFromChain: async (accountListIndex) => {
     // Locate by array position, NOT by `index`: shared/multisig and passkey
     // accounts both use the `-1` sentinel, so `index` is not unique and a
@@ -831,7 +863,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       const prev = byKey.get(s.signerKey) || byKey.get(s.signerKey.toLowerCase());
       if (prev) {
         let updated = prev;
-        if (prev.onChainSignerId === null && s.signerId !== undefined) {
+        // Overwrite whenever the chain value differs, not only when null:
+        // a device saved before the signer-id fix (account-admin.ts) may
+        // hold a position-based id that no longer matches the chain's
+        // stable one.
+        if (s.signerId !== undefined && prev.onChainSignerId !== s.signerId) {
           updated = { ...updated, onChainSignerId: s.signerId };
         }
         // Self-heal: if an earlier sync mislabeled this local device as a backup signer,
@@ -869,16 +905,28 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         label,
         kind: s.kind,
         keyDataHex: s.keyDataHex,
-        // Use the array-position signer id returned by fetchDefaultContextRule
-        // (Vec<Signer> index = the u32 remove_signer consumes). Without this,
-        // chain-discovered signers that were never locally persisted land here
-        // with onChainSignerId=null and the remove button is permanently blocked.
+        // The stable on-chain signer id from fetchDefaultContextRule's
+        // signer_ids (never a Vec position — see account-admin.ts). Without
+        // this, chain-discovered signers that were never locally persisted
+        // land here with onChainSignerId=null and the remove button is
+        // permanently blocked.
         onChainSignerId: s.signerId ?? null,
         isLocal,
         pairedAt: new Date().toISOString(),
         ...(isBackupSigner ? { isBackupSigner: true } : {}),
       };
     });
+
+    // A pending removal is already gone on-chain, but its txHash is still needed
+    // to retry confirm-remove — keep it until that call succeeds.
+    for (const d of existing) {
+      if (
+        d.pendingConfirm?.action === 'remove' &&
+        !reconciled.some((r) => r.signerKey === d.signerKey)
+      ) {
+        reconciled.push(d);
+      }
+    }
 
     // Stable order: local device(s) first, then the rest.
     reconciled.sort((a, b) => Number(b.isLocal) - Number(a.isLocal));
@@ -889,8 +937,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         (d, i) =>
           existing[i]?.signerKey !== d.signerKey ||
           existing[i]?.isLocal !== d.isLocal ||
-          // A null→number backfill of onChainSignerId must be persisted too.
-          (existing[i]?.onChainSignerId === null && d.onChainSignerId !== null),
+          existing[i]?.isBackupSigner !== d.isBackupSigner ||
+          existing[i]?.label !== d.label ||
+          existing[i]?.onChainSignerId !== d.onChainSignerId,
       );
     if (__DEV__) {
       console.log(
