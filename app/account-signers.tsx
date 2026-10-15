@@ -159,7 +159,6 @@ export default function AccountSigners() {
         smartAccountAddress,
       );
       const signerId =
-        device.onChainSignerId ??
         defaultRule.signers.find(
           (s) => s.keyDataHex.toLowerCase() === device.keyDataHex.toLowerCase(),
         )?.signerId ??
