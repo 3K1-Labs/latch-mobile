@@ -11,15 +11,9 @@
  * by redoing the on-chain call.
  */
 
-import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import { confirmAddBackupSigner, confirmRemoveBackupSigner } from '@/src/api/backup-signer';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import {
-  STELLAR_FACTORY_ADDRESS,
-  STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL,
-} from '@/src/constants/config';
 import { removeBackupSignerOnChain } from '@/src/lib/backup-signer-tx';
 import { createLogger } from '@/src/lib/logger';
 import { Device, useWalletStore } from '@/src/store/wallet';
@@ -146,31 +140,17 @@ export default function AccountSigners() {
 
   const removeDevice = async (device: Device) => {
     const smartAccountAddress = activeAccount?.smartAccountAddress;
-    const factoryAddress = STELLAR_FACTORY_ADDRESS;
-    if (!smartAccountAddress || !factoryAddress) return;
+    if (!smartAccountAddress) return;
     setBusyKey(device.signerKey);
     setError(null);
     try {
-      const defaultRule = await fetchDefaultContextRule(
-        { rpcUrl: STELLAR_RPC_URL, networkPassphrase: STELLAR_NETWORK_PASSPHRASE, factoryAddress },
+      // removeBackupSignerOnChain resolves the signer id itself from
+      // keyDataHex (one fetch, shared with its own safety checks) — fetching
+      // the rule here too would just be a second round-trip for the same id.
+      const { txHash, ruleId, signerId } = await removeBackupSignerOnChain({
         smartAccountAddress,
-      );
-      // Look up the id from the chain by key first, falling back to the
-      // stored onChainSignerId only if the key isn't found there — a stale
-      // stored id must never be the one that decides which signer is removed.
-      const signerId =
-        defaultRule.signers.find(
-          (s) => s.keyDataHex.toLowerCase() === device.keyDataHex.toLowerCase(),
-        )?.signerId ??
-        device.onChainSignerId ??
-        null;
-      if (signerId === null) {
-        throw new Error('Could not find this signer on-chain.');
-      }
-      const { txHash, ruleId } = await removeBackupSignerOnChain({
-        smartAccountAddress,
-        signerId,
         keyDataHex: device.keyDataHex,
+        fallbackSignerId: device.onChainSignerId ?? undefined,
         initiatorListIndex: activeAccountIndex,
       });
 

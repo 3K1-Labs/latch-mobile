@@ -316,10 +316,13 @@ export async function addBackupSignerOnChain(
 
 export interface RemoveBackupSignerInput {
   smartAccountAddress: string;
-  /** The backup signer's stable on-chain id (Device.onChainSignerId). */
-  signerId: number;
-  /** The backup signer's key_data hex, for the confirm-remove call. */
+  /** The backup signer's key_data hex — resolved against the chain's current
+   * signer set below, so this is the only identifier the caller must supply. */
   keyDataHex: string;
+  /** Last known on-chain id (Device.onChainSignerId), used only if the chain
+   * lookup by keyDataHex comes up empty; still re-verified against keyDataHex
+   * before use, so a stale value here can never target the wrong signer. */
+  fallbackSignerId?: number;
   /** This device's (the authorizer's) position in the accounts array. */
   initiatorListIndex: number;
 }
@@ -328,12 +331,18 @@ export interface RemoveBackupSignerChainResult {
   txHash: string;
   /** The account's Default rule id, read via fetchDefaultContextRule — never assumed to be 0. */
   ruleId: number;
+  /** The resolved signer id — the caller no longer needs its own chain lookup to get this. */
+  signerId: number;
 }
 
 /**
  * Remove a backup signer on-chain. Does not call the backend confirm-remove
  * endpoint — see the module doc; persist a pending `Device` before calling
  * it, same as the add path.
+ *
+ * Resolves the signer id itself from `keyDataHex` (one fetch, shared with the
+ * safety checks below) — callers must not fetch the rule separately just to
+ * look up the id first; that was costing an extra round-trip per remove.
  *
  * Safety checks:
  *   - never remove the account's last remaining signer
@@ -351,15 +360,27 @@ export async function removeBackupSignerOnChain(
     throw new Error("Can't remove the account's only remaining signer.");
   }
 
-  // Resolve input.signerId against the chain's current signer set rather than
-  // trusting the caller's keyDataHex outright: remove_signer below acts on
-  // signerId alone, so if that id is stale it could silently target a
-  // different signer — including this device's own — than the one the
-  // caller thinks it's removing.
-  const target = rule.signers.find((s) => s.signerId === input.signerId);
-  if (!target || target.keyDataHex.toLowerCase() !== input.keyDataHex.toLowerCase()) {
+  // Resolve by keyDataHex first — that's the caller's actual intent. Only
+  // fall back to the caller-supplied id if the key isn't found on-chain, and
+  // even then require its keyDataHex to match: remove_signer below acts on
+  // signerId alone, so a stale fallback id must never be allowed to silently
+  // target a different signer — including this device's own.
+  const byKey = rule.signers.find(
+    (s) => s.keyDataHex.toLowerCase() === input.keyDataHex.toLowerCase(),
+  );
+  const target =
+    byKey ??
+    (input.fallbackSignerId !== undefined
+      ? rule.signers.find((s) => s.signerId === input.fallbackSignerId)
+      : undefined);
+  if (
+    !target ||
+    target.signerId === undefined ||
+    target.keyDataHex.toLowerCase() !== input.keyDataHex.toLowerCase()
+  ) {
     throw new Error('This signer has changed on-chain. Refresh the Signers list and try again.');
   }
+  const signerId = target.signerId;
 
   const initiatorKeyDataHex = await getStoredKeyDataHex(input.initiatorListIndex);
   if (initiatorKeyDataHex && target.keyDataHex.toLowerCase() === initiatorKeyDataHex.toLowerCase()) {
@@ -388,9 +409,9 @@ export async function removeBackupSignerOnChain(
     cfg,
     input.smartAccountAddress,
     input.initiatorListIndex,
-    removeSignerOp(input.smartAccountAddress, rule.ruleId, input.signerId),
+    removeSignerOp(input.smartAccountAddress, rule.ruleId, signerId),
     'backup signer remove',
   );
 
-  return { txHash, ruleId: rule.ruleId };
+  return { txHash, ruleId: rule.ruleId, signerId };
 }
