@@ -465,13 +465,13 @@ export async function fetchDefaultContextRule(
     }
     if (rule && isDefaultRuleType(rule.context_type)) {
       const ruleId = typeof rule.id === 'number' ? rule.id : i;
-      // The Vec<Signer> array index IS the stable signer id used by remove_signer —
-      // the same u32 that add_signer returns in its resultMetaXdr. Attach it so
-      // callers (syncSignersFromChain) can populate Device.onChainSignerId for
-      // signers discovered here that were never locally persisted.
+      // get_context_rule returns `signer_ids`, aligned with `signers`. These are the
+      // account-global ids remove_signer consumes (never reused after removal),
+      // NOT positions in the Vec.
+      const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
       const signers = (rule.signers as any[]).map((s, idx) => ({
         ...decodeChainSigner(s, verifiers),
-        signerId: idx,
+        signerId: signerIds[idx],
       }));
       const policies = ((rule.policies as any[]) ?? []).map(String);
       return { ruleId, signers, policies };
