@@ -38,7 +38,7 @@ export function mapHistoryToPayments(
     const info = assetInfoFor(change.tokenId);
 
     out.push({
-      id: change.operation?.id?.toString() ?? change.transaction.hash,
+      id: `${change.operation?.id?.toString() ?? change.transaction.hash}_${change.tokenId ?? 'native'}_${reason}`,
       transactionHash: change.transaction.hash,
       type: change.operation?.operationType ?? 'unknown',
       txType: 'unknown',
