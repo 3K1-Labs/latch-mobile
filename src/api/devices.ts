@@ -1,6 +1,6 @@
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_BASE = `${API_BASE_URL}/v1/devices`;
+const API_PATH = '/v1/devices';
 
 export class DevicesApiError extends Error {
   code: string;
@@ -45,7 +45,7 @@ function xhr(
 async function call(method: string, path: string, body: object | null, token: string): Promise<void> {
   const { status, body: resp } = await xhr(
     method,
-    `${API_BASE}${path}`,
+    `${apiBaseUrl()}${API_PATH}${path}`,
     body ? JSON.stringify(body) : null,
     token,
   );

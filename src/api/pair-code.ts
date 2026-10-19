@@ -14,10 +14,9 @@
  */
 
 import { ApiError } from './api-error';
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/pair-codes`;
+const API_PATH = '/v1/pair-codes';
 
 export interface PairCodeMeta {
   code: string;
@@ -107,7 +106,7 @@ async function call<T>(
 ): Promise<T | null> {
   const { status, body: resp } = await xhr(
     method,
-    `${API_BASE}${path}`,
+    `${apiBaseUrl()}${API_PATH}${path}`,
     body ? JSON.stringify(body) : null,
     token,
   );

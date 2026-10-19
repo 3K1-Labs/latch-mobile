@@ -1,8 +1,11 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { getNetworkId } from '@/src/constants/config';
+
 /**
- * The latch-api base URL, with the development host resolved per platform.
+ * Rewrite a configured latch-api base URL's loopback host for the current
+ * platform, in development only.
  *
  * `EXPO_PUBLIC_API_BASE_URL=http://localhost:8080` works on the iOS simulator,
  * which shares the Mac's network stack, and fails everywhere else:
@@ -24,9 +27,7 @@ import { Platform } from 'react-native';
  * remote URL is returned untouched, and a release build never takes this path
  * at all — so a production build cannot be redirected by anything here.
  */
-function resolveApiBaseUrl(): string {
-  const configured = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
-
+function resolveApiBaseUrl(configured: string): string {
   // Release builds use exactly what was configured. No rewriting, no fallback.
   if (!__DEV__) return configured;
 
@@ -71,8 +72,28 @@ function metroHost(): string | null {
   return host;
 }
 
+// Resolved once per configured URL — Metro's host does not change within a
+// session, and re-deriving it per request would only add work.
+const PRODUCTION_API_BASE_URL = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL ?? '');
+const STAGING_API_BASE_URL = resolveApiBaseUrl(
+  process.env.EXPO_PUBLIC_STAGING_API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '',
+);
+
 /**
- * Base URL for latch-api. Resolved once — Metro's host does not change within
- * a session, and re-deriving it per request would only add work.
+ * Base URL for latch-api, for the ACTIVE network.
+ *
+ * Read live, inside a function — not captured once at module load — because
+ * `switchActiveNetwork` (src/lib/network-switch.ts) flips the active network
+ * at runtime, no app restart. A module-top-level constant would freeze
+ * whichever network was active when this module first loaded, the same bug
+ * class STELLAR_RPC_URL et al. avoid in config.ts.
+ *
+ * Testnet talks to the staging deployment (EXPO_PUBLIC_STAGING_API_BASE_URL)
+ * so backend changes can be tried against the wallet before they reach
+ * production; unset, it falls back to the same URL mainnet uses, so a fresh
+ * clone with no staging deployment configured keeps working exactly as
+ * before this existed.
  */
-export const API_BASE_URL = resolveApiBaseUrl();
+export function apiBaseUrl(): string {
+  return getNetworkId() === 'testnet' ? STAGING_API_BASE_URL : PRODUCTION_API_BASE_URL;
+}

@@ -1,7 +1,7 @@
 import { unwrap } from '@/src/api/unwrap';
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_BASE = `${API_BASE_URL}/v1/notifications`;
+const API_PATH = '/v1/notifications';
 
 export interface AppNotification {
   id: string;
@@ -60,7 +60,7 @@ function xhr(
 }
 
 async function call<T>(method: string, path: string, token: string): Promise<T> {
-  const { status, body } = await xhr(method, `${API_BASE}${path}`, null, token);
+  const { status, body } = await xhr(method, `${apiBaseUrl()}${API_PATH}${path}`, null, token);
   if (status >= 200 && status < 300) return unwrap<T>(body);
   const err = body?.error;
   throw new NotificationsApiError(

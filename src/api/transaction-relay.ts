@@ -22,10 +22,9 @@ import { toBase64, txToBase64 } from '@/src/api/smart-account';
 import { getNetworkId } from '@/src/constants/config';
 import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
 import { SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/transaction`;
+const API_PATH = '/v1/transaction';
 
 export interface RelayResult {
   hash: string;
@@ -73,7 +72,7 @@ async function accessToken(): Promise<string> {
 function xhrGet(path: string, token: string): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
-    req.open('GET', `${API_BASE}${path}`, true);
+    req.open('GET', `${apiBaseUrl()}${API_PATH}${path}`, true);
     req.setRequestHeader('Accept', 'application/json');
     req.setRequestHeader('Authorization', `Bearer ${token}`);
     req.timeout = 30000;
@@ -93,7 +92,7 @@ function xhrGet(path: string, token: string): Promise<{ status: number; body: an
 function xhrPost(path: string, body: object, token: string): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
-    req.open('POST', `${API_BASE}${path}`, true);
+    req.open('POST', `${apiBaseUrl()}${API_PATH}${path}`, true);
     req.setRequestHeader('Content-Type', 'application/json');
     req.setRequestHeader('Accept', 'application/json');
     req.setRequestHeader('Authorization', `Bearer ${token}`);

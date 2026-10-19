@@ -9,7 +9,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import * as SecureStore from 'expo-secure-store';
 import { decryptBackup, encryptBackup, type EncryptedBackup } from '../lib/backup-crypto';
-import { API_BASE_URL } from '../constants/api-host';
+import { apiBaseUrl } from '../constants/api-host';
 import { getNetworkId } from '../constants/config';
 import {
   ensureWalletSession,
@@ -23,7 +23,7 @@ import {
   type WalletAccount,
 } from '../store/wallet';
 
-const API_BASE = `${API_BASE_URL}/v1`;
+const API_PATH = '/v1';
 
 // Raw XHR — resolves with { status, body } so callers can inspect the status
 // before deciding whether to throw. Never rejects on HTTP errors; only rejects
@@ -35,7 +35,7 @@ function xhrRaw(
 ): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open(options.method ?? 'GET', `${API_BASE}${path}`, true);
+    xhr.open(options.method ?? 'GET', `${apiBaseUrl()}${API_PATH}${path}`, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('Accept', 'application/json');
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);

@@ -16,6 +16,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { fetchDefaultContextRule } from '@/src/api/account-admin';
 import { fetchWckBundle, uploadWckBundle } from '@/src/api/wck-bundle';
+import { apiBaseUrl } from '@/src/constants/api-host';
 import {
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
@@ -161,10 +162,21 @@ export function pickupKeyFor(account: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(`latch-wck-pickup:v1:${account}`)));
 }
 
-async function walletToken(): Promise<string> {
+/**
+ * The token and the backend it's valid for, captured together. A wallet-scope
+ * JWT is only meaningful against the network that issued it (see
+ * wallet-auth.ts), and ensureWalletSession's round-trip (a fresh sign-in can
+ * mean a real network call, even a biometric prompt) is slow enough that a
+ * network switch can land mid-call. Reading apiBaseUrl() again afterwards,
+ * once the caller is ready to make the WCK request, would pick up the new
+ * network's URL while still holding the old network's token. Snapshotting
+ * both here, right as the token resolves, keeps them paired.
+ */
+async function walletToken(): Promise<{ token: string; baseUrl: string }> {
   const me = pickSigner();
   if (!me) throw new Error('No personal account on this device to authenticate with.');
-  return ensureWalletSession(me.account);
+  const token = await ensureWalletSession(me.account);
+  return { token, baseUrl: apiBaseUrl() };
 }
 
 /**
@@ -175,7 +187,8 @@ async function walletToken(): Promise<string> {
  */
 export async function publishWckBundle(account: string): Promise<void> {
   const { bundle } = await buildWckBundleForMembers(account);
-  await uploadWckBundle(await walletToken(), pickupKeyFor(account), bundle);
+  const { token, baseUrl } = await walletToken();
+  await uploadWckBundle(baseUrl, token, pickupKeyFor(account), bundle);
 }
 
 /**
@@ -187,7 +200,8 @@ export async function publishWckBundle(account: string): Promise<void> {
  */
 export async function autoFetchWalletCosignKey(account: string): Promise<boolean> {
   if (await hasWalletCosignKey(account)) return true;
-  const bundle = await fetchWckBundle(await walletToken(), pickupKeyFor(account));
+  const { token, baseUrl } = await walletToken();
+  const bundle = await fetchWckBundle(baseUrl, token, pickupKeyFor(account));
   if (!bundle) return false;
   await importWalletCosignKeyFromBundle(account, bundle);
   return true;

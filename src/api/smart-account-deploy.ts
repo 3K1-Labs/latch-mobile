@@ -26,10 +26,9 @@ import { signWithStoredPasskeyAtIndex } from '@/src/lib/passkey-webauthn';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
 import { bytesToB64, compactSigToDER } from '@/src/lib/wallet-auth';
 import { getPasskeyStorageKeys, SECURE_KEYS } from '@/src/store/wallet';
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/smart-account`;
+const API_PATH = '/v1/smart-account';
 
 /** How many BIP-44 indices to probe when matching a public key to its seed. */
 const MAX_ACCOUNT_INDEX_PROBE = 10;
@@ -50,7 +49,7 @@ export class DeployApiError extends Error {
 // ─── transport ────────────────────────────────────────────────────────────────
 
 function xhrPost(path: string, body: object): Promise<{ status: number; body: any }> {
-  const url = `${API_BASE}${path}`;
+  const url = `${apiBaseUrl()}${API_PATH}${path}`;
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
     req.open('POST', url, true);

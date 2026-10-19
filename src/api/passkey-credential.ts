@@ -24,11 +24,11 @@
  * to already know — or type — the address before the first prompt.
  */
 
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 import { PASSKEY_RP_ID } from '@/src/constants/config';
 import { bytesToB64, compactSigToDER } from '@/src/lib/wallet-auth';
 
-const API_BASE = `${API_BASE_URL}/v1/passkey-credentials`;
+const API_PATH = '/v1/passkey-credentials';
 
 export class PasskeyCredentialLookupError extends Error {
   status: number;
@@ -49,7 +49,7 @@ export interface PasskeyCredentialRecord {
 // CLAUDE.md.
 
 function xhrPost(path: string, body: object): Promise<{ status: number; body: any }> {
-  const url = `${API_BASE}${path}`;
+  const url = `${apiBaseUrl()}${API_PATH}${path}`;
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
     req.open('POST', url, true);

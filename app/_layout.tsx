@@ -120,6 +120,7 @@ function RootLayoutContent() {
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppToast />
+      {/* <TestnetBanner /> */}
     </>
   );
 }

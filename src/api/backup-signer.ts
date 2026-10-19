@@ -24,19 +24,19 @@
  * calling either function, so a killed app can retry from there.
  */
 
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 import { getNetworkId } from '@/src/constants/config';
 import { fetchAnyAccessToken } from '@/src/lib/pairing-context';
 import { ApiError } from './api-error';
 
-const API_BASE = `${API_BASE_URL}/v1/smart-account/backup-signer`;
+const API_PATH = '/v1/smart-account/backup-signer';
 
 // Raw XHR, matching transaction-relay.ts / passkey-credential.ts — see the
 // Android TLS note in AGENTS.md.
 function xhrPost(path: string, body: object, token: string): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
-    req.open('POST', `${API_BASE}${path}`, true);
+    req.open('POST', `${apiBaseUrl()}${API_PATH}${path}`, true);
     req.setRequestHeader('Content-Type', 'application/json');
     req.setRequestHeader('Accept', 'application/json');
     req.setRequestHeader('Authorization', `Bearer ${token}`);

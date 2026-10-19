@@ -14,9 +14,9 @@
  * platform TLS stack via OkHttp, which Axios bypasses.
  */
 
-import { API_BASE_URL } from '../constants/api-host';
+import { apiBaseUrl } from '../constants/api-host';
 
-const API_BASE = `${API_BASE_URL}/v1/multisig/wallets`;
+const API_PATH = '/v1/multisig/wallets';
 
 export type MultisigWalletState =
   | 'pending_invites'
@@ -156,7 +156,7 @@ async function call<T>(
 ): Promise<T | null> {
   const { status, body: resp } = await xhr(
     method,
-    `${API_BASE}${path}`,
+    `${apiBaseUrl()}${API_PATH}${path}`,
     body ? JSON.stringify(body) : null,
     token,
   );

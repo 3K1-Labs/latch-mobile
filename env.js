@@ -84,6 +84,11 @@ const optionalEnv = {
   EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: httpUrl().optional(),
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: z.string().optional(),
 
+  // latch-api base URL for testnet (src/constants/api-host.ts). Absent, every
+  // network falls back to EXPO_PUBLIC_API_BASE_URL — today's single-backend
+  // behavior — so this is opt-in, not required.
+  EXPO_PUBLIC_STAGING_API_BASE_URL: httpUrl().optional(),
+
   // ─── Policy contracts ───────────────────────────────────────────────────────
   // Policies enforce rules on an account (admin quorum, recovery); the
   // VERIFIER_* addresses validate signatures. Optional because an account
@@ -96,7 +101,6 @@ const optionalEnv = {
   EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: z.string().optional(),
 
   // ─── Wallet backend ─────────────────────────────────────────────────────────
-  EXPO_PUBLIC_WALLET_BACKEND_URL: z.string().optional(),
   EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: z.string().optional(),
   EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY: z.string().optional(),
   EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: z.string().optional(),
@@ -175,6 +179,7 @@ const envObject = {
 
   EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET,
   EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET,
+  EXPO_PUBLIC_STAGING_API_BASE_URL: process.env.EXPO_PUBLIC_STAGING_API_BASE_URL,
 
   EXPO_PUBLIC_ADMIN_GUARD_POLICY: process.env.EXPO_PUBLIC_ADMIN_GUARD_POLICY,
   EXPO_PUBLIC_RECOVERY_POLICY: process.env.EXPO_PUBLIC_RECOVERY_POLICY,
@@ -182,7 +187,6 @@ const envObject = {
   EXPO_PUBLIC_COUNTER_ADDRESS: process.env.EXPO_PUBLIC_COUNTER_ADDRESS,
   EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH: process.env.EXPO_PUBLIC_SMART_ACCOUNT_WASM_HASH,
 
-  EXPO_PUBLIC_WALLET_BACKEND_URL: process.env.EXPO_PUBLIC_WALLET_BACKEND_URL,
   EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES: process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_BALANCES,
   EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY: process.env.EXPO_PUBLIC_USE_WALLET_BACKEND_HISTORY,
   EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED: process.env.EXPO_PUBLIC_MULTISIG_BACKEND_ENABLED,

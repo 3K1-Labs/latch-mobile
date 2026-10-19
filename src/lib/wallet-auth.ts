@@ -28,17 +28,16 @@ import { findDeployedNetwork } from './account-network';
 import { signWithStoredPasskeyAtIndex } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
 import { SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1`;
+const API_PATH = '/v1';
 
 // ─── Transport ────────────────────────────────────────────────────────────────
 
 function xhrPost(path: string, body: object): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const req = new XMLHttpRequest();
-    req.open('POST', `${API_BASE}${path}`, true);
+    req.open('POST', `${apiBaseUrl()}${API_PATH}${path}`, true);
     req.setRequestHeader('Content-Type', 'application/json');
     req.setRequestHeader('Accept', 'application/json');
     req.timeout = 30000;

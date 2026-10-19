@@ -1,6 +1,7 @@
+import * as SecureStore from 'expo-secure-store';
 import { queryClient } from '@/src/api/client';
 import { getNetworkId, type NetworkDetails, setActiveNetworkDetails } from '@/src/constants/config';
-import { useWalletStore } from '@/src/store/wallet';
+import { SECURE_KEYS, useWalletStore } from '@/src/store/wallet';
 import { resetSacAssetCodeCache } from '@/src/lib/sac-asset-code';
 import { disconnectAllSessions } from '@/src/lib/walletconnect';
 import { resetSacContractInfoCache } from '@/src/hooks/use-stellar-transactions';
@@ -11,9 +12,12 @@ import { resetMockSwapCache } from '@/src/services/swap/providers/mock';
  * Live network switch — no app restart. Reassigns every network-derived
  * config value in place, then clears everything that memoized a value under
  * the old network: React Query's cache (balances/transactions aren't keyed by
- * network) and the SAC-contract-id lookup caches. Chain-scoped WalletConnect
- * sessions are also torn down, but in the background (time-boxed) — the relay
- * publish that does it can stall indefinitely and must never block the switch.
+ * network), the SAC-contract-id lookup caches, and the cached wallet-scope JWT
+ * (see wallet-auth.ts), which is keyed globally rather than per network and
+ * so can't just be left for a cross-network 401 to catch. Chain-scoped
+ * WalletConnect sessions are also torn down, but in the background
+ * (time-boxed) — the relay publish that does it can stall indefinitely and
+ * must never block the switch.
  *
  * Re-points the wallet store's active account at one that lives on the new
  * network (see reconcileActiveAccountForNetwork) — a smart account is deployed
@@ -23,6 +27,26 @@ import { resetMockSwapCache } from '@/src/services/swap/providers/mock';
  */
 export async function switchActiveNetwork(details: NetworkDetails): Promise<void> {
   await setActiveNetworkDetails(details);
+
+  // The wallet-scope JWT (wallet-auth.ts) is cached under a single global
+  // SecureStore key, not one per network — it has no record of which
+  // network's backend issued it. Left in place, getWalletSessionWithoutSignIn
+  // happily hands a mainnet-issued token to the testnet backend (or vice
+  // versa) because it only checks expiry, and wck-bundle.ts's endpoints don't
+  // refresh on the 401 that follows. Every caller treats that as non-fatal,
+  // so the failure is silent: a shared wallet's cosign key just never
+  // publishes/picks up on the network just switched to. Clearing both tokens
+  // here forces a fresh, correctly-network-scoped sign-in on next use.
+  //
+  // Caught, not awaited-to-throw: a rare Keychain/Keystore failure here must
+  // not abort the switch partway through, the way the WalletConnect teardown
+  // below is also shielded — setActiveNetworkDetails has already committed,
+  // and skipping the reconciliation/cache-reset steps that follow would leave
+  // the app on the new network with stale accounts and caches from the old one.
+  await Promise.all([
+    SecureStore.deleteItemAsync(SECURE_KEYS.WALLET_ACCESS_TOKEN).catch(() => {}),
+    SecureStore.deleteItemAsync(SECURE_KEYS.WALLET_REFRESH_TOKEN).catch(() => {}),
+  ]);
 
   // Coherence first, before the query reset below refetches balances/history:
   // this updates activeNetwork + the active account synchronously in the store

@@ -7,12 +7,16 @@
  *
  * Auth: a wallet-scope Latch JWT, supplied by the caller. No refresh on 401.
  * Transport: raw XHR (Android TLS via OkHttp).
+ *
+ * The caller passes baseUrl explicitly rather than this module reading the
+ * live apiBaseUrl() singleton: the token and the backend it's valid for must
+ * come from one snapshot. A network switch (src/lib/network-switch.ts) can
+ * flip apiBaseUrl() while a caller is mid-flight on a token acquired for the
+ * network just left, and re-reading the (now-changed) global here would send
+ * that stale-network token to the new network's backend.
  */
 
-import { API_BASE_URL } from '@/src/constants/api-host';
-
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/wck-bundles`;
+const API_PATH = '/v1/wck-bundles';
 
 export class WckBundleApiError extends Error {
   code: string;
@@ -56,13 +60,14 @@ function xhr(
 
 async function call<T>(
   method: string,
+  baseUrl: string,
   path: string,
   body: object | null,
   token: string,
 ): Promise<T | null> {
   const { status, body: resp } = await xhr(
     method,
-    `${API_BASE}${path}`,
+    `${baseUrl}${API_PATH}${path}`,
     body ? JSON.stringify(body) : null,
     token,
   );
@@ -85,18 +90,24 @@ async function call<T>(
  * pickup key. 409 CONFLICT means another account owns the slot.
  */
 export async function uploadWckBundle(
+  baseUrl: string,
   token: string,
   pickupKey: string,
   bundle: string,
 ): Promise<void> {
-  await call<void>('PUT', `/${encodeURIComponent(pickupKey)}`, { bundle }, token);
+  await call<void>('PUT', baseUrl, `/${encodeURIComponent(pickupKey)}`, { bundle }, token);
 }
 
 /** Fetch the sealed bundle for a pickup key, or null when none exists (404). */
-export async function fetchWckBundle(token: string, pickupKey: string): Promise<string | null> {
+export async function fetchWckBundle(
+  baseUrl: string,
+  token: string,
+  pickupKey: string,
+): Promise<string | null> {
   try {
     const data = await call<{ bundle: string }>(
       'GET',
+      baseUrl,
       `/${encodeURIComponent(pickupKey)}`,
       null,
       token,

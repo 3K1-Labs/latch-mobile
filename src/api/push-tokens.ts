@@ -9,10 +9,9 @@
  * Transport: raw XHR (Android TLS via OkHttp).
  */
 
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/push-tokens`;
+const API_PATH = '/v1/push-tokens';
 
 export interface PushRegistration {
   queueIndex: string;
@@ -62,7 +61,7 @@ function xhr(
 async function call(method: string, path: string, body: object | null, token: string): Promise<void> {
   const { status, body: resp } = await xhr(
     method,
-    `${API_BASE}${path}`,
+    `${apiBaseUrl()}${API_PATH}${path}`,
     body ? JSON.stringify(body) : null,
     token,
   );

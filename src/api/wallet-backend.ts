@@ -8,9 +8,9 @@
  * which Axios bypasses.
  */
 
-import { API_BASE_URL } from '../constants/api-host';
+import { apiBaseUrl } from '../constants/api-host';
 
-const GRAPHQL_URL = `${API_BASE_URL}/graphql/query`;
+const GRAPHQL_PATH = '/graphql/query';
 
 interface GraphQLResponse<T> {
   data?: T;
@@ -62,7 +62,7 @@ export async function gqlFetch<T>(
   accessToken: string,
 ): Promise<T> {
   const body = JSON.stringify({ query, variables });
-  const { status, body: resp } = await xhr<T>(GRAPHQL_URL, body, accessToken);
+  const { status, body: resp } = await xhr<T>(`${apiBaseUrl()}${GRAPHQL_PATH}`, body, accessToken);
 
   if (__DEV__) console.log('[wb-graphql] status=', status, 'resp=', JSON.stringify(resp));
 

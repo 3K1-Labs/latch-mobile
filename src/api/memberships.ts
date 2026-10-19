@@ -11,10 +11,9 @@
  * (Android TLS via OkHttp), matching wck-bundle.ts.
  */
 
-import { API_BASE_URL } from '@/src/constants/api-host';
+import { apiBaseUrl } from '@/src/constants/api-host';
 
-const API_ROOT = API_BASE_URL;
-const API_BASE = `${API_ROOT}/v1/memberships`;
+const API_PATH = '/v1/memberships';
 
 export class MembershipApiError extends Error {
   code: string;
@@ -77,7 +76,7 @@ async function call<T>(
   body: object | null,
   token: string,
 ): Promise<T | null> {
-  const url = `${API_BASE}${path}`;
+  const url = `${apiBaseUrl()}${API_PATH}${path}`;
   const payload = body ? JSON.stringify(body) : null;
 
   for (let attempt = 1; ; attempt++) {
