@@ -1,6 +1,7 @@
 import { loadRpcAccount } from '@/src/api/soroban-rpc';
-import { parseSimResult, sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
-import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
+import { sorobanCall, toBase64 } from '@/src/api/smart-account';
+import { submitBuiltTransaction } from '@/src/api/transaction-relay';
+import { buildSend, type NetworkFee } from '@/src/api/transaction-build';
 import {
   getNetworkId,
   PASSKEY_RP_ID,
@@ -19,13 +20,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import {
   Account,
   Address,
-  Contract,
   Keypair,
-  nativeToScVal,
-  rpc,
   scValToNative,
   StrKey,
-  TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
 
@@ -170,6 +167,57 @@ export function signSmartAccountAuthEntry(
   addrCreds.signature(signaturesScVal);
 }
 
+/**
+ * Sign a Soroban auth entry against a digest and context_rule_ids computed
+ * SERVER-SIDE by `/v1/transaction/build-send` or `build-swap`, instead of
+ * recomputing them locally like signSmartAccountAuthEntry does.
+ *
+ * The server's FeeForwarder-wrapped tree can assign a different rule id per
+ * context (forward / approve / transfer) — recomputing with one repeated
+ * ruleId here would sign a digest the chain never asked for and fail
+ * on-chain auth (#3014). Does NOT set signatureExpirationLedger: it is
+ * already baked into `entry` as returned by the build call, and changing it
+ * would invalidate authDigestHex.
+ */
+export function signSmartAccountAuthEntryFromDigest(
+  entry: xdr.SorobanAuthorizationEntry,
+  keypair: Keypair,
+  authDigestHex: string,
+  contextRuleIds: number[],
+  verifierAddress: string,
+): void {
+  const creds = entry.credentials();
+  if (creds.switch().name !== 'sorobanCredentialsAddress') return;
+
+  const message = STELLAR_AUTH_PREFIX + authDigestHex.toLowerCase();
+  const sigBytes = keypair.sign(Buffer.from(message, 'utf8'));
+  const pkBytes = StrKey.decodeEd25519PublicKey(keypair.publicKey());
+
+  const signerKey = xdr.ScVal.scvVec([
+    xdr.ScVal.scvSymbol('External'),
+    new Address(verifierAddress).toScVal(),
+    xdr.ScVal.scvBytes(Buffer.from(Uint8Array.from(pkBytes))),
+  ]);
+
+  const signaturesScVal = xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('context_rule_ids'),
+      val: xdr.ScVal.scvVec(contextRuleIds.map((id) => xdr.ScVal.scvU32(id))),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('signers'),
+      val: xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: signerKey,
+          val: xdr.ScVal.scvBytes(Buffer.from(Uint8Array.from(sigBytes))),
+        }),
+      ]),
+    }),
+  ]);
+
+  creds.address().signature(signaturesScVal);
+}
+
 export async function loadAccount(gAddress: string): Promise<Account> {
   return loadRpcAccount(STELLAR_RPC_URL, gAddress);
 }
@@ -197,94 +245,58 @@ export interface SendTokenParams {
 
 export interface SendTokenResult {
   hash: string;
+  /** The max network fee latch-api charged the wallet for this send. */
+  networkFee: NetworkFee;
 }
 
 /**
  * Sends tokens from a Latch smart account (C-address) to any Stellar address.
  *
- * Fee model: the bundler is the outer transaction
- * source and pays all Soroban resource fees. The user's keypair only signs the
- * Soroban auth entry to authorise the smart account transfer — it never touches
- * fee payment. Move bundler signing server-side before production.
+ * Fee model: latch-api builds the FeeForwarder-wrapped transfer server-side
+ * (simulate, pick the fee token, wrap in forward()) and the wallet itself
+ * pays the network fee — see POST /v1/transaction/build-send. The phone only
+ * signs the returned Soroban auth entry with the user's keypair; it never
+ * builds, simulates, or sources the transaction.
  *
  * Flow:
- *  1. Build SAC `transfer(from, to, amount)` with bundler as source
- *  2. Simulate (auth-record pass — no __check_auth yet)
- *  3. Sign auth entries with user keypair (Latch Ed25519 verifier format)
- *  4. Re-simulate with signed auth injected (accurate resource count)
- *  5. Assemble final tx (resource fees + signed auth)
- *  6. Bundler signs outer transaction
- *  7. Submit and poll for confirmation
+ *  1. POST /v1/transaction/build-send — latch-api builds + simulates and
+ *     returns the unsigned auth entries plus the digest to sign.
+ *  2. Sign the smart account's auth entry against that digest.
+ *  3. POST /v1/transaction/submit with the signed entry swapped in.
  */
 export async function sendTokenFromSmartAccount(params: SendTokenParams): Promise<SendTokenResult> {
   const { smartAccountAddress, keypair, sacContractId, destinationAddress, amount } = params;
 
-  const amountInBaseUnits = toBaseUnits(amount);
-
-  // 1. Load the bundler account as the simulation source. Only its address is
-  //    needed here; latch-api re-sources and re-sequences the final envelope.
-  const account = await loadAccount(await bundlerAddress());
-
-  // 2. Build the SAC transfer transaction
-  const contract = new Contract(sacContractId);
-  const tx = new TransactionBuilder(account, {
-    fee: '1000000',
-    networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-  })
-    .addOperation(
-      contract.call(
-        'transfer',
-        new Address(smartAccountAddress).toScVal(),
-        new Address(destinationAddress).toScVal(),
-        nativeToScVal(amountInBaseUnits, { type: 'i128' }),
-      ),
-    )
-    .setTimeout(300)
-    .build();
-
-  // 3. Simulate — mandatory for Soroban (resource fee calculation)
-  const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(tx),
+  const built = await buildSend({
+    smartAccountAddress,
+    signerType: 'ed25519',
+    contractId: sacContractId,
+    recipient: destinationAddress,
+    amount,
   });
-  if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
-
-  // 4. Sign auth entries from first simulation (auth-record mode — no __check_auth yet)
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
 
   const verifier = await resolveRegisteredEd25519Verifier(
     smartAccountAddress,
     Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
   );
 
-  for (const entry of simResult.result?.auth ?? []) {
-    const creds = entry.credentials();
-    if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
-    const credAddr = Address.fromScAddress(creds.address().address()).toString();
-    if (credAddr === smartAccountAddress) {
-      signSmartAccountAuthEntry(entry, keypair, validUntilLedger, verifier);
-    }
-  }
+  const entry = xdr.SorobanAuthorizationEntry.fromXDR(
+    built.authEntries[built.smartAccountAuthEntryIndex],
+    'base64',
+  );
+  signSmartAccountAuthEntryFromDigest(
+    entry,
+    keypair,
+    built.authDigestHex,
+    built.contextRuleIds,
+    verifier,
+  );
 
-  // 5. Assemble with signed auth so the second simulation can run __check_auth
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
+  const authEntries = [...built.authEntries];
+  authEntries[built.smartAccountAuthEntryIndex] = toBase64(new Uint8Array(entry.toXDR()));
 
-  // 6. Re-simulate with signed auth injected — this time __check_auth executes,
-  //    giving accurate instruction count and resourceFee that covers the full cost.
-  const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
-  const simResult2 = parseSimResult(simRaw2);
-
-  //    keeps the signed auth already in txWithSignedAuth (existingAuth.length > 0).
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-
-  // 8. latch-api signs the outer transaction with the bundler key and submits.
-  //    It rebuilds the envelope around this one's host function and auth
-  //    entries rather than signing what we send, then polls to confirmation.
-  const { hash } = await submitViaBundler(prepared);
-  return { hash };
+  const { hash } = await submitBuiltTransaction(built.txXdr, authEntries);
+  return { hash, networkFee: built.networkFee };
 }
 
 // ─── Passkey send ─────────────────────────────────────────────────────────────
@@ -490,6 +502,49 @@ export async function signPasskeyAuthEntry(
   addrCreds.signature(payload);
 }
 
+/** Passkey counterpart of signSmartAccountAuthEntryFromDigest — see its doc comment. */
+export async function signPasskeyAuthEntryFromDigest(
+  entry: xdr.SorobanAuthorizationEntry,
+  listIndex: number,
+  authDigestHex: string,
+  contextRuleIds: number[],
+  webAuthnVerifier: string,
+): Promise<void> {
+  const creds = entry.credentials();
+  if (creds.switch().name !== 'sorobanCredentialsAddress') return;
+
+  const authDigest = new Uint8Array(Buffer.from(authDigestHex, 'hex'));
+
+  const { sig, keyDataHex } = await signWithStoredPasskeyAtIndex(
+    listIndex,
+    authDigest,
+    PASSKEY_RP_ID,
+    'Authenticate to send tokens',
+  );
+  const sigDataXdr = encodeWebAuthnSigData(sig);
+
+  const payload = xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('context_rule_ids'),
+      val: xdr.ScVal.scvVec(contextRuleIds.map((id) => xdr.ScVal.scvU32(id))),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('signers'),
+      val: xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvVec([
+            xdr.ScVal.scvSymbol('External'),
+            xdr.ScVal.scvAddress(Address.fromString(webAuthnVerifier).toScAddress()),
+            xdr.ScVal.scvBytes(Buffer.from(keyDataHex, 'hex')),
+          ]),
+          val: xdr.ScVal.scvBytes(Buffer.from(sigDataXdr)),
+        }),
+      ]),
+    }),
+  ]);
+  creds.address().signature(payload);
+}
+
 export interface SendTokenPasskeyParams {
   smartAccountAddress: string;
   /** Position of this account in the accounts array (used to read the correct SecureStore keys). */
@@ -510,8 +565,6 @@ export async function sendTokenFromPasskeyAccount(
 ): Promise<SendTokenResult> {
   const { smartAccountAddress, listIndex, sacContractId, destinationAddress, amount } = params;
 
-  const amountInBaseUnits = toBaseUnits(amount);
-
   // Breadcrumbs for the Sentry capture below: a passkey transfer that fails
   // only on a physical build reaches us as one flattened message, and these
   // are the values needed to tell a stale verifier from an expired signature
@@ -519,65 +572,42 @@ export async function sendTokenFromPasskeyAccount(
   // account are contract addresses, ledgers are public.
   let stage = 'resolve-verifier';
   let webAuthnVerifier: string | undefined;
-  let latestLedger: number | undefined;
   let validUntilLedger: number | undefined;
 
   try {
     webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-    const account = await loadAccount(await bundlerAddress());
+    const keyDataHex = (await getStoredKeyDataHex(listIndex)) ?? undefined;
 
-    const contract = new Contract(sacContractId);
-    const tx = new TransactionBuilder(account, {
-      fee: '1000000',
-      networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-    })
-      .addOperation(
-        contract.call(
-          'transfer',
-          new Address(smartAccountAddress).toScVal(),
-          new Address(destinationAddress).toScVal(),
-          nativeToScVal(amountInBaseUnits, { type: 'i128' }),
-        ),
-      )
-      .setTimeout(300)
-      .build();
-
-    stage = 'simulate';
-    const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-      transaction: txToBase64(tx),
+    stage = 'build';
+    const built = await buildSend({
+      smartAccountAddress,
+      signerType: 'passkey',
+      keyDataHex,
+      contractId: sacContractId,
+      recipient: destinationAddress,
+      amount,
     });
-    if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
-
-    const simResult = parseSimResult(simRaw);
-    const ledgerNow: number = simRaw.latestLedger ?? 0;
-    latestLedger = ledgerNow;
-    validUntilLedger = ledgerNow + 100;
+    validUntilLedger = built.validUntilLedger;
 
     stage = 'sign-auth';
-    for (const entry of simResult.result?.auth ?? []) {
-      const creds = entry.credentials();
-      if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
-      const credAddr = Address.fromScAddress(creds.address().address()).toString();
-      if (credAddr === smartAccountAddress) {
-        await signPasskeyAuthEntry(entry, listIndex, validUntilLedger, webAuthnVerifier);
-      }
-    }
+    const entry = xdr.SorobanAuthorizationEntry.fromXDR(
+      built.authEntries[built.smartAccountAuthEntryIndex],
+      'base64',
+    );
+    await signPasskeyAuthEntryFromDigest(
+      entry,
+      listIndex,
+      built.authDigestHex,
+      built.contextRuleIds,
+      webAuthnVerifier,
+    );
 
-    const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
+    const authEntries = [...built.authEntries];
+    authEntries[built.smartAccountAuthEntryIndex] = toBase64(new Uint8Array(entry.toXDR()));
 
-    stage = 're-simulate';
-    const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-      transaction: txToBase64(txWithSignedAuth),
-    });
-    if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
-    const simResult2 = parseSimResult(simRaw2);
-
-    const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-
-    // Outer signing and submission happen server-side — see the note above.
     stage = 'submit';
-    const { hash } = await submitViaBundler(prepared);
-    return { hash };
+    const { hash } = await submitBuiltTransaction(built.txXdr, authEntries);
+    return { hash, networkFee: built.networkFee };
   } catch (err) {
     Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
       tags: {
@@ -590,7 +620,6 @@ export async function sendTokenFromPasskeyAccount(
         listIndex,
         sacContractId,
         resolvedWebAuthnVerifier: webAuthnVerifier ?? null,
-        latestLedger: latestLedger ?? null,
         validUntilLedger: validUntilLedger ?? null,
         rawError: err instanceof Error ? err.message : String(err),
       },

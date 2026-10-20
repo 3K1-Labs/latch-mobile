@@ -170,7 +170,7 @@ async function buildOpFromRawQuote(
   rawQuote: unknown,
   quote: SwapQuote,
   smartAccountAddress: string,
-): Promise<xdr.Operation> {
+): Promise<{ operation: xdr.Operation; amountOutMinBase: bigint }> {
   const distribution = parseSoroswapDistribution(rawQuote as Record<string, unknown>);
   const distributionScVal = buildDexDistributionScVal(distribution);
   const deadlineSec = Math.floor(Date.now() / 1000) + 600;
@@ -212,7 +212,7 @@ async function buildOpFromRawQuote(
   // Prefer the stricter (lower) of the quote's minimum vs the on-chain calibrated minimum.
   const amountOutMinBase = quoteMin > 0n && quoteMin < calibratedMin ? quoteMin : calibratedMin;
 
-  return buildAggregatorOperation({ ...common, amountOutMinBase });
+  return { operation: buildAggregatorOperation({ ...common, amountOutMinBase }), amountOutMinBase };
 }
 
 function isUnbuildableRouteError(err: unknown): boolean {
@@ -233,8 +233,19 @@ export const soroswapProvider: SwapProvider = {
     smartAccountAddress: string,
   ): Promise<SwapBuildResult> {
     try {
-      const operation = await buildOpFromRawQuote(quote.raw, quote, smartAccountAddress);
-      return { operation, effectiveQuote: quote };
+      const { operation, amountOutMinBase } = await buildOpFromRawQuote(
+        quote.raw,
+        quote,
+        smartAccountAddress,
+      );
+      return {
+        operation,
+        effectiveQuote: quote,
+        tokenInContractId: quote.fromSacId,
+        amountInRaw: toBaseUnits(quote.amountIn).toString(),
+        amountOutMinRaw: amountOutMinBase.toString(),
+        routerContractId: SOROSWAP_AGGREGATOR_ADDRESS,
+      };
     } catch (err) {
       if (!isUnbuildableRouteError(err)) throw err;
       // Aggregator route can't be locally encoded (an sdex leg, or a
@@ -251,8 +262,19 @@ export const soroswapProvider: SwapProvider = {
       };
       const fallbackRaw = await fetchRawQuote(params, FALLBACK_PROTOCOLS);
       const fallbackQuote = mapQuote(fallbackRaw, params);
-      const operation = await buildOpFromRawQuote(fallbackRaw, fallbackQuote, smartAccountAddress);
-      return { operation, effectiveQuote: fallbackQuote };
+      const { operation, amountOutMinBase } = await buildOpFromRawQuote(
+        fallbackRaw,
+        fallbackQuote,
+        smartAccountAddress,
+      );
+      return {
+        operation,
+        effectiveQuote: fallbackQuote,
+        tokenInContractId: fallbackQuote.fromSacId,
+        amountInRaw: toBaseUnits(fallbackQuote.amountIn).toString(),
+        amountOutMinRaw: amountOutMinBase.toString(),
+        routerContractId: SOROSWAP_AGGREGATOR_ADDRESS,
+      };
     }
   },
 };

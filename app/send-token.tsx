@@ -22,6 +22,7 @@ import { findDeployedNetwork } from '@/src/lib/account-network';
 import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createTransfer } from '@/src/lib/cosign-transport';
 import { diagnoseAuthFailure, isAuthFailure } from '@/src/lib/tx-diagnostics';
+import { TransactionBuildError, type NetworkFee } from '@/src/api/transaction-build';
 import { friendlyTxError, isWrongNetworkError } from '@/src/lib/tx-errors';
 import { sendTokenFromPasskeyAccount, sendTokenFromSmartAccount } from '@/src/services/send-token';
 import { getPasskeyStorageKeys, useWalletStore } from '@/src/store/wallet';
@@ -77,6 +78,7 @@ const SendToken = () => {
   const [amount, setAmount] = useState('0');
   const [status, setStatus] = useState<SendStatus>('initial');
   const [txHash, setTxHash] = useState<string | undefined>(undefined);
+  const [networkFee, setNetworkFee] = useState<NetworkFee | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   const [saveAddressVisible, setSaveAddressVisible] = useState(false);
@@ -236,29 +238,43 @@ const SendToken = () => {
 
     const isPasskeyAccount = !activeAccount?.gAddress;
 
-    setStatus('sending');
-    try {
-      let result;
+    const attemptSend = async () => {
       if (isPasskeyAccount) {
-        result = await sendTokenFromPasskeyAccount({
+        return sendTokenFromPasskeyAccount({
           smartAccountAddress,
           listIndex: activeAccountIndex,
           sacContractId: selectedToken.sacContractId,
           destinationAddress: selectedWallet.address,
           amount,
         });
-      } else {
-        const { deriveWalletAtIndex } = await import('@/src/lib/seed-wallet');
-        const wallet = deriveWalletAtIndex(mnemonic!, activeAccount!.index);
-        result = await sendTokenFromSmartAccount({
-          smartAccountAddress,
-          keypair: wallet.keypair,
-          sacContractId: selectedToken.sacContractId,
-          destinationAddress: selectedWallet.address,
-          amount,
-        });
+      }
+      const { deriveWalletAtIndex } = await import('@/src/lib/seed-wallet');
+      const wallet = deriveWalletAtIndex(mnemonic!, activeAccount!.index);
+      return sendTokenFromSmartAccount({
+        smartAccountAddress,
+        keypair: wallet.keypair,
+        sacContractId: selectedToken.sacContractId,
+        destinationAddress: selectedWallet.address,
+        amount,
+      });
+    };
+
+    setStatus('sending');
+    try {
+      let result;
+      try {
+        result = await attemptSend();
+      } catch (err) {
+        // The signed max fee no longer covers the current fee (or the wallet
+        // changed) — latch-api asks us to rebuild and sign again, once.
+        if (err instanceof TransactionBuildError && err.code === 'FEE_QUOTE_STALE') {
+          result = await attemptSend();
+        } else {
+          throw err;
+        }
       }
       setTxHash(result.hash);
+      setNetworkFee(result.networkFee);
       setStatus('success');
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
     } catch (err) {
@@ -423,6 +439,7 @@ const SendToken = () => {
           tokenCode={selectedToken?.code ?? ''}
           recipient={recipientAddress}
           txHash={txHash}
+          networkFee={networkFee}
           onContinue={() => router.back()}
           onSaveAddress={!alreadySaved ? () => setSaveAddressVisible(true) : undefined}
         />

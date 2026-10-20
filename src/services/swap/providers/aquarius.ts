@@ -256,6 +256,13 @@ export const aquariusProvider: SwapProvider = {
       nativeToScVal(toBaseUnits(quote.amountIn), { type: 'u128' }),
       nativeToScVal(toBaseUnits(quote.minReceived), { type: 'u128' }),
     );
-    return { operation, effectiveQuote: quote };
+    return {
+      operation,
+      effectiveQuote: quote,
+      tokenInContractId: raw.tokenIn,
+      amountInRaw: toBaseUnits(quote.amountIn).toString(),
+      amountOutMinRaw: toBaseUnits(quote.minReceived).toString(),
+      routerContractId: AQUARIUS_ROUTER_ADDRESS,
+    };
   },
 };

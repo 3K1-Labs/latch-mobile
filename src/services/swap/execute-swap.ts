@@ -1,96 +1,88 @@
-import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
-import { Address, Keypair, rpc, StrKey, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { submitBuiltTransaction } from '@/src/api/transaction-relay';
+import { buildSwap, type NetworkFee } from '@/src/api/transaction-build';
+import { Keypair, StrKey, xdr } from '@stellar/stellar-sdk';
 
-import { parseSimResult, sorobanCall, txToBase64 } from '@/src/api/smart-account';
+import { toBase64 } from '@/src/api/smart-account';
+import { getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
 import {
-  STELLAR_NETWORK_PASSPHRASE,
-  STELLAR_RPC_URL,
-} from '@/src/constants/config';
-import {
-  loadAccount,
   resolveRegisteredEd25519Verifier,
   resolveRegisteredWebAuthnVerifier,
-  signPasskeyAuthEntry,
-  signSmartAccountAuthEntry,
+  signPasskeyAuthEntryFromDigest,
+  signSmartAccountAuthEntryFromDigest,
 } from '@/src/services/send-token';
 
 export interface ExecuteSwapResult {
   hash: string;
+  /** The max network fee latch-api charged the wallet for this swap. */
+  networkFee: NetworkFee;
 }
 
-export interface ExecuteSwapParams {
+/** Fields a SwapProvider.buildSwapOperation result contributes to build-swap. */
+interface SwapOperationInput {
+  /** Swap operation from a SwapProvider.buildSwapOperation (no auth attached) */
+  operation: xdr.Operation;
+  tokenInContractId: string;
+  amountInRaw: string;
+  amountOutMinRaw: string;
+  routerContractId?: string;
+}
+
+export interface ExecuteSwapParams extends SwapOperationInput {
   /** Deployed C-address of the smart account performing the swap */
   smartAccountAddress: string;
   /** Ed25519 signer registered on the smart account — signs the auth entry only */
   keypair: Keypair;
-  /** Swap operation from a SwapProvider.buildSwapOperation (no auth attached) */
-  operation: xdr.Operation;
 }
 
-export interface ExecuteSwapPasskeyParams {
+export interface ExecuteSwapPasskeyParams extends SwapOperationInput {
   smartAccountAddress: string;
   /** Position of this account in the accounts array (selects the SecureStore keys) */
   listIndex: number;
-  operation: xdr.Operation;
 }
 
-const FEE = '1000000';
-
-// Mirrors sendTokenFromSmartAccount: bundler is the outer tx source / fee payer;
-// the user keypair only signs the Soroban auth entry the smart account requires.
-// The only difference from a send is the operation — here it is a DEX router
+// Mirrors sendTokenFromSmartAccount: latch-api builds the FeeForwarder-wrapped
+// swap server-side (POST /v1/transaction/build-swap) and the wallet pays the
+// network fee; the user keypair only signs the returned Soroban auth entry.
+// The only difference from a send is the operation this wraps — a DEX router
 // invocation rather than a SAC transfer. See docs/swap-implementation.md.
 export async function executeSwapFromSmartAccount(
   params: ExecuteSwapParams,
 ): Promise<ExecuteSwapResult> {
-  const { smartAccountAddress, keypair, operation } = params;
+  const { smartAccountAddress, keypair, operation, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+    params;
 
-  const account = await loadAccount(await bundlerAddress());
-
-  const tx = new TransactionBuilder(account, {
-    fee: FEE,
-    networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-  })
-    .addOperation(operation)
-    .setTimeout(300)
-    .build();
-
-  const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(tx),
+  const built = await buildSwap({
+    smartAccountAddress,
+    signerType: 'ed25519',
+    swapChainXdr: toBase64(new Uint8Array(operation.toXDR())),
+    tokenInContractId,
+    amountInRaw,
+    amountOutMinRaw,
+    routerContractId,
   });
-  if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
-
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
 
   const verifier = await resolveRegisteredEd25519Verifier(
     smartAccountAddress,
     Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
   );
 
-  for (const entry of simResult.result?.auth ?? []) {
-    const creds = entry.credentials();
-    if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
-    const credAddr = Address.fromScAddress(creds.address().address()).toString();
-    if (credAddr === smartAccountAddress) {
-      signSmartAccountAuthEntry(entry, keypair, validUntilLedger, verifier);
-    }
-  }
+  const entry = xdr.SorobanAuthorizationEntry.fromXDR(
+    built.authEntries[built.smartAccountAuthEntryIndex],
+    'base64',
+  );
+  signSmartAccountAuthEntryFromDigest(
+    entry,
+    keypair,
+    built.authDigestHex,
+    built.contextRuleIds,
+    verifier,
+  );
 
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
+  const authEntries = [...built.authEntries];
+  authEntries[built.smartAccountAuthEntryIndex] = toBase64(new Uint8Array(entry.toXDR()));
 
-  const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
-  const simResult2 = parseSimResult(simRaw2);
-
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-
-  // latch-api holds the bundler key: it rebuilds this envelope with the bundler
-  // as fee-paying source, re-simulates in enforcing mode, signs and submits.
-  const { hash } = await submitViaBundler(prepared);
-  return { hash };
+  const { hash } = await submitBuiltTransaction(built.txXdr, authEntries);
+  return { hash, networkFee: built.networkFee };
 }
 
 // Passkey-backed smart account. Identical to executeSwapFromSmartAccount except
@@ -98,48 +90,38 @@ export async function executeSwapFromSmartAccount(
 export async function executeSwapFromPasskeyAccount(
   params: ExecuteSwapPasskeyParams,
 ): Promise<ExecuteSwapResult> {
-  const { smartAccountAddress, listIndex, operation } = params;
+  const { smartAccountAddress, listIndex, operation, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+    params;
 
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
-  const account = await loadAccount(await bundlerAddress());
+  const keyDataHex = (await getStoredKeyDataHex(listIndex)) ?? undefined;
 
-  const tx = new TransactionBuilder(account, {
-    fee: FEE,
-    networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-  })
-    .addOperation(operation)
-    .setTimeout(300)
-    .build();
-
-  const simRaw = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(tx),
+  const built = await buildSwap({
+    smartAccountAddress,
+    signerType: 'passkey',
+    keyDataHex,
+    swapChainXdr: toBase64(new Uint8Array(operation.toXDR())),
+    tokenInContractId,
+    amountInRaw,
+    amountOutMinRaw,
+    routerContractId,
   });
-  if (simRaw.error) throw new Error(`Simulation failed: ${simRaw.error}`);
 
-  const simResult = parseSimResult(simRaw);
-  const validUntilLedger = (simRaw.latestLedger ?? 0) + 100;
+  const entry = xdr.SorobanAuthorizationEntry.fromXDR(
+    built.authEntries[built.smartAccountAuthEntryIndex],
+    'base64',
+  );
+  await signPasskeyAuthEntryFromDigest(
+    entry,
+    listIndex,
+    built.authDigestHex,
+    built.contextRuleIds,
+    webAuthnVerifier,
+  );
 
-  for (const entry of simResult.result?.auth ?? []) {
-    const creds = entry.credentials();
-    if (creds.switch().name !== 'sorobanCredentialsAddress') continue;
-    const credAddr = Address.fromScAddress(creds.address().address()).toString();
-    if (credAddr === smartAccountAddress) {
-      await signPasskeyAuthEntry(entry, listIndex, validUntilLedger, webAuthnVerifier);
-    }
-  }
+  const authEntries = [...built.authEntries];
+  authEntries[built.smartAccountAuthEntryIndex] = toBase64(new Uint8Array(entry.toXDR()));
 
-  const txWithSignedAuth = rpc.assembleTransaction(tx, simResult).build();
-
-  const simRaw2 = await sorobanCall(STELLAR_RPC_URL, 'simulateTransaction', {
-    transaction: txToBase64(txWithSignedAuth),
-  });
-  if (simRaw2.error) throw new Error(`Re-simulation failed: ${simRaw2.error}`);
-  const simResult2 = parseSimResult(simRaw2);
-
-  const prepared = rpc.assembleTransaction(txWithSignedAuth, simResult2).build();
-
-  // latch-api holds the bundler key: it rebuilds this envelope with the bundler
-  // as fee-paying source, re-simulates in enforcing mode, signs and submits.
-  const { hash } = await submitViaBundler(prepared);
-  return { hash };
+  const { hash } = await submitBuiltTransaction(built.txXdr, authEntries);
+  return { hash, networkFee: built.networkFee };
 }

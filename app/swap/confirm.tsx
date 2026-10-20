@@ -8,6 +8,7 @@ import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { friendlyTxError } from '@/src/lib/tx-errors';
+import { TransactionBuildError } from '@/src/api/transaction-build';
 import {
   executeSwapFromPasskeyAccount,
   executeSwapFromSmartAccount,
@@ -109,10 +110,8 @@ const ConfirmSwap = () => {
 
     setSubmitting(true);
     try {
-      const { operation, effectiveQuote } = await provider.buildSwapOperation(
-        quote,
-        smartAccountAddress,
-      );
+      const { operation, effectiveQuote, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+        await provider.buildSwapOperation(quote, smartAccountAddress);
 
       if (activeAccount?.isMultisig) {
         const packet = await createSwap({
@@ -132,21 +131,43 @@ const ConfirmSwap = () => {
       const isPasskeyAccount = !activeAccount?.gAddress;
       if (__DEV__) console.log('[swap-exec] submitting', { isPasskeyAccount, smartAccountAddress });
 
-      const result = isPasskeyAccount
-        ? await executeSwapFromPasskeyAccount({
-            smartAccountAddress,
-            listIndex: activeAccountIndex,
-            operation,
-          })
-        : await (async () => {
-            const { deriveWalletAtIndex } = await import('@/src/lib/seed-wallet');
-            const wallet = deriveWalletAtIndex(mnemonic!, activeAccount!.index);
-            return executeSwapFromSmartAccount({
+      const attemptSwap = () =>
+        isPasskeyAccount
+          ? executeSwapFromPasskeyAccount({
               smartAccountAddress,
-              keypair: wallet.keypair,
+              listIndex: activeAccountIndex,
               operation,
-            });
-          })();
+              tokenInContractId,
+              amountInRaw,
+              amountOutMinRaw,
+              routerContractId,
+            })
+          : (async () => {
+              const { deriveWalletAtIndex } = await import('@/src/lib/seed-wallet');
+              const wallet = deriveWalletAtIndex(mnemonic!, activeAccount!.index);
+              return executeSwapFromSmartAccount({
+                smartAccountAddress,
+                keypair: wallet.keypair,
+                operation,
+                tokenInContractId,
+                amountInRaw,
+                amountOutMinRaw,
+                routerContractId,
+              });
+            })();
+
+      let result;
+      try {
+        result = await attemptSwap();
+      } catch (err) {
+        // The signed max fee no longer covers the current fee (or the wallet
+        // changed) — latch-api asks us to rebuild and sign again, once.
+        if (err instanceof TransactionBuildError && err.code === 'FEE_QUOTE_STALE') {
+          result = await attemptSwap();
+        } else {
+          throw err;
+        }
+      }
 
       if (__DEV__) console.log('[swap-exec] SUCCESS', result.hash);
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
@@ -154,7 +175,7 @@ const ConfirmSwap = () => {
         pathname: '/(auth)/thank-you',
         params: {
           title: 'Your swap was successful',
-          subtext: `Swapped ${params.amountIn} ${params.fromCode} for ~${effectiveQuote.amountOut} ${params.toCode}. Tx ${result.hash.slice(0, 8)}…`,
+          subtext: `Swapped ${params.amountIn} ${params.fromCode} for ~${effectiveQuote.amountOut} ${params.toCode}. Network fee: ${result.networkFee.maxAmount} ${result.networkFee.symbol}. Tx ${result.hash.slice(0, 8)}…`,
           buttonLabel: 'Go to Dashboard',
           imageSource: 'success',
         },
@@ -322,22 +343,11 @@ const ConfirmSwap = () => {
 
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
             <Text variant="p7" color="textSecondary">
-              Gas Account
-            </Text>
-            <Box flexDirection="row" alignItems="center">
-              <Text variant="p7" color="textPrimary" mr="xs">
-                Sponsored
-              </Text>
-            </Box>
-          </Box>
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
               Network Fee
             </Text>
             <Box flexDirection="row" alignItems="center">
               <Text variant="p7" color="textPrimary" mr="xs">
-                Sponsored by Latch
+                Paid by you — shown after you confirm
               </Text>
             </Box>
           </Box>

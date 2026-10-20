@@ -10,6 +10,8 @@
  * for debugging.
  */
 
+import { TransactionBuildError } from '@/src/api/transaction-build';
+
 function raw(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -37,7 +39,27 @@ export function isWrongNetworkError(err: unknown): boolean {
   );
 }
 
+/** POST /v1/transaction/build-send / build-swap's documented fee error codes. */
+export function friendlyBuildErrorMessage(err: TransactionBuildError): string {
+  switch (err.code) {
+    case 'INSUFFICIENT_FEE_BALANCE':
+      return 'Add XLM or USDC to pay the network fee.';
+    case 'FEE_QUOTE_STALE':
+      return 'The network fee changed. Please try again.';
+    case 'FEE_RULE_NOT_FOUND':
+      return "This wallet isn't set up to pay network fees yet. Please contact support.";
+    case 'TOO_MANY_FAILED_TRANSACTIONS':
+      return 'Too many failed attempts. Please try again later.';
+    case 'BAD_GATEWAY':
+      return 'The network is busy right now. Please try again in a moment.';
+    default:
+      return 'Something went wrong preparing this transaction. Please try again.';
+  }
+}
+
 export function friendlyTxError(err: unknown): string {
+  if (err instanceof TransactionBuildError) return friendlyBuildErrorMessage(err);
+
   const msg = raw(err);
   const lower = msg.toLowerCase();
 

@@ -129,13 +129,13 @@ function authEntriesFrom(tx: Transaction): string[] {
 }
 
 /**
- * Submit an assembled, auth-signed transaction for the bundler to pay for.
- *
- * Pass the transaction exactly as it would have been submitted directly: the
- * server keeps only its host function and auth entries and rebuilds the rest.
+ * Submit an already-serialized tx + auth entries (base64 XDR) to
+ * `/v1/transaction/submit`. Shared by `submitViaBundler` (which derives these
+ * from a client-built `Transaction`) and `submitBuiltTransaction` (which takes
+ * them as returned by `/v1/transaction/build-send` / `build-swap`, with one
+ * entry replaced by our signature).
  */
-export async function submitViaBundler(tx: Transaction): Promise<RelayResult> {
-  const authEntries = authEntriesFrom(tx);
+async function submitPrepared(txXdr: string, authEntries: string[]): Promise<RelayResult> {
   if (authEntries.length === 0) {
     throw new Error('transaction has no Soroban auth entries to submit');
   }
@@ -144,7 +144,7 @@ export async function submitViaBundler(tx: Transaction): Promise<RelayResult> {
   const res = await xhrPost(
     '/submit',
     {
-      tx_xdr: txToBase64(tx),
+      tx_xdr: txXdr,
       auth_entries: authEntries,
       network: getNetworkId(),
     },
@@ -162,6 +162,30 @@ export async function submitViaBundler(tx: Transaction): Promise<RelayResult> {
     status: res.body.data.status ?? 'PENDING',
     resultMetaXdr: res.body.data.result_meta_xdr ?? '',
   };
+}
+
+/**
+ * Submit an assembled, auth-signed transaction for the bundler to pay for.
+ *
+ * Pass the transaction exactly as it would have been submitted directly: the
+ * server keeps only its host function and auth entries and rebuilds the rest.
+ */
+export async function submitViaBundler(tx: Transaction): Promise<RelayResult> {
+  return submitPrepared(txToBase64(tx), authEntriesFrom(tx));
+}
+
+/**
+ * Submit the result of `/v1/transaction/build-send` or `build-swap` once the
+ * smart-account auth entry has been signed: `txXdr` and `authEntries` are
+ * taken as returned by the build call, with `authEntries[smartAccountAuthEntryIndex]`
+ * replaced by the signed entry. Unlike `submitViaBundler`, the fee here is
+ * charged to the wallet (FeeForwarder), not sponsored by the bundler.
+ */
+export async function submitBuiltTransaction(
+  txXdr: string,
+  authEntries: string[],
+): Promise<RelayResult> {
+  return submitPrepared(txXdr, authEntries);
 }
 
 // The bundler G-address, cached per network for the process lifetime. It only

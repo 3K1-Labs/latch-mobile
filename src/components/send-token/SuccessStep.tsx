@@ -1,5 +1,6 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import type { NetworkFee } from '@/src/api/transaction-build';
 import React from 'react';
 import { Image, TouchableOpacity } from 'react-native';
 
@@ -8,11 +9,12 @@ interface Props {
   tokenCode: string;
   recipient: string;
   txHash?: string;
+  networkFee?: NetworkFee;
   onContinue: () => void;
   onSaveAddress?: () => void;
 }
 
-const SuccessStep = ({ amount, tokenCode, recipient, onContinue, onSaveAddress }: Props) => {
+const SuccessStep = ({ amount, tokenCode, recipient, networkFee, onContinue, onSaveAddress }: Props) => {
   const shortRecipient = `${recipient.slice(0, 6)}...${recipient.slice(-4)}`;
 
   return (
@@ -31,6 +33,11 @@ const SuccessStep = ({ amount, tokenCode, recipient, onContinue, onSaveAddress }
             <Text variant="p6" color="textSecondary">was successfully sent to </Text>
             <Text variant="p6" color="textPrimary" fontFamily="SFBold">{shortRecipient}</Text>
           </Text>
+          {networkFee && (
+            <Text variant="p8" color="textSecondary" textAlign="center" mt="s">
+              Network fee: {networkFee.maxAmount} {networkFee.symbol}
+            </Text>
+          )}
         </Box>
       </Box>
       <Box gap="s">

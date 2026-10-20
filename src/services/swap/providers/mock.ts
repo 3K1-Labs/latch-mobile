@@ -112,6 +112,12 @@ export const mockSwapProvider: SwapProvider = {
       new Address(smartAccountAddress).toScVal(),
       nativeToScVal(toBaseUnits(quote.amountIn), { type: 'i128' }),
     );
-    return { operation, effectiveQuote: quote };
+    return {
+      operation,
+      effectiveQuote: quote,
+      tokenInContractId: quote.fromSacId,
+      amountInRaw: toBaseUnits(quote.amountIn).toString(),
+      amountOutMinRaw: toBaseUnits(quote.minReceived).toString(),
+    };
   },
 };

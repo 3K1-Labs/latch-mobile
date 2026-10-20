@@ -47,10 +47,10 @@ export interface SwapProviderMeta {
 
 export interface SwapBuildResult {
   /**
-   * Soroban operation that performs the swap, with NO auth attached. The
-   * smart-account auth entry is re-derived locally during simulation
-   * (see executeSwapFromSmartAccount), so we only take the routing intent from
-   * the provider and own the auth + fee model ourselves.
+   * Soroban operation that performs the swap, with NO auth attached. Its XDR
+   * is handed to POST /v1/transaction/build-swap as swap_chain_xdr — latch-api
+   * wraps it in FeeForwarder.forward(...), simulates, and returns the auth
+   * entries for executeSwapFromSmartAccount to sign.
    */
   operation: xdr.Operation;
   /**
@@ -60,6 +60,14 @@ export interface SwapBuildResult {
    * that will execute — show these, not the original estimate.
    */
   effectiveQuote: SwapQuote;
+  /** SAC contract id of the input token — build-swap's token_in_contract_id. */
+  tokenInContractId: string;
+  /** Input amount in SAC base units — build-swap's amount_in_raw. */
+  amountInRaw: string;
+  /** Minimum output in SAC base units — build-swap's amount_out_min_raw. */
+  amountOutMinRaw: string;
+  /** Router/aggregator contract the operation calls, if build-swap needs it named explicitly. */
+  routerContractId?: string;
 }
 
 export interface SwapProvider extends SwapProviderMeta {
