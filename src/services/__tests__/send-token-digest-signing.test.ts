@@ -54,8 +54,7 @@ function randomContractAddress(): string {
   return StrKey.encodeContract(Keypair.random().rawPublicKey());
 }
 
-/** A SorobanAuthorizationEntry fixture with one context in its tree, matching
- * the shape in reference/latch-web-extension's delegatedAuthSubmit.test.ts. */
+/** A SorobanAuthorizationEntry fixture with one context in its tree. */
 function buildEntry(): xdr.SorobanAuthorizationEntry {
   return new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(

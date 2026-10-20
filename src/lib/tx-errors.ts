@@ -57,6 +57,24 @@ export function friendlyBuildErrorMessage(err: TransactionBuildError): string {
   }
 }
 
+/**
+ * Runs a build-and-submit attempt once, and once more if latch-api rejects
+ * it as FEE_QUOTE_STALE — the signed max fee no longer covers the current
+ * fee (or the wallet changed), and a rebuild-and-resign is expected to
+ * succeed. Shared by send-token.tsx and swap/confirm.tsx so the retry
+ * policy for this error code lives in one place.
+ */
+export async function retryOnStaleFeeQuote<T>(attempt: () => Promise<T>): Promise<T> {
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err instanceof TransactionBuildError && err.code === 'FEE_QUOTE_STALE') {
+      return attempt();
+    }
+    throw err;
+  }
+}
+
 export function friendlyTxError(err: unknown): string {
   if (err instanceof TransactionBuildError) return friendlyBuildErrorMessage(err);
 

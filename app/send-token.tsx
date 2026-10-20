@@ -22,8 +22,8 @@ import { findDeployedNetwork } from '@/src/lib/account-network';
 import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createTransfer } from '@/src/lib/cosign-transport';
 import { diagnoseAuthFailure, isAuthFailure } from '@/src/lib/tx-diagnostics';
-import { TransactionBuildError, type NetworkFee } from '@/src/api/transaction-build';
-import { friendlyTxError, isWrongNetworkError } from '@/src/lib/tx-errors';
+import type { NetworkFee } from '@/src/api/transaction-build';
+import { friendlyTxError, isWrongNetworkError, retryOnStaleFeeQuote } from '@/src/lib/tx-errors';
 import { sendTokenFromPasskeyAccount, sendTokenFromSmartAccount } from '@/src/services/send-token';
 import { getPasskeyStorageKeys, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -261,18 +261,7 @@ const SendToken = () => {
 
     setStatus('sending');
     try {
-      let result;
-      try {
-        result = await attemptSend();
-      } catch (err) {
-        // The signed max fee no longer covers the current fee (or the wallet
-        // changed) — latch-api asks us to rebuild and sign again, once.
-        if (err instanceof TransactionBuildError && err.code === 'FEE_QUOTE_STALE') {
-          result = await attemptSend();
-        } else {
-          throw err;
-        }
-      }
+      const result = await retryOnStaleFeeQuote(attemptSend);
       setTxHash(result.hash);
       setNetworkFee(result.networkFee);
       setStatus('success');

@@ -13,9 +13,7 @@
 
 import { getNetworkId } from '@/src/constants/config';
 import { apiBaseUrl } from '@/src/constants/api-host';
-import { SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
-import { ensureWalletSession, getWalletSessionWithoutSignIn } from '@/src/lib/wallet-auth';
-import * as SecureStore from 'expo-secure-store';
+import { accessToken } from '@/src/api/transaction-relay';
 
 const API_PATH = '/v1/transaction';
 
@@ -84,24 +82,6 @@ export interface BuildSwapParams {
   routerContractId?: string;
 }
 
-function activeWalletAccount(): WalletAccount | undefined {
-  const { accounts, activeAccountIndex } = useWalletStore.getState();
-  return accounts[activeAccountIndex];
-}
-
-/** Mirrors transaction-relay.ts's accessToken — same token precedence. */
-async function accessToken(): Promise<string> {
-  const emailToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
-  if (emailToken) return emailToken;
-
-  const account = activeWalletAccount();
-  const walletToken = account
-    ? await ensureWalletSession(account)
-    : await getWalletSessionWithoutSignIn();
-  if (!walletToken) throw new Error('Not authenticated');
-  return walletToken;
-}
-
 function errorCodeFromBody(body: any): TransactionBuildErrorCode {
   const code = body?.error?.code;
   if (
@@ -140,6 +120,20 @@ function xhrPost(path: string, body: object, token: string): Promise<{ status: n
 
 function parseBuiltTransaction(body: any): BuiltTransaction {
   const data = body?.data;
+  if (
+    typeof data?.tx_xdr !== 'string' ||
+    !Array.isArray(data?.auth_entries) ||
+    typeof data?.smart_account_auth_entry_index !== 'number' ||
+    !Array.isArray(data?.context_rule_ids) ||
+    typeof data?.auth_digest_hex !== 'string' ||
+    typeof data?.valid_until_ledger !== 'number' ||
+    typeof data?.network_fee?.token !== 'string' ||
+    typeof data?.network_fee?.symbol !== 'string' ||
+    typeof data?.network_fee?.max_amount !== 'string' ||
+    typeof data?.network_fee?.max_amount_raw !== 'string'
+  ) {
+    throw new TransactionBuildError('Malformed response from build endpoint', 'UNKNOWN', 200);
+  }
   return {
     txXdr: data.tx_xdr,
     authEntries: data.auth_entries,

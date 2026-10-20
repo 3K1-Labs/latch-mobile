@@ -179,6 +179,27 @@ export function signSmartAccountAuthEntry(
  * already baked into `entry` as returned by the build call, and changing it
  * would invalidate authDigestHex.
  */
+/**
+ * Guards the entry at `smartAccountAuthEntryIndex` actually belongs to
+ * `smartAccountAddress` before it gets signed. The old simulate-locally flow
+ * filtered auth entries by this same check; the server now picks the index
+ * for us, so this is the one thing standing between a server bug (wrong
+ * index, off-by-one) and silently signing an entry for the wrong contract.
+ */
+export function assertCredentialsAddressMatches(
+  entry: xdr.SorobanAuthorizationEntry,
+  smartAccountAddress: string,
+): void {
+  const creds = entry.credentials();
+  if (creds.switch().name !== 'sorobanCredentialsAddress') return;
+  const credsAddress = Address.fromScAddress(creds.address().address()).toString();
+  if (credsAddress !== smartAccountAddress) {
+    throw new Error(
+      `Server returned auth entry for ${credsAddress}, expected smart account ${smartAccountAddress}`,
+    );
+  }
+}
+
 export function signSmartAccountAuthEntryFromDigest(
   entry: xdr.SorobanAuthorizationEntry,
   keypair: Keypair,
@@ -267,23 +288,24 @@ export interface SendTokenResult {
 export async function sendTokenFromSmartAccount(params: SendTokenParams): Promise<SendTokenResult> {
   const { smartAccountAddress, keypair, sacContractId, destinationAddress, amount } = params;
 
+  const keyDataHex = Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex');
+
   const built = await buildSend({
     smartAccountAddress,
     signerType: 'ed25519',
+    keyDataHex,
     contractId: sacContractId,
     recipient: destinationAddress,
     amount,
   });
 
-  const verifier = await resolveRegisteredEd25519Verifier(
-    smartAccountAddress,
-    Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
-  );
+  const verifier = await resolveRegisteredEd25519Verifier(smartAccountAddress, keyDataHex);
 
   const entry = xdr.SorobanAuthorizationEntry.fromXDR(
     built.authEntries[built.smartAccountAuthEntryIndex],
     'base64',
   );
+  assertCredentialsAddressMatches(entry, smartAccountAddress);
   signSmartAccountAuthEntryFromDigest(
     entry,
     keypair,
@@ -594,6 +616,7 @@ export async function sendTokenFromPasskeyAccount(
       built.authEntries[built.smartAccountAuthEntryIndex],
       'base64',
     );
+    assertCredentialsAddressMatches(entry, smartAccountAddress);
     await signPasskeyAuthEntryFromDigest(
       entry,
       listIndex,

@@ -5,6 +5,7 @@ import { Keypair, StrKey, xdr } from '@stellar/stellar-sdk';
 import { toBase64 } from '@/src/api/smart-account';
 import { getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
 import {
+  assertCredentialsAddressMatches,
   resolveRegisteredEd25519Verifier,
   resolveRegisteredWebAuthnVerifier,
   signPasskeyAuthEntryFromDigest,
@@ -51,9 +52,12 @@ export async function executeSwapFromSmartAccount(
   const { smartAccountAddress, keypair, operation, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
     params;
 
+  const keyDataHex = Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex');
+
   const built = await buildSwap({
     smartAccountAddress,
     signerType: 'ed25519',
+    keyDataHex,
     swapChainXdr: toBase64(new Uint8Array(operation.toXDR())),
     tokenInContractId,
     amountInRaw,
@@ -61,15 +65,13 @@ export async function executeSwapFromSmartAccount(
     routerContractId,
   });
 
-  const verifier = await resolveRegisteredEd25519Verifier(
-    smartAccountAddress,
-    Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex'),
-  );
+  const verifier = await resolveRegisteredEd25519Verifier(smartAccountAddress, keyDataHex);
 
   const entry = xdr.SorobanAuthorizationEntry.fromXDR(
     built.authEntries[built.smartAccountAuthEntryIndex],
     'base64',
   );
+  assertCredentialsAddressMatches(entry, smartAccountAddress);
   signSmartAccountAuthEntryFromDigest(
     entry,
     keypair,
@@ -111,6 +113,7 @@ export async function executeSwapFromPasskeyAccount(
     built.authEntries[built.smartAccountAuthEntryIndex],
     'base64',
   );
+  assertCredentialsAddressMatches(entry, smartAccountAddress);
   await signPasskeyAuthEntryFromDigest(
     entry,
     listIndex,

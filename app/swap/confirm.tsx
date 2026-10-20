@@ -7,8 +7,7 @@ import { usePrices } from '@/src/hooks/use-prices';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
-import { friendlyTxError } from '@/src/lib/tx-errors';
-import { TransactionBuildError } from '@/src/api/transaction-build';
+import { friendlyTxError, retryOnStaleFeeQuote } from '@/src/lib/tx-errors';
 import {
   executeSwapFromPasskeyAccount,
   executeSwapFromSmartAccount,
@@ -156,18 +155,7 @@ const ConfirmSwap = () => {
               });
             })();
 
-      let result;
-      try {
-        result = await attemptSwap();
-      } catch (err) {
-        // The signed max fee no longer covers the current fee (or the wallet
-        // changed) — latch-api asks us to rebuild and sign again, once.
-        if (err instanceof TransactionBuildError && err.code === 'FEE_QUOTE_STALE') {
-          result = await attemptSwap();
-        } else {
-          throw err;
-        }
-      }
+      const result = await retryOnStaleFeeQuote(attemptSwap);
 
       if (__DEV__) console.log('[swap-exec] SUCCESS', result.hash);
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });

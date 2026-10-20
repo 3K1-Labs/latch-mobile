@@ -56,8 +56,11 @@ function activeWalletAccount(): WalletAccount | undefined {
  * matching the deposit-intent flow; otherwise uses the wallet-scope session.
  * Signing in reads a biometric-gated passkey, so it only happens here because
  * the caller is already in a user-initiated send.
+ *
+ * Exported for transaction-build.ts's build-send/build-swap calls, which hit
+ * the same `/v1/transaction` family and need the same token precedence.
  */
-async function accessToken(): Promise<string> {
+export async function accessToken(): Promise<string> {
   const emailToken = await SecureStore.getItemAsync(SECURE_KEYS.ACCESS_TOKEN);
   if (emailToken) return emailToken;
 
