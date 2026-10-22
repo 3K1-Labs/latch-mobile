@@ -20,7 +20,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 
-import { fetchRuleThreshold } from '@/src/api/account-admin';
+import { fetchDefaultContextRule, fetchRuleThreshold } from '@/src/api/account-admin';
 import {
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
@@ -124,6 +124,47 @@ export async function signingRaisesBiometricPrompt(): Promise<boolean> {
   return requiresBiometric !== 'false';
 }
 
+/**
+ * Resolve which of this device's local accounts is registered as a signer on
+ * `multisigAddress`'s Default context rule, auto-switching the active account
+ * to a registered one if the currently active account isn't a valid signer
+ * for THIS wallet. Throws if none of this device's local accounts match any
+ * registered signer — signing with an unregistered key would otherwise only
+ * fail later, opaquely, on-chain (#3016 UnauthorizedSigner) once broadcast.
+ *
+ * pickSigner() alone can't make this call: it only knows "whichever account
+ * is active locally," not which key this specific wallet actually registered
+ * — a real risk on a device holding multiple local accounts (e.g. the user's
+ * own personal wallet alongside an account set up as a multisig member).
+ */
+export async function pickSignerForWallet(multisigAddress: string): Promise<SignerMatch> {
+  const rule = await fetchDefaultContextRule(simParams(), multisigAddress);
+  const registered = new Set(rule.signers.map((s) => s.keyDataHex.toLowerCase()));
+
+  const { accounts, activeAccountIndex, switchAccount } = useWalletStore.getState();
+  const candidates: SignerMatch[] = [];
+  for (let listIndex = 0; listIndex < accounts.length; listIndex++) {
+    const account = accounts[listIndex];
+    if (!isSignable(account)) continue;
+    const key =
+      account.gAddress && account.publicKeyHex
+        ? account.publicKeyHex
+        : await SecureStore.getItemAsync(getPasskeyStorageKeys(listIndex).keyDataHex);
+    if (key && registered.has(key.toLowerCase())) candidates.push({ account, listIndex });
+  }
+
+  if (candidates.length === 0) {
+    throw new Error('No account on this device is registered as a signer on this wallet.');
+  }
+
+  const activeMatch = candidates.find((c) => c.listIndex === activeAccountIndex);
+  if (activeMatch) return activeMatch;
+
+  const match = candidates[0];
+  await switchAccount(match.listIndex);
+  return match;
+}
+
 /** This device's External signer-key id (ed25519 pubkey hex or passkey keyDataHex). */
 export async function getMySignerKey(): Promise<string | null> {
   const me = pickSigner();
@@ -176,10 +217,7 @@ export async function createTransferPacket(p: CreateTransferPacketParams): Promi
   if (!multisigAccount.smartAccountAddress) {
     throw new Error('This multisig wallet is not deployed yet.');
   }
-  const me = pickSigner();
-  if (!me) {
-    throw new Error('No personal account on this device to sign with.');
-  }
+  const me = await pickSignerForWallet(multisigAccount.smartAccountAddress);
 
   // Authoritative threshold from chain — never the cached account field.
   const threshold = await onChainThreshold(multisigAccount.smartAccountAddress);
@@ -227,8 +265,7 @@ export async function approvePacket(id: string): Promise<CosignPacket> {
   const packet = await getPacket(id);
   if (!packet) throw new Error('Co-sign packet not found.');
 
-  const me = pickSigner();
-  if (!me) throw new Error('No personal account on this device to sign with.');
+  const me = await pickSignerForWallet(packet.smartAccountAddress);
 
   const myKey = await getMySignerKey();
   if (myKey && packet.signatures.some((s) => s.signerKey === myKey)) {
@@ -299,8 +336,7 @@ export async function createSwapPacket(p: CreateSwapPacketParams): Promise<Cosig
   if (!multisigAccount.smartAccountAddress) {
     throw new Error('This multisig wallet is not deployed yet.');
   }
-  const me = pickSigner();
-  if (!me) throw new Error('No personal account on this device to sign with.');
+  const me = await pickSignerForWallet(multisigAccount.smartAccountAddress);
 
   const threshold = await onChainThreshold(multisigAccount.smartAccountAddress);
 

@@ -20,8 +20,10 @@ export interface ExecuteSwapResult {
 
 /** Fields a SwapProvider.buildSwapOperation result contributes to build-swap. */
 interface SwapOperationInput {
-  /** Swap operation from a SwapProvider.buildSwapOperation (no auth attached) */
+  /** Pre-built operation from a SwapProvider.buildSwapOperation (no auth attached). Used as a fallback when swapChainXdr isn't set. */
   operation: xdr.Operation;
+  /** Bare ScVal swaps_chain argument from a SwapProvider.buildSwapOperation (base64 XDR). Preferred over `operation` when present. */
+  swapChainXdr?: string;
   tokenInContractId: string;
   amountInRaw: string;
   amountOutMinRaw: string;
@@ -49,7 +51,7 @@ export interface ExecuteSwapPasskeyParams extends SwapOperationInput {
 export async function executeSwapFromSmartAccount(
   params: ExecuteSwapParams,
 ): Promise<ExecuteSwapResult> {
-  const { smartAccountAddress, keypair, operation, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+  const { smartAccountAddress, keypair, operation, swapChainXdr, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
     params;
 
   const keyDataHex = Buffer.from(StrKey.decodeEd25519PublicKey(keypair.publicKey())).toString('hex');
@@ -58,7 +60,7 @@ export async function executeSwapFromSmartAccount(
     smartAccountAddress,
     signerType: 'ed25519',
     keyDataHex,
-    swapChainXdr: toBase64(new Uint8Array(operation.toXDR())),
+    swapChainXdr: swapChainXdr ?? toBase64(new Uint8Array(operation.toXDR())),
     tokenInContractId,
     amountInRaw,
     amountOutMinRaw,
@@ -92,7 +94,7 @@ export async function executeSwapFromSmartAccount(
 export async function executeSwapFromPasskeyAccount(
   params: ExecuteSwapPasskeyParams,
 ): Promise<ExecuteSwapResult> {
-  const { smartAccountAddress, listIndex, operation, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+  const { smartAccountAddress, listIndex, operation, swapChainXdr, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
     params;
 
   const webAuthnVerifier = await resolveRegisteredWebAuthnVerifier(smartAccountAddress, listIndex);
@@ -102,7 +104,7 @@ export async function executeSwapFromPasskeyAccount(
     smartAccountAddress,
     signerType: 'passkey',
     keyDataHex,
-    swapChainXdr: toBase64(new Uint8Array(operation.toXDR())),
+    swapChainXdr: swapChainXdr ?? toBase64(new Uint8Array(operation.toXDR())),
     tokenInContractId,
     amountInRaw,
     amountOutMinRaw,

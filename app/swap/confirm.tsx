@@ -109,7 +109,7 @@ const ConfirmSwap = () => {
 
     setSubmitting(true);
     try {
-      const { operation, effectiveQuote, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+      const { operation, swapChainXdr, effectiveQuote, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
         await provider.buildSwapOperation(quote, smartAccountAddress);
 
       if (activeAccount?.isMultisig) {
@@ -136,6 +136,7 @@ const ConfirmSwap = () => {
               smartAccountAddress,
               listIndex: activeAccountIndex,
               operation,
+              swapChainXdr,
               tokenInContractId,
               amountInRaw,
               amountOutMinRaw,
@@ -148,6 +149,7 @@ const ConfirmSwap = () => {
                 smartAccountAddress,
                 keypair: wallet.keypair,
                 operation,
+                swapChainXdr,
                 tokenInContractId,
                 amountInRaw,
                 amountOutMinRaw,

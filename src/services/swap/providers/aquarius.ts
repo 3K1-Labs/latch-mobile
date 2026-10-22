@@ -8,7 +8,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 
-import { sorobanCall, txToBase64 } from '@/src/api/smart-account';
+import { sorobanCall, toBase64, txToBase64 } from '@/src/api/smart-account';
 import {
   AQUARIUS_AMM_API_URL,
   AQUARIUS_ROUTER_ADDRESS,
@@ -21,12 +21,13 @@ import type { SwapBuildResult, SwapProvider, SwapQuote, SwapQuoteParams } from '
 // ─── Aquarius AMM provider (testnet) ──────────────────────────────────────────
 // Soroswap has no testnet pools; Aquarius does. We discover pools via the
 // Aquarius AMM API (which gives the canonical sorted tokens vec + pool index),
-// quote with the router's read-only estimate_swap, and execute with swap() —
-// authorized by the smart account exactly like a SAC transfer.
+// quote with the router's read-only estimate_swap, and execute via
+// swap_chained() — latch-api builds and authorizes the actual call
+// server-side from the swaps_chain ScVal buildSwapOperation returns.
 //
-// Router ABI (verified on-chain):
+// Router ABI (verified on-chain, `stellar contract info interface`):
 //   estimate_swap(tokens: Vec<Address>, token_in, token_out, pool_index: BytesN<32>, in_amount: u128) -> u128
-//   swap(user, tokens, token_in, token_out, pool_index: BytesN<32>, in_amount: u128, out_min: u128) -> u128
+//   swap_chained(user, swaps_chain: Vec<(Vec<Address>, BytesN<32>, Address)>, token_in, in_amount: u128, out_min: u128) -> u128
 //
 // Assumes 7-decimal tokens (XLM + classic-asset SACs, which is all the app
 // surfaces). Aquarius's own 18-decimal test tokens are out of scope.
@@ -67,6 +68,22 @@ function tokensVec(addrs: string[]): xdr.ScVal {
 
 function poolIndexScVal(hex: string): xdr.ScVal {
   return xdr.ScVal.scvBytes(Buffer.from(hex, 'hex'));
+}
+
+// Full swap() invocation — only the multisig cosign path (createSwapPacket)
+// needs this; the single-signer build-swap path uses swaps_chain instead.
+function buildSwapCallOperation(smartAccountAddress: string, raw: AquariusRaw, quote: SwapQuote): xdr.Operation {
+  const contract = new Contract(AQUARIUS_ROUTER_ADDRESS);
+  return contract.call(
+    'swap',
+    new Address(smartAccountAddress).toScVal(), // user — authorizes & receives output
+    tokensVec(raw.tokens),
+    new Address(raw.tokenIn).toScVal(),
+    new Address(raw.tokenOut).toScVal(),
+    poolIndexScVal(raw.poolIndex),
+    nativeToScVal(toBaseUnits(quote.amountIn), { type: 'u128' }),
+    nativeToScVal(toBaseUnits(quote.minReceived), { type: 'u128' }),
+  );
 }
 
 // Simulate a read-only router call (Soroban RPC via XHR per project rules) and
@@ -245,19 +262,30 @@ export const aquariusProvider: SwapProvider = {
 
   async buildSwapOperation(quote: SwapQuote, smartAccountAddress: string): Promise<SwapBuildResult> {
     const raw = quote.raw as AquariusRaw;
-    const contract = new Contract(AQUARIUS_ROUTER_ADDRESS);
-    const operation = contract.call(
-      'swap',
-      new Address(smartAccountAddress).toScVal(), // user — authorizes & receives output
+
+    // Multisig path (createSwapPacket): still bundler-sourced, so it needs
+    // the actual pre-built, pre-authorized operation to assemble a cosign
+    // packet from.
+    const operation = buildSwapCallOperation(smartAccountAddress, raw, quote);
+
+    // Single-signer path (POST /v1/transaction/build-swap): latch-api
+    // reconstructs the router's swap_chained(user, swaps_chain, token_in,
+    // in_amount, out_min) call itself and wraps it in
+    // FeeForwarder.forward() — it does not accept a pre-built operation (see
+    // BuildSwap in internal/service/webapp/build_swap_transaction.go,
+    // latch-api repo). swaps_chain is Vec<(pool tokens, pool_index,
+    // token_out)>; a direct pair swap through the selected pool is a
+    // single-hop chain.
+    const swapStep = xdr.ScVal.scvVec([
       tokensVec(raw.tokens),
-      new Address(raw.tokenIn).toScVal(),
-      new Address(raw.tokenOut).toScVal(),
       poolIndexScVal(raw.poolIndex),
-      nativeToScVal(toBaseUnits(quote.amountIn), { type: 'u128' }),
-      nativeToScVal(toBaseUnits(quote.minReceived), { type: 'u128' }),
-    );
+      new Address(raw.tokenOut).toScVal(),
+    ]);
+    const swapChainXdr = toBase64(new Uint8Array(xdr.ScVal.scvVec([swapStep]).toXDR()));
+
     return {
       operation,
+      swapChainXdr,
       effectiveQuote: quote,
       tokenInContractId: raw.tokenIn,
       amountInRaw: toBaseUnits(quote.amountIn).toString(),

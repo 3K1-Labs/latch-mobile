@@ -47,12 +47,24 @@ export interface SwapProviderMeta {
 
 export interface SwapBuildResult {
   /**
-   * Soroban operation that performs the swap, with NO auth attached. Its XDR
-   * is handed to POST /v1/transaction/build-swap as swap_chain_xdr — latch-api
-   * wraps it in FeeForwarder.forward(...), simulates, and returns the auth
-   * entries for executeSwapFromSmartAccount to sign.
+   * Full pre-built Soroban operation, with NO auth attached. Used by the
+   * multisig cosign path (createSwapPacket), which is still bundler-sourced
+   * and needs the actual operation to assemble a packet from.
    */
   operation: xdr.Operation;
+  /**
+   * Base64 XDR of a bare ScVal: the Aquarius router's swap_chained(...)
+   * `swaps_chain` argument (Vec<(pool tokens, pool_index, token_out)>, one
+   * entry per hop). This is what POST /v1/transaction/build-swap's
+   * swap_chain_xdr field expects for the single-signer path — latch-api
+   * reconstructs the swap_chained call itself from this plus
+   * tokenInContractId/amountInRaw/amountOutMinRaw and wraps it in
+   * FeeForwarder.forward(). See BuildSwap in
+   * internal/service/webapp/build_swap_transaction.go (latch-api repo).
+   * Only Aquarius can populate this — Soroswap's aggregator contract has no
+   * equivalent call shape (see registry.ts), so it's optional here.
+   */
+  swapChainXdr?: string;
   /**
    * The quote the operation was actually built from. Equals the input quote
    * unless the provider had to re-route at build time (e.g. Soroswap's

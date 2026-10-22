@@ -39,6 +39,7 @@ import {
   getMySignerKey,
   onChainThreshold,
   pickSigner,
+  pickSignerForWallet,
   type CreateTransferPacketParams,
 } from '@/src/lib/cosign-packet-flow';
 import {
@@ -159,8 +160,7 @@ function decryptedEntries(raw: CosignRequestRaw, w: ResolvedWallet): CollectedEn
 export async function createTransferRequest(p: CreateTransferPacketParams): Promise<CosignPacket> {
   const account = p.multisigAccount.smartAccountAddress;
   if (!account) throw new Error('This multisig wallet is not deployed yet.');
-  const me = pickSigner();
-  if (!me) throw new Error('No personal account on this device to sign with.');
+  const me = await pickSignerForWallet(account);
 
   // Creator generates the wallet's key on first send if absent (idempotent —
   // returns the wizard-created key when present). Members get it via the
@@ -226,13 +226,14 @@ export async function getRequest(id: string): Promise<CosignPacket | null> {
 }
 
 export async function approveRequest(id: string): Promise<CosignPacket> {
-  const me = pickSigner();
-  if (!me) throw new Error('No personal account on this device to sign with.');
-
   return withWalletToken(async (t) => {
     const raw = await getCosignRequest(t, id);
     const w = await resolveWallet(raw.queueIndex);
     if (!w) throw new Error("This wallet's encryption key isn't on this device.");
+
+    // Resolved AFTER w.address is known — must match a signer actually
+    // registered on THIS wallet, not whatever account happens to be active.
+    const me = await pickSignerForWallet(w.address);
 
     const myKey = await getMySignerKey();
     const myBlind = myKey ? blindSignerId(w.wck, myKey) : null;
