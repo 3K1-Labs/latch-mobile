@@ -15,7 +15,8 @@ import { Core } from '@walletconnect/core';
 import { buildApprovedNamespaces, getSdkError } from '@walletconnect/utils';
 
 import { txToBase64 } from '@/src/api/smart-account';
-import { ACTIVE_NETWORK, HORIZON_URL } from '@/src/constants/config';
+import { submitAndConfirm } from '@/src/api/soroban-rpc';
+import { ACTIVE_NETWORK, STELLAR_RPC_URL } from '@/src/constants/config';
 import { deriveWalletAtIndex } from '@/src/lib/seed-wallet';
 import { reviewSessionRequest } from '@/src/lib/wc-request-review';
 
@@ -281,8 +282,8 @@ export async function approveSignRequest(
     return;
   }
 
-  // stellar_signAndSubmitXDR — sign + submit to Horizon
-  await submitToHorizon(signedXdr);
+  // stellar_signAndSubmitXDR — sign + submit, then wait for inclusion
+  await submitAndConfirm(STELLAR_RPC_URL, signedXdr);
   await walletKit.respondSessionRequest({
     topic,
     response: { id, jsonrpc: '2.0', result: { status: 'success' } },
@@ -295,30 +296,6 @@ export async function rejectSignRequest(request: WalletKitTypes.SessionRequest):
   await walletKit.respondSessionRequest({
     topic,
     response: { id, jsonrpc: '2.0', error: getSdkError('USER_REJECTED') },
-  });
-}
-
-function submitToHorizon(signedXdr: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${HORIZON_URL}/transactions`, true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.timeout = 30_000;
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-        return;
-      }
-      try {
-        const body = JSON.parse(xhr.responseText);
-        reject(new Error(body?.extras?.result_codes?.transaction ?? `HTTP ${xhr.status}`));
-      } catch {
-        reject(new Error(`HTTP ${xhr.status}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.ontimeout = () => reject(new Error('Request timed out'));
-    xhr.send(`tx=${encodeURIComponent(signedXdr)}`);
   });
 }
 

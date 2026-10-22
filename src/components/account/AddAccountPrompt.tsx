@@ -12,6 +12,9 @@ interface AddAccountPromptProps {
   onCreatePress: () => void;
   onAddSharedPress: () => void;
   onCreateMultisigPress: () => void;
+  onAddPasskeyPress: () => void;
+  /** False when the device/OS has no synced-passkey support — hides that option. */
+  platformPasskeySupported: boolean;
 }
 
 const AddAccountPrompt = ({
@@ -19,13 +22,18 @@ const AddAccountPrompt = ({
   onCreatePress,
   onAddSharedPress,
   onCreateMultisigPress,
+  onAddPasskeyPress,
+  platformPasskeySupported,
 }: AddAccountPromptProps) => {
   const theme = useTheme<Theme>();
   const [selected, setSelected] = React.useState<
-    'create' | 'shared' | 'create-multisig' | 'connect' | null
+    'create' | 'shared' | 'create-multisig' | 'passkey' | 'connect' | null
   >(null);
 
-  const handlePress = (option: 'create' | 'shared' | 'connect', callback?: () => void) => {
+  const handlePress = (
+    option: 'create' | 'shared' | 'create-multisig' | 'passkey' | 'connect',
+    callback?: () => void,
+  ) => {
     setSelected(option);
     setTimeout(() => {
       if (callback) {
@@ -82,7 +90,6 @@ const AddAccountPrompt = ({
         {/* Create Multisig Wallet Option */}
         <TouchableOpacity
           activeOpacity={0.8}
-          // @ts-ignore
           onPress={() => handlePress('create-multisig', onCreateMultisigPress)}
         >
           <Box
@@ -125,6 +132,31 @@ const AddAccountPrompt = ({
             </Text>
           </Box>
         </TouchableOpacity>
+
+        {/* Add Existing Passkey Account Option */}
+        {platformPasskeySupported && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => handlePress('passkey', onAddPasskeyPress)}
+          >
+            <Box
+              padding="l"
+              borderRadius={24}
+              borderWidth={1.5}
+              borderColor={selected === 'passkey' ? 'primary700' : 'gray800'}
+            >
+              <Box mb="s">
+                <Text variant="h9" color="textPrimary" fontWeight="700">
+                  Add Passkey Account
+                </Text>
+              </Box>
+              <Text variant="p7" color="textSecondary" lineHeight={22}>
+                Already have a Latch account with a passkey? Add it here using the passkey synced
+                to Google Password Manager or iCloud Keychain — no address to type.
+              </Text>
+            </Box>
+          </TouchableOpacity>
+        )}
 
         {/* Connect Existing Option */}
         {/* <TouchableOpacity activeOpacity={0.8} onPress={() => handlePress('connect')}>

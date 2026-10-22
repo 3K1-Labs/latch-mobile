@@ -24,7 +24,6 @@
 
 import { bundlerAddress, submitViaBundler } from '@/src/api/transaction-relay';
 import {
-  Account,
   Keypair,
   rpc,
   scValToNative,
@@ -39,12 +38,12 @@ import {
   liftToRuntimeSigner,
   RuntimeSigner,
 } from '@/src/api/account-admin';
+import { loadRpcAccount } from '@/src/api/soroban-rpc';
 import {
   parseSimResult,
   sorobanCall,
   txToBase64,
 } from '@/src/api/smart-account';
-import { HORIZON_URL } from '@/src/constants/config';
 import { AccountSigner, computeMajorityThreshold } from '@/src/lib/account-signers';
 
 export interface CompletePairingInput {
@@ -92,8 +91,6 @@ export interface RpcConfig {
   rpcUrl: string;
   networkPassphrase: string;
   factoryAddress: string;
-  /** Horizon URL used to fetch the bundler's current sequence number. */
-  horizonUrl?: string;
 }
 
 /**
@@ -152,14 +149,7 @@ export async function completePairing(
   // The bundler sources and pays for this; latch-api holds its key. Only the
   // address is needed here, to simulate against a real sequence number.
   const bundlerG = await bundlerAddress();
-  const horizonUrl = cfg.horizonUrl ?? HORIZON_URL;
-
-  const horizonResp = await fetch(`${horizonUrl}/accounts/${bundlerG}`);
-  if (!horizonResp.ok) {
-    throw new Error(`Bundler account not found on Horizon: ${horizonResp.status}`);
-  }
-  const horizonJson = await horizonResp.json();
-  const bundlerAccount = new Account(bundlerG, horizonJson.sequence);
+  const bundlerAccount = await loadRpcAccount(cfg.rpcUrl, bundlerG);
 
   const builder = new TransactionBuilder(bundlerAccount, {
     fee: '2000000',
@@ -208,7 +198,7 @@ export async function completePairing(
  * read the value. Callers should fall back to re-querying chain state
  * (e.g. via get_context_rule) in that case.
  */
-function extractFirstU32FromMeta(resultMetaXdr: string | undefined, opIndex: number): number | undefined {
+export function extractFirstU32FromMeta(resultMetaXdr: string | undefined, opIndex: number): number | undefined {
   if (!resultMetaXdr) return undefined;
   try {
     const meta = xdr.TransactionMeta.fromXDR(resultMetaXdr, 'base64');

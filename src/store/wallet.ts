@@ -5,6 +5,7 @@ import {
   STELLAR_RPC_URL,
   getNetworkId,
 } from '@/src/constants/config';
+import { findDeployedNetwork, type NetworkId } from '@/src/lib/account-network';
 import { clearSacTransferCache } from '@/src/lib/sac-transfer-cache';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,9 +24,37 @@ export const SECURE_KEYS = {
   KEY_DATA_HEX: 'latch_key_data_hex',
   PASSKEY_PRIVATE_KEY: 'latch_passkey_private_key',
   PASSKEY_REQUIRES_BIOMETRIC: 'latch_passkey_requires_biometric',
+  // 'platform' for a real OS passkey (react-native-passkey — synced via Google
+  // Password Manager / iCloud Keychain, no local private key); absent or
+  // 'local' for today's SecureStore-only P-256 key. See platform-passkey.ts.
+  PASSKEY_KIND: 'latch_passkey_kind',
+  // The relying party ID the credential in this slot was created under.
+  //
+  // A platform passkey is scoped to its RP: the OS locates it by RP ID, so
+  // changing EXPO_PUBLIC_PASSKEY_RP_ID orphans every credential minted under
+  // the old one. Credential Manager then simply reports no match, which
+  // surfaces as a generic ceremony failure naming nothing — the app asks for a
+  // nonce, signs nothing, and never reaches the deploy call. Recording the RP
+  // makes that detectable instead of a silent dead end.
+  PASSKEY_RP_ID: 'latch_passkey_rp_id',
   // Fingerprint of the keyDataHex used when the smart account was last deployed.
   // If this differs from the current KEY_DATA_HEX, the account must be re-deployed.
   DEPLOYED_KEY_DATA: 'latch_deployed_key_data',
+  // Monotonically increasing counter used to number platform passkeys in the OS
+  // credential manager ("Latch Wallet 1", "Latch Wallet 2", …). Never derived
+  // from accounts.length or a list index: removing an account and adding another
+  // reuses the index, which would mint two passkeys the OS chooser shows with
+  // the same name. Only ever incremented. See provision-passkey.ts.
+  PASSKEY_SEQ: 'latch_passkey_seq',
+  // The name computed for account index 0's passkey at creation time
+  // ("Latch Wallet 1", "Savings (Latch 2)") and the seq baked into it.
+  // Persisted so a later, separate deploy call — e.g. deploy-account.tsx
+  // picking up credentials that biometric.tsx already provisioned — can send
+  // latch-api's passkey-credentials index the same label the OS sheet showed,
+  // instead of recomputing (which would bump PASSKEY_SEQ again and disagree
+  // with it). See provision-passkey.ts.
+  PASSKEY_LABEL: 'latch_passkey_label',
+  PASSKEY_LABEL_SEQ: 'latch_passkey_label_seq',
   // Latch backend auth tokens
   ACCESS_TOKEN: 'latch_access_token',
   REFRESH_TOKEN: 'latch_refresh_token',
@@ -76,6 +105,24 @@ export interface Device {
   isLocal: boolean;
   /** ISO-8601 timestamp of when the device was paired. */
   pairedAt: string;
+  /**
+   * True for a signer enrolled via the solo backup-signer flow
+   * (src/lib/backup-signer-tx.ts) — add_signer on the Default rule only,
+   * never the admin/ThresholdPolicy rule. The account stays 1-of-N no
+   * matter how many of these exist, so any UI computing a multisig signer
+   * count (e.g. PoliciesSheet) must exclude devices with this flag set.
+   * Absent/false for a normal paired (potentially multisig) device.
+   */
+  isBackupSigner?: boolean;
+  /**
+   * Set the moment a backup-signer add/remove lands on-chain, cleared only
+   * once the matching backend confirm call succeeds. Durable so a killed app
+   * can resume confirming later instead of losing the txHash — see
+   * src/lib/backup-signer-tx.ts. `action: 'remove'` marks a device that is
+   * already gone on-chain but still shown (as "Removing…") until its
+   * passkey-credentials row is deregistered.
+   */
+  pendingConfirm?: { txHash: string; contextRuleId: number; action: 'add' | 'remove' };
 }
 
 /**
@@ -160,6 +207,12 @@ export function getPasskeyStorageKeys(listIndex: number): {
   keyDataHex: string;
   privateKey: string;
   requiresBiometric: string;
+  kind: string;
+  rpId: string;
+  /** The name shown for this slot's passkey at creation time ("Latch Wallet 2"). */
+  label: string;
+  /** The seq baked into `label`, as a string. */
+  labelSeq: string;
 } {
   if (listIndex === 0) {
     return {
@@ -167,6 +220,10 @@ export function getPasskeyStorageKeys(listIndex: number): {
       keyDataHex: SECURE_KEYS.KEY_DATA_HEX,
       privateKey: SECURE_KEYS.PASSKEY_PRIVATE_KEY,
       requiresBiometric: SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC,
+      kind: SECURE_KEYS.PASSKEY_KIND,
+      rpId: SECURE_KEYS.PASSKEY_RP_ID,
+      label: SECURE_KEYS.PASSKEY_LABEL,
+      labelSeq: SECURE_KEYS.PASSKEY_LABEL_SEQ,
     };
   }
   return {
@@ -174,6 +231,10 @@ export function getPasskeyStorageKeys(listIndex: number): {
     keyDataHex: `latch_key_data_hex_${listIndex}`,
     privateKey: `latch_passkey_private_key_${listIndex}`,
     requiresBiometric: `latch_passkey_requires_biometric_${listIndex}`,
+    kind: `latch_passkey_kind_${listIndex}`,
+    rpId: `latch_passkey_rp_id_${listIndex}`,
+    label: `latch_passkey_label_${listIndex}`,
+    labelSeq: `latch_passkey_label_seq_${listIndex}`,
   };
 }
 
@@ -189,6 +250,14 @@ interface WalletStore {
 
   /** Index into `accounts` for the currently active account */
   activeAccountIndex: number;
+
+  /**
+   * The network the app is currently pointed at, mirrored into the store so
+   * the account switcher (and anything else) re-renders on a live switch —
+   * `getNetworkId()` reads a module `let` and is not reactive. Kept in sync by
+   * `reconcileActiveAccountForNetwork` and `rehydrateWallet`.
+   */
+  activeNetwork: NetworkId;
 
   // ─── Derived shortcuts (backward-compatible with existing screens) ────────
   /** Full keypair for the active account (null for passkey users) */
@@ -248,6 +317,24 @@ interface WalletStore {
   setAccountNetwork: (smartAddress: string, network: 'testnet' | 'mainnet') => Promise<void>;
 
   /**
+   * Re-point the app at `net`: update `activeNetwork`, and if the active
+   * account's smart account doesn't live on `net`, switch to the first account
+   * that does (an exact match, else an unknown/undeployed one). Leaves the
+   * active account untouched when the list has nothing for `net` — the switcher
+   * surfaces an "accounts on the other network" row for that case. Called from
+   * `switchActiveNetwork` after the network config has been applied.
+   */
+  reconcileActiveAccountForNetwork: (net: NetworkId) => Promise<void>;
+
+  /**
+   * Probe the chain for every account that has a deployed smart account but no
+   * recorded `network`, and stamp the result. Best-effort — a failed probe
+   * leaves the account unresolved (still shown on the current network). Fired
+   * when the account switcher opens and after a network switch.
+   */
+  resolveUnknownAccountNetworks: () => Promise<void>;
+
+  /**
    * Remove an account by its BIP-44/passkey index. Used to roll back an
    * optimistically-added account when its on-chain deployment fails.
    */
@@ -257,9 +344,25 @@ interface WalletStore {
    * Replace the devices list and (optionally) the admin rule id for an
    * account. Used after a pair flow completes to persist the new device
    * set + freshly installed admin rule.
+   *
+   * Matches by `bip44Index`, which is NOT unique: passkey, deployed and
+   * shared/multisig accounts are all created with `index: -1`. Calling this
+   * for one of them writes every account sharing that sentinel. Use
+   * `updateAccountDevicesAt` (by array position) for those account kinds.
    */
   updateAccountDevices: (
     bip44Index: number,
+    devices: Device[],
+    adminRuleId?: number | null,
+  ) => Promise<void>;
+
+  /**
+   * Same as `updateAccountDevices`, but targets the account by its array
+   * position instead of `bip44Index` — the only safe way to update a
+   * passkey/deployed/shared account, since those all share `index: -1`.
+   */
+  updateAccountDevicesAt: (
+    listIndex: number,
     devices: Device[],
     adminRuleId?: number | null,
   ) => Promise<void>;
@@ -333,11 +436,40 @@ function getCachedWallet(mnemonic: string, bip44Index: number): StellarWallet {
   return wallet;
 }
 
+/**
+ * Whether an account can be the active one while the app is pointed at `net`.
+ * A deployed smart account is a contract on exactly one network — but an
+ * account with no `network` yet (older record, probe pending/failed) or one
+ * not deployed anywhere is treated as usable on either, so a bad RPC read
+ * never hides a wallet.
+ */
+export function accountUsableOnNetwork(
+  account: WalletAccount | undefined,
+  net: NetworkId,
+): boolean {
+  if (!account) return false;
+  if (!account.smartAccountAddress) return true;
+  if (!account.network) return true;
+  return account.network === net;
+}
+
+/**
+ * First list position to make active on `net`: an exact network match wins,
+ * then any account that's usable (unknown/undeployed). -1 when the list has
+ * nothing for this network.
+ */
+function firstUsableIndexForNetwork(accounts: WalletAccount[], net: NetworkId): number {
+  const exact = accounts.findIndex((a) => a.smartAccountAddress && a.network === net);
+  if (exact >= 0) return exact;
+  return accounts.findIndex((a) => accountUsableOnNetwork(a, net));
+}
+
 export const useWalletStore = create<WalletStore>((set, get) => ({
   pendingWallet: null,
   mnemonic: null,
   accounts: [],
   activeAccountIndex: 0,
+  activeNetwork: getNetworkId(),
   activeWallet: null,
   smartAccountAddress: null,
   avatars: {},
@@ -551,6 +683,39 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     set({ accounts: updated });
   },
 
+  reconcileActiveAccountForNetwork: async (net) => {
+    const { accounts, activeAccountIndex } = get();
+    set({ activeNetwork: net });
+
+    // Stamp any unknown-network accounts in the background so the switcher's
+    // buckets settle; never block the switch on an RPC round-trip.
+    void get().resolveUnknownAccountNetworks();
+
+    if (accountUsableOnNetwork(accounts[activeAccountIndex], net)) return;
+
+    const nextIndex = firstUsableIndexForNetwork(accounts, net);
+    // Nothing on this network — keep the current selection. The switcher shows
+    // the off-network accounts under a "tap to switch" row, and the send guard
+    // still blocks a transfer from the wrong-network account.
+    if (nextIndex < 0 || nextIndex === activeAccountIndex) return;
+
+    await get().switchAccount(nextIndex);
+  },
+
+  resolveUnknownAccountNetworks: async () => {
+    const pending = get().accounts.filter((a) => a.smartAccountAddress && !a.network);
+    for (const account of pending) {
+      const address = account.smartAccountAddress as string;
+      try {
+        const found = await findDeployedNetwork(address);
+        if (found) await get().setAccountNetwork(address, found);
+      } catch {
+        // Best-effort — an unresolved account stays visible on the current
+        // network until the next probe succeeds.
+      }
+    }
+  },
+
   markAccountMultisig: async (listIndex, threshold, signers) => {
     const { accounts } = get();
     if (!accounts[listIndex]) return;
@@ -569,6 +734,22 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             ...a,
             devices,
             // Only overwrite adminRuleId if the caller explicitly passed it.
+            ...(adminRuleId !== undefined ? { adminRuleId } : {}),
+          }
+        : a,
+    );
+    await persistAccounts(updated);
+    set({ accounts: updated });
+  },
+
+  updateAccountDevicesAt: async (listIndex, devices, adminRuleId) => {
+    const { accounts } = get();
+    if (!accounts[listIndex]) return;
+    const updated = accounts.map((a, i) =>
+      i === listIndex
+        ? {
+            ...a,
+            devices,
             ...(adminRuleId !== undefined ? { adminRuleId } : {}),
           }
         : a,
@@ -615,6 +796,29 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return false;
     }
 
+    // Signer keys that belong to the admin (ThresholdPolicy) rule, if one is
+    // installed. completePairing always installs that rule in the SAME tx
+    // that adds a 2nd multisig-pairing device, so a Default-rule signer that
+    // is NOT in this set (or there's no admin rule at all) can only be a
+    // backup signer — see backup-signer-tx.ts, which never touches this rule.
+    let adminRuleSignerKeys: Set<string> | null = null;
+    if (account.adminRuleId !== undefined && account.adminRuleId !== null) {
+      try {
+        const { fetchContextRuleSigners } = await import('@/src/api/account-admin');
+        const adminSigners = await fetchContextRuleSigners(
+          { rpcUrl, networkPassphrase, factoryAddress },
+          account.smartAccountAddress,
+          account.adminRuleId,
+        );
+        adminRuleSignerKeys = new Set(adminSigners.map((s) => s.signerKey));
+      } catch (e) {
+        // Best-effort: an unreadable admin rule just means newly discovered
+        // signers fall back to "treat as backup signer" below, same as an
+        // account with no admin rule at all.
+        if (__DEV__) console.warn('syncSignersFromChain: could not read admin rule signers:', e);
+      }
+    }
+
     // Reconcile against chain truth. Existing local metadata (label, isLocal,
     // pairedAt, onChainSignerId) is preserved by matching on signerKey; newly
     // discovered signers are added as remote devices.
@@ -628,34 +832,101 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     // credential stored in SecureStore.
     const localKeys = new Set<string>();
     if (account.gAddress && account.publicKeyHex) {
-      localKeys.add(`ed25519:${account.publicKeyHex}`);
+      localKeys.add(`ed25519:${account.publicKeyHex.toLowerCase()}`);
+      localKeys.add(account.publicKeyHex.toLowerCase());
     }
     try {
-      const selfPasskey = await SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX);
-      if (selfPasskey) localKeys.add(`webauthn:${selfPasskey}`);
+      const selfPasskey = await SecureStore.getItemAsync(
+        getPasskeyStorageKeys(accountListIndex).keyDataHex,
+      );
+      if (selfPasskey) {
+        localKeys.add(`webauthn:${selfPasskey.toLowerCase()}`);
+        localKeys.add(selfPasskey.toLowerCase());
+      }
+      const fallbackPasskey = await SecureStore.getItemAsync(SECURE_KEYS.KEY_DATA_HEX);
+      if (fallbackPasskey) {
+        localKeys.add(`webauthn:${fallbackPasskey.toLowerCase()}`);
+        localKeys.add(fallbackPasskey.toLowerCase());
+      }
     } catch {
       // best-effort; isLocal labelling degrades gracefully without it
     }
 
-    const reconciled: Device[] = rule.signers.map((s) => {
-      const prev = byKey.get(s.signerKey);
-      if (prev) return prev;
-      const isLocal = !hadLocal && localKeys.has(s.signerKey);
+    const reconciled: Device[] = rule.signers.map((s, idx) => {
+      const isThisSignerLocal =
+        localKeys.has(s.signerKey.toLowerCase()) ||
+        localKeys.has(`webauthn:${s.keyDataHex.toLowerCase()}`) ||
+        localKeys.has(`ed25519:${s.keyDataHex.toLowerCase()}`) ||
+        localKeys.has(s.keyDataHex.toLowerCase()) ||
+        (!hadLocal && idx === 0 && !account.isMultisig);
+
+      const prev = byKey.get(s.signerKey) || byKey.get(s.signerKey.toLowerCase());
+      if (prev) {
+        let updated = prev;
+        // Overwrite whenever the chain value differs, not only when null:
+        // a device saved before the signer-id fix (account-admin.ts) may
+        // hold a position-based id that no longer matches the chain's
+        // stable one.
+        if (s.signerId !== undefined && prev.onChainSignerId !== s.signerId) {
+          updated = { ...updated, onChainSignerId: s.signerId };
+        }
+        // Self-heal: if an earlier sync mislabeled this local device as a backup signer,
+        // restore its proper local designation and remove the backup flag.
+        if (isThisSignerLocal && (updated.isBackupSigner || !updated.isLocal)) {
+          updated = {
+            ...updated,
+            isLocal: true,
+            isBackupSigner: undefined,
+            label: updated.label === 'Backup signer' ? 'This Device' : updated.label,
+          };
+        }
+        return updated;
+      }
+      const isLocal = isThisSignerLocal;
+      // A newly discovered non-local, non-delegated signer is a backup
+      // signer unless it's provably a multisig member (present in the admin
+      // rule). See the adminRuleSignerKeys comment above. Delegated signers
+      // and shared/multisig wallets are a different feature entirely — every
+      // signer there is a legitimate member, never a backup signer.
+      const isBackupSigner =
+        !isLocal &&
+        !account.isMultisig &&
+        s.kind !== 'delegated' &&
+        !(adminRuleSignerKeys?.has(s.signerKey) ?? false);
       const label = isLocal
         ? 'This Device'
         : s.kind === 'delegated'
           ? 'Member wallet'
-          : 'Paired device';
+          : isBackupSigner
+            ? 'Backup signer'
+            : 'Paired device';
       return {
         signerKey: s.signerKey,
         label,
         kind: s.kind,
         keyDataHex: s.keyDataHex,
-        onChainSignerId: null,
+        // The stable on-chain signer id from fetchDefaultContextRule's
+        // signer_ids (never a Vec position — see account-admin.ts). Without
+        // this, chain-discovered signers that were never locally persisted
+        // land here with onChainSignerId=null and the remove button is
+        // permanently blocked.
+        onChainSignerId: s.signerId ?? null,
         isLocal,
         pairedAt: new Date().toISOString(),
+        ...(isBackupSigner ? { isBackupSigner: true } : {}),
       };
     });
+
+    // A pending removal is already gone on-chain, but its txHash is still needed
+    // to retry confirm-remove — keep it until that call succeeds.
+    for (const d of existing) {
+      if (
+        d.pendingConfirm?.action === 'remove' &&
+        !reconciled.some((r) => r.signerKey === d.signerKey)
+      ) {
+        reconciled.push(d);
+      }
+    }
 
     // Stable order: local device(s) first, then the rest.
     reconciled.sort((a, b) => Number(b.isLocal) - Number(a.isLocal));
@@ -663,7 +934,12 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     const changed =
       reconciled.length !== existing.length ||
       reconciled.some(
-        (d, i) => existing[i]?.signerKey !== d.signerKey || existing[i]?.isLocal !== d.isLocal,
+        (d, i) =>
+          existing[i]?.signerKey !== d.signerKey ||
+          existing[i]?.isLocal !== d.isLocal ||
+          existing[i]?.isBackupSigner !== d.isBackupSigner ||
+          existing[i]?.label !== d.label ||
+          existing[i]?.onChainSignerId !== d.onChainSignerId,
       );
     if (__DEV__) {
       console.log(
@@ -774,6 +1050,23 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         persistAccounts(accounts).catch(() => {});
       }
 
+      // Keep the active account coherent with the network the app booted on:
+      // a smart account deployed on the other network can't be read or spent
+      // from here. Repoint to the first account that lives on this network
+      // (falling back to an unknown/undeployed one); if the list has nothing
+      // for it, keep the persisted choice — the switcher surfaces that case.
+      const bootNetwork = getNetworkId();
+      if (!accountUsableOnNetwork(accounts[activeAccountIndex], bootNetwork)) {
+        const repointed = firstUsableIndexForNetwork(accounts, bootNetwork);
+        if (repointed >= 0 && repointed !== activeAccountIndex) {
+          activeAccountIndex = repointed;
+          await SecureStore.setItemAsync(
+            SECURE_KEYS.ACTIVE_ACCOUNT_INDEX,
+            String(activeAccountIndex),
+          );
+        }
+      }
+
       // Derive the in-memory keypair for the active account
       const activeAccount = accounts[activeAccountIndex] ?? accounts[0];
       const activeWallet =
@@ -787,6 +1080,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         mnemonic,
         accounts,
         activeAccountIndex,
+        activeNetwork: bootNetwork,
         activeWallet,
         smartAccountAddress: activeAccount.smartAccountAddress,
         avatars: storedAvatars,
@@ -814,6 +1108,10 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           SecureStore.deleteItemAsync(keys.keyDataHex),
           SecureStore.deleteItemAsync(keys.privateKey),
           SecureStore.deleteItemAsync(keys.requiresBiometric),
+          SecureStore.deleteItemAsync(keys.kind),
+          SecureStore.deleteItemAsync(keys.rpId),
+          SecureStore.deleteItemAsync(keys.label),
+          SecureStore.deleteItemAsync(keys.labelSeq),
         ];
       });
 
@@ -832,6 +1130,17 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       SecureStore.deleteItemAsync(SECURE_KEYS.CREDENTIAL_ID),
       SecureStore.deleteItemAsync(SECURE_KEYS.KEY_DATA_HEX),
       SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_PRIVATE_KEY),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_KIND),
+      // Slot-0 credential metadata that used to be left behind on a full reset,
+      // so the next wallet inherited a stale RP, biometric flag, OS-sheet name,
+      // and deploy fingerprint. PASSKEY_SEQ is deliberately NOT cleared: it is a
+      // monotonic counter whose whole job is to keep OS credential names unique
+      // even across a wipe, since a synced passkey outlives local storage.
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_RP_ID),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_REQUIRES_BIOMETRIC),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_LABEL),
+      SecureStore.deleteItemAsync(SECURE_KEYS.PASSKEY_LABEL_SEQ),
+      SecureStore.deleteItemAsync(SECURE_KEYS.DEPLOYED_KEY_DATA),
       AsyncStorage.removeItem(ASYNC_KEYS.AVATARS),
       AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING),
       clearSacTransferCache(),
@@ -842,6 +1151,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       mnemonic: null,
       accounts: [],
       activeAccountIndex: 0,
+      activeNetwork: getNetworkId(),
       activeWallet: null,
       smartAccountAddress: null,
       avatars: {},

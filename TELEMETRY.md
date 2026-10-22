@@ -39,6 +39,48 @@ material is not at risk here: it does not appear in error paths, and `console`
 output is stripped from release bundles entirely (`drop_console` in
 `metro.config.js`).
 
+Performance tracing is on for account deployment only. `tracesSampler` in
+`app/_layout.tsx` keeps root spans named `deploy.*` and drops everything else,
+so no screen-navigation or general HTTP timing is collected — only how long a
+deployment and its passkey ceremony take, tagged with the network and whether
+the credential is a platform or device-local key.
+
+### Source maps
+
+`eas build` uploads source maps through the `sentry-eas-build-*` hooks in
+`package.json`. `eas update` does **not** — nothing in an OTA update uploads
+anything on its own, so for a while every OTA-delivered error resolved against
+the last *build's* maps and Sentry attributed frames to whatever happened to sit
+at that offset. Two unrelated crashes were reported inside `react-native-svg`
+and `@walletconnect/core`, neither of which was involved in either.
+
+The `update:*` scripts therefore export, upload, and publish that same export:
+
+```
+eas env:exec <env> "npm run export:sourcemaps" && eas update … --skip-bundler
+```
+
+Four things are load-bearing, each of which failed in a different way when it
+was missing:
+
+- **`env:exec`** runs the export under the EAS environment. `expo export` on its
+  own reads local `.env` and would ship a developer's values.
+- **`--platform android --platform ios`** on the export. The default is `all`,
+  which includes web, and `web.output: 'static'` server-renders every route
+  under Node — where importing a native module throws `__fbBatchedBridgeConfig
+  is not set`. `eas update` never bundled web, so this only appears once you
+  export by hand.
+- **`--source-maps external`**. Source maps are off by default
+  (`sourceMaps = !!args['--source-maps']`), and the upload step does not object
+  to finding none — so omitting this leaves the release *looking* instrumented
+  while Sentry still has nothing to resolve frames against.
+- **`--skip-bundler`** republishes the `dist/` that was just uploaded instead of
+  re-bundling. A second bundle would have different hashes and the maps would
+  not match it.
+
+The upload also happens before the publish, so a failed upload stops the release
+rather than shipping an untraceable one.
+
 ## The backend
 
 `latch-api` sees what you would expect of a wallet backend: your email if you

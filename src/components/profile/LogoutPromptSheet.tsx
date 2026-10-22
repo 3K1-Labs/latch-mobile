@@ -11,11 +11,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface Props {
   visible: boolean;
@@ -195,6 +193,8 @@ const LogoutPromptSheet = ({
           <Text variant="h7" color="textPrimary" fontWeight="700" mb="m" textAlign="center">
             {contentTitle}
           </Text>
+          ?
+        </Text>
 
           <Text variant="p5" color="textSecondary" textAlign="center" mb="xl" lineHeight={24}>
             {contentText}
@@ -215,28 +215,9 @@ const LogoutPromptSheet = ({
             actions
           )}
         </Box>
-      </Animated.View>
-    </Modal>
+      </Box>
+    </BottomSheet>
   );
 };
-
-const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-  },
-  sheet: {
-    width: '100%',
-    position: 'absolute',
-    bottom: 0,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 20,
-  },
-});
 
 export default LogoutPromptSheet;

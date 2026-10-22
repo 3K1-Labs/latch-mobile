@@ -12,6 +12,7 @@ interface Props {
   selectedToken: SendToken;
   selectedWallet: Recipient;
   amount: string;
+  fiatLabel?: string;
   onKeyPress: (key: string) => void;
   onMaxPress: () => void;
   onPresetPress: (usdAmount: number) => void;
@@ -21,6 +22,7 @@ const AmountEntryStep = ({
   selectedToken,
   selectedWallet,
   amount,
+  fiatLabel,
   onKeyPress,
   onMaxPress,
   onPresetPress,
@@ -101,6 +103,11 @@ const AmountEntryStep = ({
             {selectedToken.code}
           </Text>
         </Box>
+        {fiatLabel ? (
+          <Text variant="p8" color="textSecondary" mt="s">
+            {fiatLabel}
+          </Text>
+        ) : null}
         {isOverBalance && (
           <Text variant="p8" color="inputError" mt="s">
             Exceeds available balance

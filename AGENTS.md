@@ -108,11 +108,11 @@ and explaining the reasoning over applying one.
 
 ## Known gotchas
 
-- **`ACTIVE_NETWORK` defaults to mainnet** in `src/constants/config.ts`.
-  `hydrateActiveNetwork()` corrects it from the persisted choice during startup,
-  and the app root gates rendering on that, but a first run before hydration is
-  pointed at mainnet. Check which network you are on before testing anything
-  that spends.
+- **`ACTIVE_NETWORK` defaults to testnet** in `src/constants/config.ts`.
+  `hydrateActiveNetwork()` applies the persisted choice during startup (either
+  network — a persisted `mainnet` is honored), and the app root gates rendering
+  on that. A fresh install with no saved choice stays on testnet. Still check
+  which network you are on before testing anything that spends.
 - **The network switch reassigns `let` bindings live.** Every reader must be
   inside a function body, never a module-level computation, or it captures a
   stale value. See `applyNetworkDetails`.

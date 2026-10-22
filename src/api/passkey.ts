@@ -10,11 +10,12 @@
  * return it across app restarts without any network call.
  */
 
+import * as Sentry from '@sentry/react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { deployPasskeyAccount } from '@/src/api/smart-account-deploy';
 import {
-  HORIZON_URL,
+  getNetworkId,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -27,7 +28,6 @@ import { SECURE_KEYS } from '../store/wallet';
 
 const getConfig = () => ({
   rpcUrl: STELLAR_RPC_URL,
-  horizonUrl: HORIZON_URL,
   networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
   factoryAddress: STELLAR_FACTORY_ADDRESS,
 });
@@ -56,11 +56,15 @@ export interface LookupResult {
  *
  * @param credentialId  Local credential identifier (cache + SecureStore key)
  * @param keyDataHex    Uncompressed P-256 pubkey (65B = 130 hex) + credentialId hex (16B = 32 hex)
+ * @param label         Fed to latch-api's passkey-credentials recovery index; see provision-passkey.ts
+ * @param seq           The seq baked into `label`
  */
 export async function deploySmartAccount(
   credentialId: string,
   keyDataHex: string,
   skipCache = false,
+  label?: string,
+  seq?: number,
 ): Promise<DeployResult> {
   if (!keyDataHex || keyDataHex.length < 132) {
     return {
@@ -111,6 +115,8 @@ export async function deploySmartAccount(
     const { smartAccountAddress, alreadyDeployed } = await deployPasskeyAccount(
       credentialId,
       keyDataHex,
+      label,
+      seq,
     );
 
     if (__DEV__) console.log('[passkey] deployed:', smartAccountAddress);
@@ -119,6 +125,19 @@ export async function deploySmartAccount(
     return { smartAccountAddress, alreadyDeployed };
   } catch (error: any) {
     console.error('[passkey] deploySmartAccount error:', error?.message);
+    // Reported here, not only at the screen, because this is the last point at
+    // which the real Error exists: the return below flattens it to a string and
+    // the caller rebuilds it with `new Error(result.error)`, losing the stack
+    // and the DeployApiError status. A deployment that fails on one physical
+    // device and nowhere else is exactly the case that needs the original.
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error?.message ?? error)), {
+      tags: {
+        scope: 'passkey-deploy',
+        network: getNetworkId(),
+        ...(typeof error?.status === 'number' ? { httpStatus: String(error.status) } : {}),
+      },
+      extra: { credentialId, keyDataHexLength: keyDataHex?.length },
+    });
     return {
       smartAccountAddress: '',
       alreadyDeployed: false,

@@ -9,6 +9,7 @@ import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
+import { groupByDate } from '@/src/utils/group-by-date';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { router } from 'expo-router';
@@ -25,29 +26,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const height = Dimensions.get('window').height;
-
-function dateSectionLabel(dateStr?: string): string {
-  if (!dateStr) return 'Unknown';
-  const d = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-}
-
-function groupByDate(txs: StellarPayment[]): { title: string; data: StellarPayment[] }[] {
-  const map = new Map<string, StellarPayment[]>();
-  for (const tx of txs) {
-    const label = dateSectionLabel(tx.createdAt);
-    const group = map.get(label) ?? [];
-    group.push(tx);
-    map.set(label, group);
-  }
-  return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
-}
 
 const History = () => {
   const theme = useTheme<Theme>();
@@ -109,7 +87,7 @@ const History = () => {
     return result;
   }, [transactions, activeFilter, search, smartAccountAddress]);
 
-  const sections = useMemo(() => groupByDate(filtered), [filtered]);
+  const sections = useMemo(() => groupByDate(filtered, (tx) => tx.createdAt), [filtered]);
 
   const handleRowPress = (tx: StellarPayment) => {
     const isSent = tx.from === smartAccountAddress;

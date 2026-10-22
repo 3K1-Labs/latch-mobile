@@ -99,6 +99,61 @@ jobs:
         if: needs.changes.outputs.code == 'true' && !cancelled()
         run: bun run test
 
+  # Nothing secret belongs in this repository, and once it is public a leaked
+  # commit is permanent and indexed within minutes. This scans the PR's own
+  # commits, so it catches a secret before it is ever merged.
+  #
+  # Runs the gitleaks binary directly rather than gitleaks/gitleaks-action@v2:
+  # that action refuses to run for organisation-owned repositories without a
+  # paid licence key ("[3K1-Labs] is an organization. License key is
+  # required."), which is what made this job fail instantly the first time it
+  # was restored. The scanner itself is MIT-licensed and free; only the action
+  # wrapper is gated.
+  #
+  # Scoped to the commit range under review, never the whole history. A full
+  # scan reports ~47 findings that are all false positives — Stellar contract
+  # addresses in the token registry, and constants named `*_KEY` that hold
+  # storage key names, not credentials. Gating merges on that backlog would
+  # block every PR for something no PR introduced.
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # gitleaks needs history to diff a pull request's commit range.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/gitleaks" gitleaks
+        env:
+          GITLEAKS_VERSION: 8.28.0
+
+      - name: Scan for committed secrets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          # A pull request scans base..head. A push scans what it pushed.
+          # Anything else (a new branch, a force push, the all-zero before
+          # SHA) falls back to the tip commit, so the job still reports a
+          # real result rather than erroring on a range that cannot resolve.
+          if [ -n "$BASE_SHA" ]; then
+            RANGE="$BASE_SHA..$HEAD_SHA"
+          elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="$BEFORE_SHA..$HEAD_SHA"
+          else
+            RANGE="-1"
+          fi
+          echo "Scanning $RANGE"
+          "$RUNNER_TEMP/gitleaks/gitleaks" git . --log-opts="$RANGE" --redact --no-banner
+
   # 102 runtime dependencies; Dependabot alone only flags what's already
   # known and already installed. This checks what a PR is ABOUT to add —
   # a newly introduced dependency with a known advisory, or one under a
@@ -119,3 +174,18 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+
+  # Cheap and stack-agnostic, and docs are exactly where a typo earns its
+  # keep — so unlike the jobs above, this one is NOT gated on `changes`. It
+  # should run at full strength on a docs-only PR, not skip past the thing
+  # it exists to catch.
+  typos:
+    name: typo check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check for typos
+        uses: crate-ci/typos@v1

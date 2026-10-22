@@ -1,0 +1,50 @@
+# Config for crate-ci/typos (.github/workflows/ci.yml, `typo check` job).
+#
+# Every entry here was verified against a real `typos` run over this repo,
+# not added preemptively — see the reference open-source-readiness checklist
+# for why that order matters: enabling a spell-checker as a required check
+# against un-triaged pre-existing content just means every future PR inherits
+# someone else's unfixed backlog.
+
+[files]
+extend-exclude = [
+  # A ~3,300-line token registry (name/address/symbol/decimals/chainId) for
+  # swap routing, not prose. Real asset names and tickers (TRU, ALLO, THQ,
+  # WRON, "StablR Euro", "The Virtua Kolect") collide with English near-misses
+  # by chance, and will keep doing so as tokens are added — this is data to
+  # exclude permanently, not typos to fix once.
+  "src/constants/tokens.ts",
+]
+
+[default.extend-words]
+# Real, deliberately-used compsci term ("failed to parse"). typos prefers
+# "unparsable"; this codebase uses "unparseable" consistently across error
+# messages and comments — mapped to itself rather than "corrected" everywhere.
+unparseable = "unparseable"
+Unparseable = "Unparseable"
+# Tokenizer fragments, not misspellings: "mis-cleared"/"mis-encodes" (hyphen
+# splits "mis" off as its own word), and "OTPs"/"OTAs"/"PNGs" (pluralized
+# abbreviations split into a fragment — OT, PN — plus the plural suffix).
+mis = "mis"
+OT = "OT"
+PN = "PN"
+
+# WebAuthn's public-key encoding is COSE (CBOR Object Signing and Encryption,
+# RFC 8152). It appears throughout the platform-passkey and CBOR decoding
+# paths and their tests. typos reads it as a near-miss for "case"; it is the
+# spec's own acronym, in every casing the code uses it.
+COSE = "COSE"
+Cose = "Cose"
+cose = "cose"
+# Regex fragment, not a word: passkey-failure.ts matches the Android Credential
+# Manager strings with `cancell?ed`, which covers both the American and British
+# spellings in one pattern. The tokenizer splits "cancell" off the optional l.
+cancell = "cancell"
+# Token tickers and product names quoted in OSS_READINESS_CHECKLIST.md as
+# examples of the swap token registry. The registry file itself is excluded
+# above; these are the same strings repeated in prose, so they need the same
+# treatment rather than the doc losing typo checking entirely.
+ALLO = "ALLO"
+TRU = "TRU"
+Stabl = "Stabl"
+Virtua = "Virtua"

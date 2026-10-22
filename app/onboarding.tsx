@@ -4,6 +4,8 @@ import Button from '@/src/components/shared/Button';
 import ProgressPagination from '@/src/components/shared/ProgressPagination';
 import Text from '@/src/components/shared/Text';
 import { LATCH_TERMS_URL } from '@/src/constants/constants';
+import { clearProvisionedPasskeyAtIndex } from '@/src/lib/provision-passkey';
+import * as Sentry from '@sentry/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -138,7 +140,29 @@ const Onboarding = () => {
           <Button
             label="Create a New Wallet"
             variant="primary"
-            onPress={() => router.navigate('/(auth)/biometric')}
+            onPress={async () => {
+              // Start from a clean slot. A platform passkey from an earlier run
+              // survives an app reinstall, and biometric.tsx skips the passkey
+              // sheet whenever a credential id is already present — so without
+              // this, a leftover credential makes new-wallet setup silently
+              // reuse it. No smart account is deployed at this point, so the
+              // discarded credential is unreferenced.
+              try {
+                await clearProvisionedPasskeyAtIndex(0);
+              } catch (err) {
+                // A failed clear is not fatal here — we still proceed — but it
+                // means biometric.tsx's `existingCredId` check will reuse
+                // whatever stale credential is left behind. Worth knowing about
+                // rather than losing silently.
+                Sentry.captureException(
+                  err instanceof Error
+                    ? err
+                    : new Error(`clearProvisionedPasskeyAtIndex failed: ${String(err)}`),
+                  { tags: { scope: 'onboarding-new-wallet-clear' } },
+                );
+              }
+              router.navigate('/(auth)/biometric');
+            }}
             // onPress={() => router.navigate('/(onboarding)/choose-wallet')}
           />
           <Button

@@ -14,6 +14,7 @@ import { ApiError } from '@/src/api/api-error';
 import { getPairCodeMeta, submitPairCodeResponse } from '@/src/api/pair-code';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import { PASSKEY_RP_ID } from '@/src/constants/config';
 import { fetchAnyAccessToken } from '@/src/lib/pairing-context';
 import {
   decodeChallengeB64,
@@ -39,8 +40,6 @@ type Stage =
   | { kind: 'submitting' }
   | { kind: 'success' }
   | { kind: 'error'; message: string };
-
-const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://latch.finance';
 
 export default function PairEnterCode() {
   const theme = useTheme<Theme>();
@@ -216,7 +215,7 @@ async function signWithLocalPasskey(
   if (!account.publicKeyHex) {
     throw new Error('passkey account is missing public key material');
   }
-  return signChallengePasskey(challenge, account.publicKeyHex, RP_ID);
+  return signChallengePasskey(challenge, account.publicKeyHex, PASSKEY_RP_ID);
 }
 
 const styles = StyleSheet.create({

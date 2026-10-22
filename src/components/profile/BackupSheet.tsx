@@ -7,12 +7,12 @@ import {
   uploadBackup,
   verifyOTP,
 } from '@/src/api/latch-auth';
-import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
+import SheetHeader from '@/src/components/profile/SheetHeader';
+import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Input from '@/src/components/shared/Input';
 import Text from '@/src/components/shared/Text';
 import { SECURE_KEYS } from '@/src/store/wallet';
-import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,23 +20,10 @@ import { useTheme } from '@shopify/restyle';
 import * as SecureStore from 'expo-secure-store';
 import { Formik } from 'formik';
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Modal,
-  StyleSheet,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import * as Yup from 'yup';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const schema = Yup.object({
   password: Yup.string().min(8, 'Must be at least 8 characters').required('Required'),
@@ -54,7 +41,6 @@ type Phase = 'checking' | 'add-email' | 'backup';
 type EmailSubPhase = 'email' | 'otp';
 
 const BackupSheet = ({ visible, onClose }: Props) => {
-  const insets = useSafeAreaInsets();
   const theme = useTheme<Theme>();
   const { isDark } = useAppTheme();
   const [backupExists, setBackupExists] = useState<boolean | null>(null);
@@ -76,8 +62,6 @@ const BackupSheet = ({ visible, onClose }: Props) => {
   // never one — lets the copy say "session expired" instead of "no email".
   const [sessionExpired, setSessionExpired] = useState(false);
   const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   const enterAddEmailPhase = (expired: boolean) => {
     setPhase('add-email');
@@ -133,25 +117,11 @@ const BackupSheet = ({ visible, onClose }: Props) => {
           });
       });
 
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        damping: 25,
-        mass: 1,
-        stiffness: 150,
-      }).start();
-
       return () => {
         cancelled = true;
       };
-    } else {
-      Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
     }
-  }, [visible, translateY]);
+  }, [visible]);
 
   const startResendCooldown = () => {
     setResendCooldown(60);
@@ -277,52 +247,24 @@ const BackupSheet = ({ visible, onClose }: Props) => {
   };
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.backdrop} />
-      </TouchableWithoutFeedback>
-
-      <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
-        <Animated.View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-              paddingBottom: Math.max(insets.bottom, 16),
-              transform: [{ translateY }],
-              height: SHEET_HEIGHT,
-            },
-          ]}
-        >
-          <BottomSheetHandle />
-
-          {/* Header */}
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            justifyContent="space-between"
-            paddingHorizontal="m"
-            py="m"
-            mb="s"
-          >
-            <TouchableOpacity
-              onPress={onClose}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-            </TouchableOpacity>
-            <Text variant="h8" color="textPrimary" fontWeight="700">
-              Wallet Backup
-            </Text>
-            <Box width={40} />
-          </Box>
-
-          <KeyboardAwareScrollView
-            contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16 }}
-            bottomOffset={16}
-            showsVerticalScrollIndicator={false}
-          >
-            {phase === 'checking' ? (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      snapPoints={['92%']}
+      keyboardBehavior="extend"
+      android_keyboardInputMode="adjustResize"
+      backgroundStyle={{
+        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
+      }}
+      header={<SheetHeader title="Wallet Backup" onBack={onClose} titleVariant="h8" iconSize={24} />}
+      contentContainerStyle={{ flex: 1 }}
+    >
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16 }}
+        bottomOffset={16}
+        showsVerticalScrollIndicator={false}
+      >
+        {phase === 'checking' ? (
               <Box flex={1} justifyContent="center" alignItems="center">
                 <ActivityIndicator color={theme.colors.primary700} />
               </Box>
@@ -588,29 +530,9 @@ const BackupSheet = ({ visible, onClose }: Props) => {
                 </Formik>
               </>
             )}
-          </KeyboardAwareScrollView>
-        </Animated.View>
-      </View>
-    </Modal>
+      </KeyboardAwareScrollView>
+    </BottomSheet>
   );
 };
-
-const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    width: '100%',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 20,
-  },
-});
 
 export default BackupSheet;

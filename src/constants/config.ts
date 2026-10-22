@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Networks } from '@stellar/stellar-sdk';
 
+import { normalizePasskeyRpId } from '@/src/lib/passkey-rp-id';
 import { ACTIVE_NETWORK_STORAGE_KEY } from './network-storage-key';
 
 export { ACTIVE_NETWORK_STORAGE_KEY };
@@ -35,7 +36,8 @@ export const TESTNET_NETWORK: NetworkDetails = {
   networkName: 'Test Net',
   horizonUrl: 'https://horizon-testnet.stellar.org',
   networkPassphrase: Networks.TESTNET,
-  sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org',
+  sorobanRpcUrl:
+    process.env.EXPO_PUBLIC_SOROBAN_RPC_URL ?? 'https://rpc.ankr.com/stellar_testnet_soroban',
   friendbotUrl: 'https://friendbot.stellar.org',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS ?? '',
 };
@@ -45,7 +47,8 @@ export const MAINNET_NETWORK: NetworkDetails = {
   networkName: 'Main Net',
   horizonUrl: 'https://horizon.stellar.org',
   networkPassphrase: Networks.PUBLIC,
-  sorobanRpcUrl: process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
+  sorobanRpcUrl:
+    process.env.EXPO_PUBLIC_SOROBAN_RPC_URL_MAINNET ?? 'https://mainnet.sorobanrpc.com',
   factoryAddress: process.env.EXPO_PUBLIC_FACTORY_ADDRESS_MAINNET ?? '',
 };
 
@@ -54,16 +57,14 @@ export const MAINNET_NETWORK: NetworkDetails = {
 // (hook, event handler, render), never a module-top-level computation, so the
 // live binding is picked up on the next call/render — see network-switch.ts.
 //
-// Starts on testnet and is corrected by hydrateActiveNetwork() during startup
+// Starts on mainnet and is corrected by hydrateActiveNetwork() during startup
 // from the user's persisted choice. The app root gates rendering on that
 // hydration, so nothing reads a network value before it is applied.
 //
-// Testnet is the default deliberately. A fresh install has no persisted choice,
-// so whatever sits here is what a first run uses — and a first run that lands
-// on mainnet deploys a real account and spends real bundler XLM before the user
-// has chosen anything. The safe default is the one that costs nothing when it
-// is wrong.
-export let ACTIVE_NETWORK: NetworkDetails = TESTNET_NETWORK;
+// Mainnet is the default: account creation is mainnet-first, so a fresh
+// install with no persisted choice deploys a real account on mainnet rather
+// than testnet.
+export let ACTIVE_NETWORK: NetworkDetails = MAINNET_NETWORK;
 
 // Convenience shortcuts derived from the active network
 let HORIZON_URL = ACTIVE_NETWORK.horizonUrl;
@@ -78,7 +79,8 @@ export const BASE_RESERVE_MIN_COUNT = 2;
 
 // Relying party ID used when constructing WebAuthn authenticatorData for passkey signing.
 // Must be a stable domain string — the on-chain verifier checks signature math, not this value.
-const PASSKEY_RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'latch.finance';
+// Normalised to a bare domain: see normalizePasskeyRpId for what a scheme here breaks.
+const PASSKEY_RP_ID = normalizePasskeyRpId(process.env.EXPO_PUBLIC_PASSKEY_RP_ID ?? 'uselatch.app');
 
 // ─── Swap / liquidity aggregation (Soroswap Aggregator API) ───────────────────
 // The API key is baked into the bundle (EXPO_PUBLIC_*). Testnet only — move the
@@ -89,6 +91,22 @@ const SOROSWAP_API_URL = (
 const SOROSWAP_API_KEY = process.env.EXPO_PUBLIC_SOROSWAP_API_KEY ?? '';
 // Soroswap expects the network as a lowercase query param (?network=testnet|mainnet).
 let SOROSWAP_NETWORK = getNetworkId();
+
+// Aggregator contract — target of `swap_exact_tokens_for_tokens`. The provider
+// used to get its invocation XDR from Soroswap's POST /quote/build, but that
+// endpoint expects `from` to be a classic G wallet; it mis-builds against a
+// smart account's C-address. We build the invocation locally instead (same fix
+// latch-web-extension shipped — providers/soroswap.ts), which needs the
+// aggregator's own contract address rather than whatever /quote/build resolved
+// server-side. Sourced from soroswap/aggregator public/*.contracts.json, same
+// as the extension's config — hardcoded there too (no env override): unlike
+// the Aquarius router below, this contract isn't redeployed on a schedule, so
+// there's nothing to override for.
+const TESTNET_SOROSWAP_AGGREGATOR = 'CAYP3UWLJM7ZPTUKL6R6BFGTRWLZ46LRKOXTERI2K6BIJAWGYY62TXTO';
+const MAINNET_SOROSWAP_AGGREGATOR = 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA';
+// Reassigned by applyNetworkDetails() on a live switch, same as the Aquarius values below.
+let SOROSWAP_AGGREGATOR_ADDRESS =
+  ACTIVE_NETWORK.network === 'TESTNET' ? TESTNET_SOROSWAP_AGGREGATOR : MAINNET_SOROSWAP_AGGREGATOR;
 
 /** `'testnet' | 'mainnet'` form of ACTIVE_NETWORK, used across cosign/multisig/swap code. */
 export function getNetworkId(): 'testnet' | 'mainnet' {
@@ -142,6 +160,9 @@ function applyNetworkDetails(details: NetworkDetails): void {
   const isTestnet = details.network === 'TESTNET';
   AQUARIUS_AMM_API_URL = isTestnet ? TESTNET_AQUARIUS_API_URL : MAINNET_AQUARIUS_API_URL;
   AQUARIUS_ROUTER_ADDRESS = isTestnet ? TESTNET_AQUARIUS_ROUTER : MAINNET_AQUARIUS_ROUTER;
+  SOROSWAP_AGGREGATOR_ADDRESS = isTestnet
+    ? TESTNET_SOROSWAP_AGGREGATOR
+    : MAINNET_SOROSWAP_AGGREGATOR;
 }
 
 /**
@@ -153,7 +174,14 @@ function applyNetworkDetails(details: NetworkDetails): void {
 export async function hydrateActiveNetwork(): Promise<void> {
   try {
     const stored = await AsyncStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
-    if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
+    // Honor whichever choice was persisted. The module default is mainnet, so
+    // the testnet branch is the one that actually matters — without it a
+    // persisted 'testnet' choice is silently dropped on every cold start and
+    // the app reverts to mainnet. Applying mainnet explicitly is harmless
+    // (idempotent) and keeps the two cases symmetric.
+    if (stored === 'mainnet') applyNetworkDetails(MAINNET_NETWORK);
+    else if (stored === 'testnet') applyNetworkDetails(TESTNET_NETWORK);
+    // No stored choice → keep the module default (mainnet).
   } catch {
     // Storage unavailable — keep the mainnet default rather than blocking launch.
   }
@@ -214,6 +242,7 @@ export {
   DEPOSIT_RELAYER_NETWORKS,
   HORIZON_URL,
   PASSKEY_RP_ID,
+  SOROSWAP_AGGREGATOR_ADDRESS,
   SOROSWAP_API_KEY,
   SOROSWAP_API_URL,
   SOROSWAP_NETWORK,

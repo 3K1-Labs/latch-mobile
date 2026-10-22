@@ -50,14 +50,14 @@ shared deployment.
 
 ## Architecture
 
-| Area | Choice |
-| --- | --- |
-| Framework | Expo 55, React Native 0.83, Expo Router |
-| Language | TypeScript |
-| State | Zustand for wallet state, React Query for server state |
-| Styling | `@shopify/restyle` — `Box` and `Text` are the layout primitives |
-| Stellar | `@stellar/stellar-sdk` 15, Soroban RPC + Horizon |
-| Forms | Formik + Yup |
+| Area      | Choice                                                          |
+| --------- | --------------------------------------------------------------- |
+| Framework | Expo 55, React Native 0.83, Expo Router                         |
+| Language  | TypeScript                                                      |
+| State     | Zustand for wallet state, React Query for server state          |
+| Styling   | `@shopify/restyle` — `Box` and `Text` are the layout primitives |
+| Stellar   | `@stellar/stellar-sdk` 15, Soroban RPC + Horizon                |
+| Forms     | Formik + Yup                                                    |
 
 ```
 app/                 file-based routes (Expo Router)
@@ -109,3 +109,9 @@ generally need a testnet demonstration rather than only a passing build.
 [Apache 2.0](LICENSE). The Latch name and logo are trademarks and are not
 covered by that licence — see [NOTICE](NOTICE). You may fork and ship this code;
 please don't ship it as Latch.
+
+### Generate apk
+
+```shell
+eas build --profile preview--platform android
+```

@@ -1,7 +1,6 @@
-import React from 'react';
-import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { TouchableOpacity } from 'react-native';
 
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
@@ -10,9 +9,10 @@ import { Theme } from '@/src/theme/theme';
 interface AccountSheetHeaderProps {
   onClose: () => void;
   onAdd: () => void;
+  label?: string;
 }
 
-const AccountSheetHeader = ({ onClose, onAdd }: AccountSheetHeaderProps) => {
+const AccountSheetHeader = ({ onClose, onAdd, label }: AccountSheetHeaderProps) => {
   const theme = useTheme<Theme>();
 
   return (
@@ -29,7 +29,7 @@ const AccountSheetHeader = ({ onClose, onAdd }: AccountSheetHeaderProps) => {
       </TouchableOpacity>
 
       <Text variant="h9" color="textPrimary" fontWeight="700">
-        Accounts
+        {label} Accounts
       </Text>
 
       <TouchableOpacity onPress={onAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

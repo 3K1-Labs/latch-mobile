@@ -8,8 +8,9 @@
  * which Axios bypasses.
  */
 
-const API_ROOT = process.env.EXPO_PUBLIC_WALLET_BACKEND_URL ?? '';
-const GRAPHQL_URL = `${API_ROOT}/graphql/query`;
+import { API_BASE_URL } from '../constants/api-host';
+
+const GRAPHQL_URL = `${API_BASE_URL}/graphql/query`;
 
 interface GraphQLResponse<T> {
   data?: T;

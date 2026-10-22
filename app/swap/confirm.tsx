@@ -4,6 +4,7 @@ import Text from '@/src/components/shared/Text';
 import TxAuthModal from '@/src/components/shared/TxAuthModal';
 import { swapTokenImage } from '@/src/components/swap/token-image';
 import { usePrices } from '@/src/hooks/use-prices';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { friendlyTxError } from '@/src/lib/tx-errors';
@@ -27,13 +28,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const formatUsd = (amountStr: string, price?: string) => {
-  const amount = parseFloat(amountStr || '0');
-  const p = parseFloat(price ?? '0');
-  if (!amount || !p) return '≈$0.00';
-  return `≈$${(amount * p).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-
 const ConfirmSwap = () => {
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
@@ -55,6 +49,7 @@ const ConfirmSwap = () => {
   const { smartAccountAddress, accounts, activeAccountIndex, mnemonic } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
   const { data: prices } = usePrices();
+  const { formatToken } = useDisplayFiat();
   const provider = getActiveSwapProvider(params.providerId);
 
   // Real token logos from the Soroswap token list (fallback to local assets).
@@ -100,8 +95,8 @@ const ConfirmSwap = () => {
     authResolveRef.current = null;
   };
 
-  const spendUsd = formatUsd(params.amountIn, prices?.[params.fromCode]?.price);
-  const receiveUsd = formatUsd(quote?.amountOut ?? '0', prices?.[params.toCode]?.price);
+  const spendFiat = formatToken(params.amountIn, prices?.[params.fromCode]?.price).text;
+  const receiveFiat = formatToken(quote?.amountOut ?? '0', prices?.[params.toCode]?.price).text;
   const accountLabel = smartAccountAddress ? maskAddress(smartAccountAddress) : '—';
 
   const handleConfirm = async () => {
@@ -273,7 +268,7 @@ const ConfirmSwap = () => {
                 -{params.amountIn} {params.fromCode}
               </Text>
               <Text variant="p8" color="textSecondary">
-                {spendUsd}
+                {spendFiat}
               </Text>
             </Box>
           </Box>
@@ -307,7 +302,7 @@ const ConfirmSwap = () => {
                 +{quote?.amountOut ?? '—'} {params.toCode}
               </Text>
               <Text variant="p8" color="textSecondary">
-                {receiveUsd}
+                {receiveFiat}
               </Text>
             </Box>
             <Box>

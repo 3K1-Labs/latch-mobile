@@ -7,6 +7,7 @@ import React from 'react';
 import { Linking, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { fetchTxDetails } from '@/src/api/tx-details';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import UtilityHeader from '@/src/components/shared/UtilityHeader';
@@ -14,30 +15,8 @@ import TransactionDetailCard from '@/src/components/transaction/TransactionDetai
 import TransactionHashBox from '@/src/components/transaction/TransactionHashBox';
 import TransactionStatusHeader from '@/src/components/transaction/TransactionStatusHeader';
 import TransactionTimeline from '@/src/components/transaction/TransactionTimeline';
-import { ACTIVE_NETWORK, getTransactionExplorerUrl, HORIZON_URL } from '@/src/constants/config';
+import { ACTIVE_NETWORK, getTransactionExplorerUrl } from '@/src/constants/config';
 import { useAppTheme } from '@/src/theme/ThemeContext';
-
-async function fetchTxDetails(hash: string): Promise<{ fee: string; ledger: string }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', `${HORIZON_URL}/transactions/${encodeURIComponent(hash)}`, true);
-    xhr.setRequestHeader('Accept', 'application/json');
-    xhr.timeout = 12000;
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        const feeStroops = parseInt(data.fee_charged ?? '0', 10);
-        const feeXLM = String(parseFloat((feeStroops / 10_000_000).toFixed(7)));
-        resolve({ fee: `${feeXLM} XLM`, ledger: String(data.ledger ?? '—') });
-      } catch {
-        resolve({ fee: '—', ledger: '—' });
-      }
-    };
-    xhr.onerror = () => resolve({ fee: '—', ledger: '—' });
-    xhr.ontimeout = () => resolve({ fee: '—', ledger: '—' });
-    xhr.send();
-  });
-}
 
 const TransactionDetailScreen = () => {
   const router = useRouter();

@@ -13,10 +13,13 @@ import { Theme } from '@/src/theme/theme';
 
 interface AddAccountInfoProps {
   defaultName: string;
-  onBack: () => void;
+  /** Omit to hide the header back button (e.g. when account creation is mandatory). */
+  onBack?: () => void;
   onSubmit: (name: string, image: string | null) => void;
   isSubmitting?: boolean;
   errorMessage?: string | null;
+  /** Optional ghost button rendered under the primary action. */
+  secondaryAction?: { label: string; onPress: () => void; disabled?: boolean };
 }
 
 const AddAccountInfoSchema = Yup.object().shape({
@@ -29,6 +32,7 @@ const AddAccountInfo = ({
   onSubmit,
   isSubmitting,
   errorMessage,
+  secondaryAction,
 }: AddAccountInfoProps) => {
   const theme = useTheme<Theme>();
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -62,9 +66,13 @@ const AddAccountInfo = ({
         mt={'s'}
         mb="l"
       >
-        <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="chevron-back" size={20} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
+        {onBack ? (
+          <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="chevron-back" size={20} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
+        ) : (
+          <Box width={40} />
+        )}
 
         <Text variant="h10" color="textPrimary" fontWeight="800">
           Create Account
@@ -160,6 +168,26 @@ const AddAccountInfo = ({
                   </Text>
                 </Box>
               </TouchableOpacity>
+
+              {secondaryAction && (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={secondaryAction.onPress}
+                  disabled={secondaryAction.disabled}
+                  style={{ marginTop: 12 }}
+                >
+                  <Box height={52} justifyContent="center" alignItems="center">
+                    <Text
+                      variant="h11"
+                      color="textSecondary"
+                      fontWeight="700"
+                      style={{ opacity: secondaryAction.disabled ? 0.5 : 1 }}
+                    >
+                      {secondaryAction.label}
+                    </Text>
+                  </Box>
+                </TouchableOpacity>
+              )}
             </Box>
           </Box>
         )}

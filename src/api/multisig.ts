@@ -14,8 +14,9 @@
  * platform TLS stack via OkHttp, which Axios bypasses.
  */
 
-const API_ROOT = process.env.EXPO_PUBLIC_WALLET_BACKEND_URL ?? '';
-const API_BASE = `${API_ROOT}/v1/multisig/wallets`;
+import { API_BASE_URL } from '../constants/api-host';
+
+const API_BASE = `${API_BASE_URL}/v1/multisig/wallets`;
 
 export type MultisigWalletState =
   | 'pending_invites'

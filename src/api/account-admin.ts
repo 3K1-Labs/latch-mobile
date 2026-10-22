@@ -109,7 +109,7 @@ function encodeContextRuleType(t: ContextRuleType): xdr.ScVal {
 }
 
 /** SimpleThresholdAccountParams ScVal — the install payload for ThresholdPolicy. */
-function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
+export function encodeThresholdPolicyParams(threshold: number): xdr.ScVal {
   return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
       key: xdr.ScVal.scvSymbol('threshold'),
@@ -194,6 +194,21 @@ export function batchAddSignerOp(
     'batch_add_signer',
     xdr.ScVal.scvU32(ruleId),
     xdr.ScVal.scvVec(signers.map(encodeRuntimeSigner)),
+  );
+}
+
+/** `add_policy(rule_id, policy, install_param)` — returns the policy's u32 id on-chain. */
+export function addPolicyOp(
+  accountAddress: string,
+  ruleId: number,
+  policyAddress: string,
+  installParam: xdr.ScVal,
+): xdr.Operation {
+  return new Contract(accountAddress).call(
+    'add_policy',
+    xdr.ScVal.scvU32(ruleId),
+    new Address(policyAddress).toScVal(),
+    installParam,
   );
 }
 
@@ -343,6 +358,17 @@ export interface ChainSigner {
    * byte-compatible (isVerifierCompatible) before re-registering this signer.
    */
   foreignVerifier?: boolean;
+  /**
+   * The signer's stable on-chain id, from the rule's `signer_ids` (aligned with
+   * `signers`) — the same account-global u32 that `add_signer` returns and
+   * `remove_signer(rule_id, signer_id)` consumes. This is NOT the signer's
+   * position in the Vec: ids come from a never-reused counter (`NextSignerId`),
+   * so positions drift from ids as soon as any signer is removed. Populated
+   * whenever signers are read via `fetchDefaultContextRule` or
+   * `fetchContextRuleSigners` so that chain-discovered signers that were never
+   * locally persisted (e.g. added on another device) can still be removed.
+   */
+  signerId?: number;
 }
 
 export interface DefaultContextRule {
@@ -350,6 +376,11 @@ export interface DefaultContextRule {
   ruleId: number;
   /** Signers currently attached to the Default rule. */
   signers: ChainSigner[];
+  /**
+   * Policy contract addresses attached to the Default rule. With none, the
+   * contract requires EVERY signer on the rule (N-of-N).
+   */
+  policies: string[];
 }
 
 function bytesToHex(value: unknown): string {
@@ -437,11 +468,43 @@ export async function fetchDefaultContextRule(
     }
     if (rule && isDefaultRuleType(rule.context_type)) {
       const ruleId = typeof rule.id === 'number' ? rule.id : i;
-      const signers = (rule.signers as any[]).map((s) => decodeChainSigner(s, verifiers));
-      return { ruleId, signers };
+      // get_context_rule returns `signer_ids`, aligned with `signers`. These are the
+      // account-global ids remove_signer consumes (never reused after removal),
+      // NOT positions in the Vec. Attach them so callers (syncSignersFromChain)
+      // can populate Device.onChainSignerId for signers discovered here that
+      // were never locally persisted.
+      const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
+      const signers = (rule.signers as any[]).map((s, idx) => ({
+        ...decodeChainSigner(s, verifiers),
+        signerId: signerIds[idx],
+      }));
+      const policies = ((rule.policies as any[]) ?? []).map(String);
+      return { ruleId, signers, policies };
     }
   }
   throw new Error('no Default context rule found on account');
+}
+
+/**
+ * Read an arbitrary context rule's signer set by id, without searching for
+ * the Default rule. Callers that already know the id — e.g. `syncSignersFromChain`
+ * reading `WalletAccount.adminRuleId` to tell a multisig member apart from a
+ * backup signer — use this instead of `fetchDefaultContextRule`.
+ */
+export async function fetchContextRuleSigners(
+  p: SimulationParams,
+  accountAddress: string,
+  ruleId: number,
+): Promise<ChainSigner[]> {
+  const verifiers = await fetchFactoryVerifiers(p);
+  const rule: any = await simulateRead(p, accountAddress, 'get_context_rule', [
+    xdr.ScVal.scvU32(ruleId),
+  ]);
+  const signerIds = (rule.signer_ids as number[] | undefined) ?? [];
+  return (rule.signers as any[]).map((s, idx) => ({
+    ...decodeChainSigner(s, verifiers),
+    signerId: signerIds[idx],
+  }));
 }
 
 /**
@@ -460,8 +523,10 @@ export async function fetchRuleThreshold(
   p: SimulationParams,
   accountAddress: string,
   ruleId: number,
+  /** Pass an already-fetched result to skip fetchFactoryVerifiers' own RPC round-trip. */
+  knownVerifiers?: FactoryVerifiers,
 ): Promise<number> {
-  const verifiers = await fetchFactoryVerifiers(p);
+  const verifiers = knownVerifiers ?? (await fetchFactoryVerifiers(p));
   const threshold = await simulateRead(p, verifiers.thresholdPolicy, 'get_threshold', [
     xdr.ScVal.scvU32(ruleId),
     new Address(accountAddress).toScVal(),

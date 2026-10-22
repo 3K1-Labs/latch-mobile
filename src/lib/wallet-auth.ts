@@ -18,11 +18,16 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
-import { getNetworkId, PASSKEY_RP_ID } from '../constants/config';
+import {
+  getNetworkId,
+  MAINNET_NETWORK,
+  PASSKEY_RP_ID,
+  TESTNET_NETWORK,
+} from '../constants/config';
 import { findDeployedNetwork } from './account-network';
-import { signWithPasskey } from './passkey-webauthn';
+import { signWithStoredPasskeyAtIndex } from './passkey-webauthn';
 import { deriveWalletAtIndex } from './seed-wallet';
-import { getPasskeyStorageKeys, SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
+import { SECURE_KEYS, useWalletStore, type WalletAccount } from '../store/wallet';
 import { API_BASE_URL } from '@/src/constants/api-host';
 
 const API_ROOT = API_BASE_URL;
@@ -220,6 +225,22 @@ async function buildEd25519Payload(
   };
 }
 
+/**
+ * Position of `account` in the accounts array — what `getPasskeyStorageKeys`
+ * and `signWithStoredPasskeyAtIndex` key their SecureStore slots on. Matched
+ * by smart account address rather than object identity: `account` here may be
+ * a copy read fresh from the store rather than the exact stored reference.
+ * Falls back to 0 (the legacy non-indexed slot, where the first passkey
+ * credential always lives) rather than -1 on a miss — every passkey account
+ * has a credential somewhere, and 0 is the only slot guaranteed to exist.
+ */
+function resolvePasskeyListIndex(account: WalletAccount): number {
+  const idx = useWalletStore
+    .getState()
+    .accounts.findIndex((a) => a.smartAccountAddress === account.smartAccountAddress);
+  return idx >= 0 ? idx : 0;
+}
+
 async function buildPasskeyPayload(
   account: WalletAccount,
   nonceB64URL: string,
@@ -227,43 +248,135 @@ async function buildPasskeyPayload(
   wallet: string,
   keyType: string,
 ): Promise<Record<string, string>> {
-  // Find this account's passkey privateKey in SecureStore.
-  // List index 0 uses the legacy non-indexed keys; later indices use suffixes.
-  // We don't have the list index handy here, so probe index 0 first (the
-  // common case) then fall back if missing.
-  const keys0 = getPasskeyStorageKeys(0);
-  let privateKeyHex = await SecureStore.getItemAsync(keys0.privateKey);
-  if (!privateKeyHex) {
-    // Try indexed slots up to a small bound.
-    for (let i = 1; i < 10; i++) {
-      const keys = getPasskeyStorageKeys(i);
-      const credIdHex = await SecureStore.getItemAsync(keys.credentialId);
-      if (credIdHex && credIdHex === account.credentialId) {
-        privateKeyHex = await SecureStore.getItemAsync(keys.privateKey);
-        break;
-      }
-    }
-  }
-  if (!privateKeyHex) throw new Error('passkey private key not found in SecureStore');
+  const listIndex = resolvePasskeyListIndex(account);
 
-  // signWithPasskey embeds challenge=b64url(nonceBytes) inside clientDataJSON
-  // and sets origin=rpId (PASSKEY_RP_ID). The backend allowlist must contain
-  // this rpId value (LATCH_WEBAUTHN_ALLOWED_ORIGINS).
-  const { authenticatorData, clientDataJSON, signature } = await signWithPasskey(
-    privateKeyHex,
+  // signWithStoredPasskeyAtIndex is the one place that knows how to route
+  // between a locally-stored raw key and a real platform passkey (Face ID /
+  // Touch ID via the OS ceremony, no local private key to read at all) — this
+  // used to re-read SecureStore by hand and always assumed a local key,
+  // which is why signing in with a platform-passkey account failed with
+  // "passkey private key not found in SecureStore" (it never had one to
+  // find). It embeds challenge=b64url(nonceBytes) inside clientDataJSON and
+  // sets origin=rpId (PASSKEY_RP_ID) exactly like the old direct call did, so
+  // the backend allowlist requirement (LATCH_WEBAUTHN_ALLOWED_ORIGINS) is
+  // unchanged.
+  const { sig } = await signWithStoredPasskeyAtIndex(
+    listIndex,
     nonceBytes,
     PASSKEY_RP_ID,
+    'Authenticate to sign in',
   );
-  const derSig = compactSigToDER(signature);
+  const derSig = compactSigToDER(sig.signature);
 
   return {
     wallet,
     key_type: keyType,
     nonce: nonceB64URL,
-    authenticator_data: bytesToB64(authenticatorData),
-    client_data_json: bytesToB64(clientDataJSON),
+    authenticator_data: bytesToB64(sig.authenticatorData),
+    client_data_json: bytesToB64(sig.clientDataJSON),
     passkey_signature: bytesToB64(derSig),
   };
+}
+
+export interface NewDevicePasskeySignInResult {
+  tokens: TokenPair;
+  /** This account's on-chain webauthn signer key data (pubkey + credential id), for local bootstrap. */
+  keyDataHex: string;
+  /** hex credential ID the OS ceremony actually used. */
+  credentialId: string;
+  network: 'testnet' | 'mainnet';
+}
+
+/**
+ * Sign in to an EXISTING smart account on a device that has never used it
+ * before — no local SecureStore state required. Only works for accounts
+ * whose primary signer is a real platform passkey (synced via Google
+ * Password Manager / iCloud Keychain, see platform-passkey.ts): the OS
+ * ceremony itself locates the matching synced credential, and the assertion
+ * is verified against the account's ON-CHAIN webauthn signer — never
+ * against anything the client claims locally, so a caller can only ever
+ * sign in as a wallet whose passkey it actually controls.
+ *
+ * Unlike signInWithWallet (which takes an already-known WalletAccount from
+ * the store), this only needs the smart account address — the caller
+ * supplies it (e.g. pasted in on a "Sign in with passkey" screen) and gets
+ * back everything needed to bootstrap a local WalletAccount afterwards.
+ */
+export async function signInToExistingWalletWithPlatformPasskey(
+  smartAccountAddress: string,
+): Promise<NewDevicePasskeySignInResult> {
+  const network = await findDeployedNetwork(smartAccountAddress);
+  if (!network) {
+    throw new Error(
+      "Couldn't find a deployed smart account at that address on either network. Check the address and try again.",
+    );
+  }
+
+  const ch = await xhrPost('/auth/challenge', {
+    wallet: smartAccountAddress,
+    key_type: 'passkey',
+    network,
+  });
+  if (ch.status !== 200 || !ch.body?.data?.nonce) {
+    throw new Error(ch.body?.error?.message ?? `challenge failed (${ch.status})`);
+  }
+  const nonceB64URL = ch.body.data.nonce as string;
+  const nonceBytes = b64URLToBytes(nonceB64URL);
+
+  // Dynamic import: keeps react-native-passkey's native module out of every
+  // consumer of this file unless a platform-passkey sign-in is actually run.
+  const { signWithPlatformPasskey } = await import('./platform-passkey');
+  const sig = await signWithPlatformPasskey({ rpId: PASSKEY_RP_ID, challenge: nonceBytes });
+  const derSig = compactSigToDER(sig.signature);
+
+  const si = await xhrPost('/auth/sign-in', {
+    wallet: smartAccountAddress,
+    key_type: 'passkey',
+    nonce: nonceB64URL,
+    authenticator_data: bytesToB64(sig.authenticatorData),
+    client_data_json: bytesToB64(sig.clientDataJSON),
+    passkey_signature: bytesToB64(derSig),
+    network,
+  });
+  if (si.status !== 200 || !si.body?.data?.access_token) {
+    throw new Error(si.body?.error?.message ?? `sign-in failed (${si.status})`);
+  }
+
+  const tokens: TokenPair = {
+    accessToken: si.body.data.access_token,
+    refreshToken: si.body.data.refresh_token,
+  };
+  await Promise.all([
+    SecureStore.setItemAsync(SECURE_KEYS.WALLET_ACCESS_TOKEN, tokens.accessToken),
+    SecureStore.setItemAsync(SECURE_KEYS.WALLET_REFRESH_TOKEN, tokens.refreshToken),
+  ]);
+
+  // The sign-in above already proved this device holds a valid signer for
+  // the account; now read which on-chain webauthn signer it actually is, so
+  // future transaction signing on this device has keyDataHex to work with.
+  const { fetchDefaultContextRule } = await import('@/src/api/account-admin');
+  const netDetails = network === 'mainnet' ? MAINNET_NETWORK : TESTNET_NETWORK;
+  const rule = await fetchDefaultContextRule(
+    {
+      rpcUrl: netDetails.sorobanRpcUrl,
+      networkPassphrase: netDetails.networkPassphrase,
+      factoryAddress: netDetails.factoryAddress,
+    },
+    smartAccountAddress,
+  );
+  const webauthnSigners = rule.signers.filter((s) => s.kind === 'webauthn');
+  const matched =
+    webauthnSigners.find((s) => s.keyDataHex.toLowerCase().endsWith(sig.credentialIdHex.toLowerCase())) ??
+    // Fall back to the sole webauthn signer — covers the common single-device
+    // case even if credential-id matching fails for some reason.
+    (webauthnSigners.length === 1 ? webauthnSigners[0] : undefined);
+  if (!matched) {
+    throw new Error(
+      "Signed in, but couldn't find a matching passkey signer on this account. Please contact support.",
+    );
+  }
+
+  return { tokens, keyDataHex: matched.keyDataHex, credentialId: sig.credentialIdHex, network };
 }
 
 // Decode a JWT's `exp` and report whether it's past (with a small skew so we

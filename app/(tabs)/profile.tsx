@@ -4,12 +4,12 @@ import AboutSheet from '@/src/components/profile/AboutSheet';
 import AccountInfoSheet from '@/src/components/profile/AccountInfoSheet';
 import AddressBookSheet from '@/src/components/profile/AddressBookSheet';
 import BackupSheet from '@/src/components/profile/BackupSheet';
+import CurrencySheet from '@/src/components/profile/CurrencySheet';
 import DrawerProfileHeader from '@/src/components/profile/DrawerProfileHeader';
 import HelpSupportSheet from '@/src/components/profile/HelpSupportSheet';
 import LogoutItem from '@/src/components/profile/LogoutItem';
 import LogoutPromptSheet from '@/src/components/profile/LogoutPromptSheet';
 import NetworkSheet from '@/src/components/profile/NetworkSheet';
-import NotificationSheet from '@/src/components/profile/NotificationSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
 // import PoliciesSheet from '@/src/components/profile/PoliciesSheet';
 import { getBackupStatus, logout } from '@/src/api/latch-auth';
@@ -19,7 +19,7 @@ import SettingItem from '@/src/components/profile/SettingItem';
 import SignersSheet from '@/src/components/profile/SignersSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { ACTIVE_NETWORK } from '@/src/constants/config';
+import { ACTIVE_NETWORK, MAINNET_NETWORK, TESTNET_NETWORK } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
@@ -27,6 +27,7 @@ import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
@@ -39,20 +40,33 @@ const Profile = () => {
   const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { clearAll, accounts, activeAccountIndex, avatars } = useWalletStore();
   const { closeDrawer } = useDrawer();
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   // const { isDark, toggleTheme } = useAppTheme();
   const [accountInfoVisible, setAccountInfoVisible] = useState(false);
   // const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [switcherVisible, setSwitcherVisible] = useState(false);
+  // Non-null when the switcher should open straight into account creation —
+  // set when a network switch lands on a network with no usable account.
+  const [switcherInitialStep, setSwitcherInitialStep] = useState<'list' | 'add-info'>('list');
   const [recoveryVisible, setRecoveryVisible] = useState(false);
   const [signersVisible, setSignersVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
   // const [policiesVisible, setPoliciesVisible] = useState(false);
   const [addressBookVisible, setAddressBookVisible] = useState(false);
   const [networkVisible, setNetworkVisible] = useState(false);
-  const [, forceNetworkLabelRefresh] = useState(0);
-  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [currencyVisible, setCurrencyVisible] = useState(false);
+  const { selectedCurrency } = useDisplayFiat();
+  // Held as state, not read straight off the ACTIVE_NETWORK module binding in
+  // render: the binding is only reliably live at call time (event handlers, API
+  // calls), and a bare re-render was not reliably picking up the reassignment.
+  // The NetworkSheet calls onNetworkChanged after the switch has applied, and
+  // that callback reads the fresh value.
+  const [networkLabel, setNetworkLabel] = useState(
+    ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network',
+  );
   const [helpSupportVisible, setHelpSupportVisible] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
@@ -63,22 +77,17 @@ const Profile = () => {
 
   const activeAccount = accounts[activeAccountIndex];
   const isPasskeyAccount = !activeAccount?.gAddress;
-
-  // One-shot nudge: if onboarding's backup upload failed, prompt for it here
-  // instead of losing the failure silently — see BACKUP_PENDING and
-  // deploy-account.tsx's Step 5.
-  useEffect(() => {
-    AsyncStorage.getItem(ASYNC_KEYS.BACKUP_PENDING).then((pending) => {
-      if (pending === 'true') {
-        AsyncStorage.removeItem(ASYNC_KEYS.BACKUP_PENDING);
-        setBackupVisible(true);
-      }
-    });
-  }, []);
+  // Locally-cached backup signer count — good enough to decide which screen to
+  // open. account-signers.tsx always syncs from chain on mount, so a stale
+  // count only affects which route is pushed, not what the user sees there.
+  const backupSignerCount = activeAccount?.devices?.filter((d) => d.isBackupSigner).length ?? 0;
 
   if (!activeAccount) return null;
 
   const handleLogout = async () => {
+    await unregisterPush();
+    queryClient.removeQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+    useNotificationStore.getState().reset();
     await logout();
     await clearAll();
     await AsyncStorage.multiRemove([BIOMETRIC_ENABLED_KEY, 'latch_onboarding_complete']);
@@ -138,8 +147,14 @@ const Profile = () => {
 
         <AccountSwitcherSheet
           visible={switcherVisible}
-          onClose={() => setSwitcherVisible(false)}
-          onNeedsBackup={() => setBackupVisible(true)}
+          initialStep={switcherInitialStep}
+          mandatory={switcherInitialStep === 'add-info'}
+          onSwitchBack={handleSwitchBackNetwork}
+          switchBackLabel={`Switch back to ${previousNetworkLabel}`}
+          onClose={() => {
+            setSwitcherVisible(false);
+            setSwitcherInitialStep('list');
+          }}
         />
         <AccountInfoSheet
           visible={accountInfoVisible}
@@ -164,12 +179,21 @@ const Profile = () => {
         <NetworkSheet
           visible={networkVisible}
           onClose={() => setNetworkVisible(false)}
-          onNetworkChanged={() => forceNetworkLabelRefresh((n) => n + 1)}
+          onNetworkChanged={() =>
+            setNetworkLabel(ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network')
+          }
+          onNeedsAccount={() => {
+            setNetworkVisible(false);
+            // Let the network sheet finish dismissing before the switcher slides
+            // up, so they don't cross-fade over each other. Set the step and
+            // visibility together so the sheet's open effect sees 'add-info'.
+            setTimeout(() => {
+              setSwitcherInitialStep('add-info');
+              setSwitcherVisible(true);
+            }, 250);
+          }}
         />
-        <NotificationSheet
-          visible={notificationsVisible}
-          onClose={() => setNotificationsVisible(false)}
-        />
+        <CurrencySheet visible={currencyVisible} onClose={() => setCurrencyVisible(false)} />
         <HelpSupportSheet
           visible={helpSupportVisible}
           onClose={() => setHelpSupportVisible(false)}
@@ -190,7 +214,6 @@ const Profile = () => {
         <SharedWalletWizardSheet
           visible={sharedWalletVisible}
           onClose={() => setSharedWalletVisible(false)}
-          onNeedsBackup={() => setBackupVisible(true)}
         />
 
         <Box paddingHorizontal="m">
@@ -217,7 +240,7 @@ const Profile = () => {
               label="Multisig Wallets"
               onPress={() => setSharedWalletVisible(true)}
             />
-            {activeAccount.isMultisig && (
+            {/* {activeAccount.isMultisig && (
               <SettingItem
                 icon="checkmark-done-outline"
                 label="Approve a Request"
@@ -228,7 +251,7 @@ const Profile = () => {
                   }
                 }}
               />
-            )}
+            )} */}
             <SettingItem
               icon="book-outline"
               label="Address Book"
@@ -262,18 +285,38 @@ const Profile = () => {
               label="Wallet Backup"
               onPress={() => setBackupVisible(true)}
             />
-            <SettingItem
+            {/* <SettingItem
               icon="keypad-outline"
               label="Signers"
               onPress={() => setSignersVisible(true)}
               image={require('@/src/assets/icon/monitor-ipad-mobile.png')}
-            />
+            /> */}
             <SettingItem
               icon="document-text-outline"
               label="Permissions"
               onPress={() => setPermissionsVisible(true)}
               image={require('@/src/assets/icon/mobile-shield-protection.png')}
             />
+            {isPasskeyAccount && (
+              <SettingItem
+                icon="key-outline"
+                label="Backup Signers"
+                value={backupSignerCount > 0 ? String(backupSignerCount) : undefined}
+                onPress={() => {
+                  // Close the drawer first — the drawer is a React Native Modal,
+                  // and navigating without dismissing it leaves its invisible
+                  // backdrop blocking all touches once the Expo Router modal
+                  // screen dismisses. Wait for the close animation (200ms) before
+                  // pushing, matching the pattern used for network switching above.
+                  closeDrawer();
+                  // If there are existing backup signers, go to the list so the
+                  // user can view or remove them. If there are none, go straight
+                  // to the add flow.
+                  const dest = backupSignerCount > 0 ? '/account-signers' : '/add-backup-signer';
+                  setTimeout(() => router.push(dest), 250);
+                }}
+              />
+            )}
             {/* <SettingItem
               icon="options-outline"
               label="Policies"
@@ -295,13 +338,40 @@ const Profile = () => {
             <SettingItem
               icon="globe-outline"
               label="Network"
-              value={ACTIVE_NETWORK.network === 'TESTNET' ? 'Testnet' : 'Public Network'}
+              value={networkLabel}
               onPress={() => setNetworkVisible(true)}
+            />
+            <SettingItem
+              icon="cash-outline"
+              label="Currency"
+              value={selectedCurrency}
+              onPress={() => setCurrencyVisible(true)}
             />
             <SettingItem
               icon="notifications-outline"
               label="Notifications"
-              onPress={() => setNotificationsVisible(true)}
+              rightElement={
+                unreadCount > 0 ? (
+                  <Box
+                    minWidth={20}
+                    height={20}
+                    borderRadius={10}
+                    paddingHorizontal="xs"
+                    mr="s"
+                    justifyContent="center"
+                    alignItems="center"
+                    backgroundColor="primary700"
+                  >
+                    <Text variant="p8" color="textWhite" fontWeight="700">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </Text>
+                  </Box>
+                ) : undefined
+              }
+              onPress={() => {
+                closeDrawer();
+                setTimeout(() => router.push('/notification'), 250);
+              }}
             />
           </Box>
 

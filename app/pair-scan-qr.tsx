@@ -8,6 +8,7 @@
 
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import { PASSKEY_RP_ID } from '@/src/constants/config';
 import {
   decodeChallengeB64,
   encodeSignedChallenge,
@@ -34,8 +35,6 @@ type Stage =
   | { kind: 'signing' }
   | { kind: 'showReply'; payload: string }
   | { kind: 'error'; message: string };
-
-const RP_ID = process.env.EXPO_PUBLIC_PASSKEY_RP_ID || 'https://latch.finance';
 
 export default function PairScanQR() {
   const theme = useTheme<Theme>();
@@ -205,7 +204,7 @@ async function signWithLocalPasskey(
   challenge: Uint8Array,
 ) {
   if (!account?.publicKeyHex) throw new Error('passkey account is missing public key material');
-  return signChallengePasskey(challenge, account.publicKeyHex, RP_ID);
+  return signChallengePasskey(challenge, account.publicKeyHex, PASSKEY_RP_ID);
 }
 
 const styles = StyleSheet.create({

@@ -8,6 +8,30 @@ const buildNumber = String(epochTimeInSeconds);
 const buildVersion = packageJson.version;
 const appName = env.APP_NAME;
 const sentry = env.SENTRY_AUTH_TOKEN;
+// Must match PASSKEY_RP_ID in src/constants/config.ts — the associated domain
+// is how iOS proves this app is authorized to create/use passkeys scoped to
+// that relying party (ASAuthorizationPlatformPublicKeyCredentialProvider).
+// Requires a `.well-known/apple-app-site-association` file with a
+// `webcredentials` entry for this app served from that domain (backend/infra
+// change, outside this repo).
+// Normalised the same way as normalizePasskeyRpId in
+// src/lib/passkey-rp-id.ts — an RP ID configured as a URL would produce
+// `webcredentials:https://example.com`, which iOS cannot parse.
+const passkeyRpId = (env.EXPO_PUBLIC_PASSKEY_RP_ID || 'uselatch.app')
+  .trim()
+  .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+  .replace(/\/.*$/, '');
+
+// iOS verifies an associated domain through Apple's CDN, which a Simulator or
+// a locally-signed debug build never completes — swcd does not even attempt the
+// fetch, so every passkey ceremony fails with "Unable to verify webcredentials
+// association of <team>.<bundle> with domain <rp>". Developer mode makes iOS
+// read https://<rp>/.well-known/apple-app-site-association directly instead.
+//
+// Requires Settings › Developer › Associated Domains Development on a physical
+// device; the Simulator honours it without the toggle. Never applied to an EAS
+// or CI artifact, which must verify through the CDN like a shipped app does.
+const associatedDomainMode = env.isShippingBuild ? '' : '?mode=developer';
 
 export default {
   expo: {
@@ -28,8 +52,9 @@ export default {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: appName === 'Latch' ? 'co.getlatch.latchapp' : 'qa.getlatch.app',
+      bundleIdentifier: 'co.getlatch.latchapp',
       appleTeamId: 'P5QF5H77W5',
+      associatedDomains: [`webcredentials:${passkeyRpId}${associatedDomainMode}`],
       ...(process.env.GOOGLE_SERVICES_IOS || existsSync('./GoogleService-Info.plist')
         ? { googleServicesFile: process.env.GOOGLE_SERVICES_IOS ?? './GoogleService-Info.plist' }
         : {}),
@@ -71,6 +96,8 @@ export default {
         'android.permission.USE_FINGERPRINT',
         'android.permission.CAMERA',
         'android.permission.POST_NOTIFICATIONS',
+        'android.permission.READ_EXTERNAL_STORAGE',
+        'android.permission.WRITE_EXTERNAL_STORAGE',
       ],
     },
     web: {
@@ -135,9 +162,18 @@ export default {
       [
         'expo-build-properties',
         {
+          ios: {
+            enableSceneSupport: true,
+          },
           android: {
             compileSdkVersion: 36,
-            targetSdkVersion: 35,
+            // Play rejects an upload whose target API is below the level it
+            // required a year earlier ("Target SDK of artifact is too low"),
+            // and that floor moved to 36 on 2026-08-31. Pinned rather than left
+            // to the Expo default because it is a store deadline, not a
+            // preference: it has to move on Google's schedule, and an explicit
+            // number is what makes the next bump a visible edit.
+            targetSdkVersion: 36,
             buildToolsVersion: '36.0.0',
             gradlePluginVersion: '8.9.1',
             ndk: '27.1.12297006',
@@ -145,15 +181,24 @@ export default {
           },
         },
       ],
+      // The plugin is added only when a token is available, so a build without
+      // one skips source-map upload instead of failing on it.
+      //
+      // `authToken` and `url` are deliberately NOT passed here. Passing the
+      // token inline bakes it into the resolved config (the plugin warns:
+      // "Detected unsecure use of 'authToken'"), and setting `url` alongside a
+      // token that sentry-cli reads from the environment makes the two come
+      // from different configuration sources, which makes sentry-cli discard
+      // the URL ("Ignoring a configured URL..."). sentry-cli reads
+      // SENTRY_AUTH_TOKEN from the environment on its own, and defaults to
+      // sentry.io, so both are better left unset.
       ...(sentry
         ? [
             [
               '@sentry/react-native/expo',
               {
-                url: 'https://sentry.io/',
-                authToken: sentry,
                 project: 'latch-mobile',
-                organization: 'latch',
+                organization: 'latch-ha',
               },
             ],
           ]

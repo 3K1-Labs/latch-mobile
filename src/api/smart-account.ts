@@ -24,13 +24,13 @@ import {
   TransactionBuilder,
   xdr,
 } from '@stellar/stellar-sdk';
-import QuickCrypto from 'react-native-quick-crypto';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 import { deployMultisigAccount, deploySeedWalletAccount } from '@/src/api/smart-account-deploy';
 import { AccountSigner, encodeAccountInitParams } from '@/src/lib/account-signers';
 import {
   ACTIVE_NETWORK,
-  HORIZON_URL,
   STELLAR_FACTORY_ADDRESS,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -41,6 +41,7 @@ import {
   sortSignersCanonical,
 } from '@/src/lib/multisig-address';
 import {
+  fetchRpcAccount,
   ledgerKeyToBase64,
   parseSimResult,
   sorobanCall,
@@ -67,9 +68,7 @@ const deploymentCache = new Map<string, { smartAccountAddress: string; gAddress?
 
 async function deriveSalt(input: string): Promise<Buffer> {
   const SMART_ACCOUNT_VERSION = 'factory-v2';
-  const saltHex = QuickCrypto.createHash('sha256')
-    .update(input + SMART_ACCOUNT_VERSION)
-    .digest('hex');
+  const saltHex = bytesToHex(sha256(utf8ToBytes(input + SMART_ACCOUNT_VERSION)));
   return Buffer.from(saltHex, 'hex');
 }
 
@@ -110,8 +109,7 @@ function deriveGAddressFromPubkey(pubkeyHex: string): string {
 
 async function fundAccountIfNeeded(gAddress: string): Promise<void> {
   try {
-    const horizonResponse = await fetch(`${HORIZON_URL}/accounts/${gAddress}`);
-    if (horizonResponse.ok) return;
+    if (await fetchRpcAccount(STELLAR_RPC_URL, gAddress)) return;
   } catch {}
 
   // Friendbot only exists on testnet — on mainnet an unfunded account means

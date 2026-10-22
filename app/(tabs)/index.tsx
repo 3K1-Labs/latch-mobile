@@ -11,12 +11,14 @@ import { getNetworkId } from '@/src/constants/config';
 import { useDrawer } from '@/src/context/drawer-context';
 import { useTabBarScroll } from '@/src/context/tab-bar-scroll';
 import { useCreateDepositIntent } from '@/src/hooks/use-deposit';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { usePortfolio, type TokenBalance } from '@/src/hooks/use-portfolio';
 import { usePrices } from '@/src/hooks/use-prices';
 import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { discoverMigration } from '@/src/lib/migration';
+import { useNotificationStore } from '@/src/store/notification-store';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
@@ -65,21 +67,23 @@ function TokenRow({
   showBalance,
   isDark,
   theme,
+  fiatLabel,
 }: {
   token: TokenBalance;
   showBalance: boolean;
   isDark: boolean;
   theme: Theme;
+  fiatLabel: string;
 }) {
   const iconUrl = useTokenIcon(token.code, token.issuer);
   const amount = parseFloat(token.amount);
+  // 7dp for every token, not just XLM — a non-native balance under 0.01 (e.g.
+  // dust left over from a swap) otherwise rounds to the same "0.00" shown for
+  // an empty wallet. minimumFractionDigits still pads a round number to 2dp,
+  // so this is a no-op for ordinary balances.
   const formattedAmount = amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: token.code === 'XLM' ? 7 : 2,
-  });
-  const formattedUsd = token.usdValue.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 7,
   });
 
   return (
@@ -120,7 +124,7 @@ function TokenRow({
           {showBalance ? `${formattedAmount} ${token.code}` : '****'}
         </Text>
         <Text variant="p8" color="textSecondary" mt="xs">
-          {showBalance ? `$${formattedUsd}` : '****'}
+          {showBalance ? fiatLabel : '****'}
         </Text>
       </Box>
     </Box>
@@ -274,6 +278,7 @@ const Home = () => {
   const activeAccountImage = activeAccount ? avatars[activeAccount.publicKeyHex] : undefined;
 
   const { openDrawer } = useDrawer();
+  const unreadNotifications = useNotificationStore((s) => s.unreadCount);
 
   const { tokens: trackedTokens } = useTrackedTokens();
 
@@ -282,6 +287,7 @@ const Home = () => {
     refetch: refetchPrices,
     isPlaceholderData: pricesArePlaceholder,
   } = usePrices();
+  const { formatUsdValue, formatToken, usedFallback } = useDisplayFiat();
   // No blocking overlay on either of these. Both render their own section
   // state, so balances are usable while the (far slower) history scan is still
   // running, and a cold start paints the last known values immediately from the
@@ -377,7 +383,7 @@ const Home = () => {
 
   return (
     <Box flex={1} backgroundColor="onboardingbg">
-      <StatusBar style={'light'} />
+      <StatusBar style={'dark'} />
       {/* Header */}
       <Box
         flexDirection="row"
@@ -419,6 +425,16 @@ const Home = () => {
               {activeAccountName}
             </Text>
             <Ionicons name="chevron-down" size={14} color={theme.colors.textPrimary} />
+            {unreadNotifications > 0 && (
+              <Box
+                position="absolute"
+                width={10}
+                height={10}
+                borderRadius={5}
+                backgroundColor="primary700"
+                style={{ top: 0, left: 0, borderWidth: 2, borderColor: theme.colors.mainBackground }}
+              />
+            )}
           </Box>
         </TouchableOpacity>
 
@@ -482,10 +498,7 @@ const Home = () => {
                 : // No figure at all beats a fabricated one: with nothing fetched
                   // and nothing cached, "$0.00" would read as an empty wallet.
                   portfolio
-                  ? `$${totalUsd.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
+                  ? formatUsdValue(totalUsd).text
                   : '—'}
             </Text>
           )}
@@ -531,6 +544,11 @@ const Home = () => {
           {balanceStatus && (
             <Text variant="p8" color="textSecondary" mt="xs">
               {balanceStatus}
+            </Text>
+          )}
+          {usedFallback && showBalance && (
+            <Text variant="p8" color="textSecondary" mt="xs">
+              Showing USD — rate unavailable
             </Text>
           )}
         </Box>
@@ -611,6 +629,9 @@ const Home = () => {
                 <TokenRow
                   key={token.code + (token.issuer ?? '')}
                   token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
+                  fiatLabel={
+                    formatToken(token.amount, livePrices[token.code]?.price, { approx: false }).text
+                  }
                   showBalance={showBalance}
                   isDark={isDark}
                   theme={theme}

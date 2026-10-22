@@ -77,7 +77,7 @@ export function signChallengeEd25519(
  *
  * @param keyDataHex  Hex of the on-chain key_data for this passkey. Stored
  *                    locally in SECURE_KEYS.KEY_DATA_HEX.
- * @param rpId        Relying party ID (e.g. "latch.finance"). Must match
+ * @param rpId        Relying party ID (e.g. "uselatch.app"). Must match
  *                    what the passkey was registered with.
  */
 export async function signChallengePasskey(
