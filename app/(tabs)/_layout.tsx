@@ -3,8 +3,8 @@ import { CustomTabBar } from '@/src/components/CustomTabBar';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import { DrawerProvider } from '@/src/context/drawer-context';
 import { TabBarScrollProvider } from '@/src/context/tab-bar-scroll';
-import { usePushNotifications } from '@/src/hooks/use-push-notifications';
-import { useUnreadCount } from '@/src/hooks/use-unread-count';
+// import { usePushNotifications } from '@/src/hooks/use-push-notifications';
+// import { useUnreadCount } from '@/src/hooks/use-unread-count';
 import { useLoadingOverlay } from '@/src/store/loading-overlay';
 import { useWalletStore } from '@/src/store/wallet';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -24,8 +24,8 @@ const TabsLayout = () => {
   }, [rehydrateWallet]);
 
   // Post-auth surface: register for content-free approval pushes + handle taps.
-  usePushNotifications();
-  useUnreadCount();
+  // usePushNotifications();
+  // useUnreadCount();
 
   return (
     <BottomSheetModalProvider>

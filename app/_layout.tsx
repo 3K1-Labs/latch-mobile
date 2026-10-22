@@ -21,7 +21,7 @@ import { queryClient } from '../src/api/client';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
-import { useNetworkStatus } from '../src/hooks/use-network-status';
+// import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
@@ -78,7 +78,7 @@ function RootLayoutContent() {
   useOtaUpdate();
   useWalletConnect();
   useWalletConnectDeepLink();
-  useNetworkStatus();
+  // useNetworkStatus();
   useDeviceIntegrity();
 
   return (
