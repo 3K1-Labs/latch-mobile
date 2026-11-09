@@ -7,7 +7,13 @@ import {
   VariantProps,
 } from '@shopify/restyle';
 import React from 'react';
-import { ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleProp,
+  StyleSheet,
+  TextStyle,
+  TouchableOpacity,
+} from 'react-native';
 import { Theme } from '../../theme/theme';
 import Box, { BoxProps } from './Box';
 import Text from './Text';
@@ -33,6 +39,7 @@ interface Props extends BoxProps {
   leftIcon?: any;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   labelColor?: keyof Theme['colors'];
+  labelStyle?: StyleProp<TextStyle>;
 }
 
 const Button: React.FC<Props> = ({
@@ -44,6 +51,7 @@ const Button: React.FC<Props> = ({
   leftIcon,
   rightIcon,
   labelColor,
+  labelStyle,
   bg,
   ...rest
 }) => {
@@ -72,7 +80,7 @@ const Button: React.FC<Props> = ({
           <ActivityIndicator color={theme.colors.primary700} />
         </Box>
       )}
-      <Text variant="body" fontWeight="bold" color={finalLabelColor} style={styles.label}>
+      <Text variant="body" fontWeight="bold" color={finalLabelColor} style={[styles.label, labelStyle]}>
         {label}
       </Text>
       {rightIcon && (

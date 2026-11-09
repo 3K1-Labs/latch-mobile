@@ -185,6 +185,11 @@ const sharedColors = {
   btnHover: '#6D3E04',
   btnBorder: '#2B2A29',
 
+  surfaceBase: '#020202',
+  textSubheading: '#706F6F',
+  textSubtle: '#413F3F',
+  buttonLabel: '#111111',
+
   mainColorHover: '#A67100',
 
   black: palette.black,
