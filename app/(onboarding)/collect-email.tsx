@@ -20,21 +20,22 @@ import {
   verifyOTP,
   verifyRecoveryOTP,
 } from '@/src/api/latch-auth';
+import {
+  RoundBackButton,
+  SetupButton,
+  SetupHeading,
+} from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import { LATCH_PRIVACY_URL } from '@/src/constants/constants';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useRef, useState } from 'react';
 import {
-  Image,
   Linking,
   StyleSheet,
   TextInput,
@@ -214,17 +215,10 @@ const CollectEmail = () => {
   return (
     <Box
       flex={1}
-      backgroundColor="onboardingbg"
-      paddingHorizontal="m"
-      style={{ paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 24) }}
+      backgroundColor="surfaceBase"
+      paddingHorizontal="l"
+      style={{ paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 24) }}
     >
-      <LinearGradient
-        colors={[theme.colors.gradientLight, theme.colors.gradientDark]}
-        locations={[0, 0.2772]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.9 }}
-        style={StyleSheet.absoluteFill}
-      />
       <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ flexGrow: 1 }}
@@ -234,8 +228,8 @@ const CollectEmail = () => {
         <StatusBar style={statusBarStyle} />
 
         {/* Header */}
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-          <TouchableOpacity
+        <Box mb="m">
+          <RoundBackButton
             onPress={() => {
               if (phase === 'otp') {
                 setPhase('email');
@@ -246,35 +240,12 @@ const CollectEmail = () => {
               }
             }}
             disabled={isLoading}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={24}
-              color={isLoading ? theme.colors.textSecondary : theme.colors.textPrimary}
-            />
-          </TouchableOpacity>
-          <Image
-            source={require('@/src/assets/images/logoLoading.png')}
-            style={{ width: 35, height: 35 }}
-            resizeMode="contain"
           />
-          <Box width={24} />
         </Box>
 
         {/* Title */}
-        <Box alignItems="center" mt="xl" mb="xxl">
-          <Text variant="h7" fontSize={30} textAlign="center" fontWeight="700" color="textPrimary">
-            {title}
-          </Text>
-          <Text
-            variant="body"
-            color="textSecondary"
-            // mt="s"
-            textAlign="center"
-            style={{ width: '85%' }}
-          >
-            {subtitle}
-          </Text>
+        <Box mt="l" mb="xxl">
+          <SetupHeading title={title} subtitle={subtitle} />
         </Box>
 
         {/* Input */}
@@ -284,7 +255,9 @@ const CollectEmail = () => {
               Email Address
             </Text>
             <Box
-              backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+              backgroundColor="inputBox"
+              borderWidth={1}
+              borderColor="inputOutline"
               borderRadius={16}
               paddingHorizontal="m"
               height={56}
@@ -317,7 +290,7 @@ const CollectEmail = () => {
                 ]}
               />
             </Box>
-            <Text variant="caption" color="textSecondary" mb="m">
+            <Text variant="caption" color="textSubheading" mb="m">
               We use email for security alerts, for unsubscribing, and other details. See our
               <Text
                 variant="caption"
@@ -332,7 +305,9 @@ const CollectEmail = () => {
           </>
         ) : (
           <Box
-            backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+            backgroundColor="inputBox"
+            borderWidth={1}
+            borderColor="inputOutline"
             borderRadius={16}
             paddingHorizontal="m"
             height={56}
@@ -366,7 +341,7 @@ const CollectEmail = () => {
 
         {/* Primary button */}
         <Box mt={'auto'}>
-          <Button
+          <SetupButton
             label={
               isLoading
                 ? ''
@@ -376,11 +351,8 @@ const CollectEmail = () => {
                     ? 'Recover Account'
                     : 'Verify'
             }
-            variant={isLoading ? 'disabled' : 'primary'}
-            bg={isLoading ? 'btnDisabled' : 'primary700'}
-            labelColor={isLoading ? 'gray600' : 'black'}
+            busy={isLoading}
             onPress={phase === 'email' ? handleSendCode : handleVerify}
-            disabled={isLoading}
             mt={'auto'}
           />
           {phase === 'otp' && (
@@ -407,7 +379,7 @@ const CollectEmail = () => {
                 disabled={isLoading}
                 activeOpacity={0.7}
               >
-                <Text variant="body" color="textSecondary">
+                <Text variant="body" color="textSubheading">
                   Skip for now
                 </Text>
               </TouchableOpacity>

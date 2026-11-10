@@ -189,6 +189,11 @@ const sharedColors = {
   textSubheading: '#706F6F',
   textSubtle: '#413F3F',
   buttonLabel: '#111111',
+  inputBox: '#0F0F0F',
+  inputOutline: '#1A1A1A',
+  textMuted: '#A09F9F',
+  accentGreen: '#76B101',
+  sheetDim: '#101010',
 
   mainColorHover: '#A67100',
 

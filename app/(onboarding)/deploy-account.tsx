@@ -17,9 +17,8 @@ import { deploySmartAccount as deploySmartAccountEd25519 } from '@/src/api/smart
 import { discoverMigration } from '@/src/lib/migration';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { SetupButton, SetupHeading } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
-import Text from '@/src/components/shared/Text';
 import DeployTimeline, { type DeployStep, type StepStatus } from '@/src/components/deploy/DeployTimeline';
 import {
   getStoredPasskeyLabel,
@@ -30,15 +29,12 @@ import {
 import { getNetworkId } from '@/src/constants/config';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
-import { Theme } from '@/src/theme/theme';
-import { useTheme } from '@shopify/restyle';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Image, StyleSheet } from 'react-native';
+import { AccessibilityInfo, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Stage =
@@ -129,7 +125,6 @@ async function getOrCreatePasskeyCredentials(): Promise<{
 }
 
 const DeployAccount = () => {
-  const theme = useTheme<Theme>();
   const statusBarStyle = useStatusBarStyle();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -442,19 +437,12 @@ const DeployAccount = () => {
         : 'This usually takes a few moments. Keep the app open.';
 
   return (
-    <Box flex={1} backgroundColor="mainBackground">
-      <LinearGradient
-        colors={[theme.colors.gradientLight, theme.colors.gradientDark]}
-        locations={[0, 0.2772]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.9 }}
-        style={StyleSheet.absoluteFill}
-      />
+    <Box flex={1} backgroundColor="surfaceBase">
       <StatusBar style={statusBarStyle} />
 
       <Box
         flex={1}
-        paddingHorizontal="xl"
+        paddingHorizontal="l"
         style={{ paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 24) }}
       >
         {/* Logo */}
@@ -466,12 +454,7 @@ const DeployAccount = () => {
 
         {/* Hero */}
         <Box mt="xxl">
-          <Text variant="h7" fontSize={30} fontWeight="700" color="textPrimary" lineHeight={38}>
-            {heading}
-          </Text>
-          <Text variant="body" color="textSecondary" mt="s" lineHeight={22}>
-            {subheading}
-          </Text>
+          <SetupHeading title={heading} subtitle={subheading} align="left" />
         </Box>
 
         {/* Timeline */}
@@ -483,13 +466,7 @@ const DeployAccount = () => {
 
         {/* Error recovery — bottom anchored */}
         {stage === 'error' && (
-          <Button
-            label="Try Again"
-            variant="primary"
-            onPress={retry}
-            bg="primary700"
-            labelColor="black"
-          />
+          <SetupButton label="Try Again" onPress={retry} />
         )}
       </Box>
     </Box>

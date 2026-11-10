@@ -12,16 +12,18 @@
 
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { fetchAndRestoreBackup, LatchAPIError, uploadBackup } from '@/src/api/latch-auth';
+import {
+  RoundBackButton,
+  SetupButton,
+  SetupHeading,
+} from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import { SECURE_KEYS } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { shortenAddress } from '@/src/utils';
-import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
@@ -29,7 +31,6 @@ import { Formik } from 'formik';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -158,46 +159,20 @@ const SetRecoveryPassword = () => {
     >
       <Box
         flex={1}
-        backgroundColor="onboardingbg"
-        paddingHorizontal="m"
-        style={{ paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 24) }}
+        backgroundColor="surfaceBase"
+        paddingHorizontal="l"
+        style={{ paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 24) }}
       >
-        <LinearGradient
-          colors={[theme.colors.gradientLight, theme.colors.gradientDark]}
-          locations={[0, 0.2772]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 0.9 }}
-          style={StyleSheet.absoluteFill}
-        />
         <StatusBar style={statusBarStyle} />
 
         {/* Header */}
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-          <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-          </TouchableOpacity>
-          <Image
-            source={require('@/src/assets/images/logoLoading.png')}
-            style={{ width: 35, height: 35 }}
-            resizeMode="contain"
-          />
-          <Box width={24} />
+        <Box mb="m">
+          <RoundBackButton onPress={() => router.back()} />
         </Box>
 
         {/* Title */}
-        <Box alignItems="center" mt="xl" mb="xxl">
-          <Text variant="h7" fontSize={30} textAlign="center" fontWeight="700" color="textPrimary">
-            {title}
-          </Text>
-          <Text
-            variant="body"
-            color="textSecondary"
-            mt="s"
-            textAlign="center"
-            style={{ width: '85%' }}
-          >
-            {subtitle}
-          </Text>
+        <Box mt="l" mb="xxl">
+          <SetupHeading title={title} subtitle={subtitle} />
         </Box>
 
         {walletChoices ? (
@@ -210,7 +185,9 @@ const SetRecoveryPassword = () => {
                 activeOpacity={0.7}
               >
                 <Box
-                  backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+                  backgroundColor="inputBox"
+                  borderWidth={1}
+                  borderColor="inputOutline"
                   borderRadius={16}
                   paddingHorizontal="m"
                   height={56}
@@ -254,7 +231,9 @@ const SetRecoveryPassword = () => {
             <Box flex={1}>
               {/* Password field */}
               <Box
-                backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+                backgroundColor="inputBox"
+                borderWidth={1}
+                borderColor="inputOutline"
                 borderRadius={16}
                 paddingHorizontal="m"
                 height={56}
@@ -286,7 +265,9 @@ const SetRecoveryPassword = () => {
               {!isEnter && (
                 <>
                   <Box
-                    backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
+                    backgroundColor="inputBox"
+                    borderWidth={1}
+                    borderColor="inputOutline"
                     borderRadius={16}
                     paddingHorizontal="m"
                     height={56}
@@ -318,13 +299,10 @@ const SetRecoveryPassword = () => {
               )}
 
               <Box mt="auto">
-                <Button
+                <SetupButton
                   label={isSubmitting ? '' : isEnter ? 'Restore Wallet' : 'Continue'}
-                  variant={isSubmitting ? 'disabled' : 'primary'}
-                  bg={isSubmitting ? 'btnDisabled' : 'primary700'}
-                  labelColor={isSubmitting ? 'gray600' : 'black'}
+                  busy={isSubmitting}
                   onPress={() => submit()}
-                  disabled={isSubmitting}
                 />
                 {isSubmitting && (
                   <Box

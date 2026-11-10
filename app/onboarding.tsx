@@ -1,11 +1,11 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
-import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
 import OnboardingIllustration, {
   ARTBOARD_HEIGHT,
   ARTBOARD_WIDTH,
 } from '@/src/components/onboarding/OnboardingIllustration';
 import { ONBOARDING_SLIDES } from '@/src/components/onboarding/slides';
+import Box from '@/src/components/shared/Box';
+import Button from '@/src/components/shared/Button';
 import ProgressPagination from '@/src/components/shared/ProgressPagination';
 import Text from '@/src/components/shared/Text';
 import { LATCH_TERMS_URL } from '@/src/constants/constants';
@@ -13,7 +13,7 @@ import { clearProvisionedPasskeyAtIndex } from '@/src/lib/provision-passkey';
 import * as Sentry from '@sentry/react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FlatList, Linking, StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -137,7 +137,7 @@ const Onboarding = () => {
                   { tags: { scope: 'onboarding-new-wallet-clear' } },
                 );
               }
-              router.navigate('/(auth)/biometric');
+              router.navigate('/(onboarding)/create-wallet');
             }}
             // onPress={() => router.navigate('/(onboarding)/choose-wallet')}
           />

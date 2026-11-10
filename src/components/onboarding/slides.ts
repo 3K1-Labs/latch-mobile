@@ -38,7 +38,7 @@ export type OnboardingSlide = {
   illustration: Illustration;
 };
 
-const frame = (left: number, top: number, width: number, height: number): Frame => ({
+export const frame = (left: number, top: number, width: number, height: number): Frame => ({
   left,
   top,
   width,
@@ -55,7 +55,7 @@ const inset =
       (1 - (top + bottom) / 100) * height,
     );
 
-const solo = (
+export const solo = (
   source: ImageSourcePropType,
   box: Frame,
   options: Omit<ArtPart, 'source' | 'frame'> & { motion?: Motion } = {},

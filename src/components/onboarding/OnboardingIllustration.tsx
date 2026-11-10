@@ -103,15 +103,20 @@ const MovingLayer = ({
 interface Props {
   illustration: Illustration;
   scale: number;
+  height?: number;
 }
 
-const OnboardingIllustration: React.FC<Props> = ({ illustration, scale }) => {
+const OnboardingIllustration: React.FC<Props> = ({
+  illustration,
+  scale,
+  height = ARTBOARD_HEIGHT,
+}) => {
   const { artboard, clip, durationMs, layers } = illustration;
   const reducedMotion = useReducedMotion();
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    if (reducedMotion) return;
+    if (reducedMotion || !durationMs) return;
     progress.value = withRepeat(
       withTiming(1, { duration: durationMs, easing: Easing.linear }),
       -1,
@@ -121,7 +126,7 @@ const OnboardingIllustration: React.FC<Props> = ({ illustration, scale }) => {
   }, [durationMs, progress, reducedMotion]);
 
   return (
-    <Box style={{ width: ARTBOARD_WIDTH * scale, height: ARTBOARD_HEIGHT * scale }}>
+    <Box style={{ width: ARTBOARD_WIDTH * scale, height: height * scale }}>
       <Box style={[styles.canvas, { transform: [{ scale }] }]}>
         <Box style={[styles.layer, artboard, clip && styles.clip]}>
           {layers.map((layer, index) =>

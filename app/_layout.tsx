@@ -18,9 +18,11 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import 'react-native-reanimated';
 import '../shim';
 import { queryClient } from '../src/api/client';
+import Box from '../src/components/shared/Box';
 import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
+import { useInactivityLock } from '../src/hooks/use-inactivity-lock';
 // import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
@@ -80,9 +82,10 @@ function RootLayoutContent() {
   useWalletConnectDeepLink();
   // useNetworkStatus();
   useDeviceIntegrity();
+  const recordActivity = useInactivityLock();
 
   return (
-    <>
+    <Box flex={1} onTouchStart={recordActivity}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="send-token" options={{ presentation: 'modal' }} />
@@ -121,7 +124,7 @@ function RootLayoutContent() {
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppToast />
       {/* <TestnetBanner /> */}
-    </>
+    </Box>
   );
 }
 

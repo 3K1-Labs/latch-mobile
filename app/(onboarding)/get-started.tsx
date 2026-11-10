@@ -6,12 +6,10 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RoundBackButton, SetupButton, SetupTitle } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
-import Header from '@/src/components/shared/Header';
 import Text from '@/src/components/shared/Text';
 import { Theme } from '@/src/theme/theme';
-import { LinearGradient } from 'expo-linear-gradient';
 
 type OptionType = 'new-account' | 'seed-phrase' | 'existing-wallet' | 'recover' | 'passkey';
 
@@ -30,7 +28,7 @@ const GetStarted = () => {
     // },
     {
       id: 'seed-phrase' as OptionType,
-      title: 'Import With Seed Phrase',
+      title: 'Import with Seed Phrase',
       description: 'Restore your account using your 12-word recovery phrase',
     },
     {
@@ -48,15 +46,9 @@ const GetStarted = () => {
       title: 'Recover Account',
       description: 'Restore your wallet using your recovery email',
     },
-    // {
-    //   id: 'recover' as OptionType,
-    //   title: 'Recover Account',
-    //   description: 'Restore your wallet using your recovery email',
-    // },
   ];
 
   const handleContinue = () => {
-    // Navigate based on selected option
     switch (selectedOption) {
       // case 'new-account':
       //   router.push('/(onboarding)/recovery-phrase');
@@ -79,92 +71,80 @@ const GetStarted = () => {
   };
 
   return (
-    <Box flex={1} backgroundColor="onboardingbg">
-      <LinearGradient
-        colors={['rgba(50, 60, 14, 0.74)', '#121212']}
-        locations={[0, 0.2772]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.91 }}
-        style={StyleSheet.absoluteFill}
-      />
+    <Box flex={1} backgroundColor="surfaceBase">
       <StatusBar style={statusBarStyle} />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingHorizontal: theme.spacing.m,
-          paddingBottom: 40,
-          paddingTop: 60,
+          paddingHorizontal: theme.spacing.l,
+          paddingTop: insets.top + 12,
+          paddingBottom: 24,
         }}
       >
-        {/* Header Section */}
-        <Box alignItems="center" mb="xxl">
-          <Header />
+        <RoundBackButton onPress={() => router.canGoBack() && router.back()} />
 
-          <Text variant="h7" mt="xs" fontSize={32} textAlign="center">
-            I Have A Wallet
-          </Text>
-          <Text variant="p5" color="textSecondary" mt="xs" textAlign="center" width={'85%'}>
+        <Box style={styles.title}>
+          <SetupTitle title="I have a Wallet">
             Import the wallet you already have or connect an existing stellar wallet.
-          </Text>
+          </SetupTitle>
         </Box>
 
-        {/* Options Section */}
-        <Box gap="m">
-          {options.map((option) => (
-            <TouchableOpacity
-              key={option.id}
-              onPress={() => setSelectedOption(option.id)}
-              activeOpacity={0.7}
-            >
-              <Box
-                flexDirection="row"
-                alignItems="center"
-                gap="m"
-                paddingHorizontal="m"
-                height={90}
-                borderRadius={16}
-                borderWidth={2}
-                borderColor={
-                  selectedOption === option.id
-                    ? 'primary700'
-                    : statusBarStyle !== 'dark'
-                      ? 'gray800'
-                      : 'gray200'
-                }
-                backgroundColor="mainBackground"
+        <Box gap="sm" style={styles.options}>
+          {options.map((option) => {
+            const selected = selectedOption === option.id;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                activeOpacity={0.7}
+                onPress={() => setSelectedOption(option.id)}
               >
-                <Box flex={1}>
-                  <Text variant="h10" color="textPrimary" fontWeight="bold">
+                <Box
+                  style={styles.option}
+                  backgroundColor="inputBox"
+                  borderWidth={1}
+                  borderColor={selected ? 'accentGreen' : 'inputOutline'}
+                >
+                  <Text
+                    variant="p6"
+                    fontFamily="SFproMedium"
+                    lineHeight={24}
+                    letterSpacing={0}
+                    color="textPrimary"
+                  >
                     {option.title}
                   </Text>
-                  <Text variant="p7" color="textSecondary">
+                  <Text variant="p7" color="textSubheading">
                     {option.description}
                   </Text>
                 </Box>
-              </Box>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </Box>
       </ScrollView>
 
-      {/* Continue Button at Bottom */}
-      <Box
-        paddingHorizontal="m"
-        paddingTop="m"
-        backgroundColor="mainBackground"
-        style={{ paddingBottom: Math.max(insets.bottom, 24) }}
-      >
-        <Button
-          label="Continue"
-          variant={selectedOption ? 'primary' : 'disabled'}
-          onPress={handleContinue}
-          bg={selectedOption ? 'primary700' : 'btnDisabled'}
-          labelColor={selectedOption ? 'black' : 'gray600'}
-          disabled={!selectedOption}
-        />
+      <Box px="l" pt="m" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+        <SetupButton label="Continue" disabled={!selectedOption} onPress={handleContinue} />
       </Box>
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  title: {
+    marginTop: 56,
+  },
+  options: {
+    marginTop: 48,
+  },
+  option: {
+    gap: 2,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 24,
+  },
+});
 
 export default GetStarted;

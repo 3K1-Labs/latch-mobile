@@ -1,4 +1,10 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import {
+  CompactSwitch,
+  RoundBackButton,
+  SetupButton,
+  SetupTitle,
+} from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
@@ -100,6 +106,7 @@ const Biometrics = () => {
   const [biometricLabel, setBiometricLabel] = useState('Biometrics');
   const [biometricIcon, setBiometricIcon] = useState<'scan' | 'finger-print'>('scan');
   const [biometricEnabledForUnlock, setBiometricEnabledForUnlock] = useState(false);
+  const [biometricUnlockOn, setBiometricUnlockOn] = useState(true);
 
   const keySize = (width - theme.spacing.m * 2 - theme.spacing.m * 2) / 3;
 
@@ -119,14 +126,16 @@ const Biometrics = () => {
     // biometrics so the flag stays meaningful.
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-    if (hasHardware && isEnrolled) {
+    if (!biometricUnlockOn) {
+      await AsyncStorage.removeItem(BIOMETRIC_ENABLED_KEY);
+    } else if (hasHardware && isEnrolled) {
       await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
     }
     // set-pin will forward through the rest of onboarding once confirmed.
     router.replace(
       from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',
     );
-  }, [from, router]);
+  }, [biometricUnlockOn, from, router]);
 
   /**
    * Creates the device-only key and continues — only ever called after
@@ -745,96 +754,69 @@ const Biometrics = () => {
   // Don't render anything until the biometric-availability check resolves;
   // devices without biometrics are redirected to PIN setup before this point.
   if (checkingSetup) {
-    return <Box flex={1} backgroundColor="onboardingbg" />;
+    return <Box flex={1} backgroundColor="surfaceBase" />;
   }
 
   return (
     <Box
       flex={1}
-      backgroundColor="onboardingbg"
-      paddingHorizontal="m"
-      style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
+      backgroundColor="surfaceBase"
+      paddingHorizontal="l"
+      style={{ paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 24) }}
     >
-      <LinearGradient
-        colors={['rgba(50, 60, 14, 0.74)', '#121212']}
-        locations={[0, 0.2772]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.9 }}
-        style={StyleSheet.absoluteFill}
-      />
       <StatusBar style={statusBarStyle} />
 
-      {/* Header */}
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-        <TouchableOpacity
-          onPress={() => {
-            if (router.canGoBack()) router.back();
-          }}
-          disabled={isProcessing}
-        >
-          <Ionicons
-            name="chevron-back"
-            size={24}
-            color={isProcessing ? theme.colors.textSecondary : theme.colors.textPrimary}
+      <RoundBackButton
+        onPress={() => {
+          if (router.canGoBack()) router.back();
+        }}
+        disabled={isProcessing}
+      />
+
+      <Box style={{ marginTop: 56 }}>
+        <SetupTitle title="Protect Your Account">
+          Add Biometric security to make sure only you have access to your Wallet.
+        </SetupTitle>
+      </Box>
+
+      <Box
+        flexDirection="row"
+        alignItems="center"
+        gap="m"
+        backgroundColor="inputBox"
+        borderWidth={1}
+        borderColor="inputOutline"
+        borderRadius={24}
+        height={80}
+        style={{ marginTop: 48, paddingLeft: 24, paddingRight: 20 }}
+      >
+        {biometricIcon === 'finger-print' ? (
+          <Ionicons name="finger-print" size={28} color="#FFC508" />
+        ) : (
+          <Image
+            source={require('@/src/assets/images/face_id.png')}
+            style={{ width: 28, height: 28, tintColor: '#FFC508' }}
+            resizeMode="contain"
           />
-        </TouchableOpacity>
-        <Image
-          source={require('@/src/assets/images/logoLoading.png')}
-          style={{ width: 35, height: 35 }}
-          resizeMode="contain"
-        />
-        <Box width={24} />
-      </Box>
-
-      {/* Title */}
-      <Box alignItems="center" mt="l">
-        <Text variant="h7" fontSize={32} textAlign="center">
-          Secure Your Account
-        </Text>
-        <Text
-          variant="p5"
-          color="textSecondary"
-          mt="xs"
-          textAlign="center"
-          style={{ width: '80%' }}
-        >
-          Gain quick and secure access to your account using biometrics.
-        </Text>
-      </Box>
-
-      {/* Biometric Icon */}
-      <Box flex={1} justifyContent="center" alignItems="center">
-        <Box
-          backgroundColor="bg800"
-          borderRadius={16}
-          height={115}
-          width={115}
-          alignItems="center"
-          justifyContent="center"
-        >
-          {biometricIcon === 'finger-print' ? (
-            <Ionicons name="finger-print" size={80} color={theme.colors.primary700} />
-          ) : (
-            <Image
-              source={require('@/src/assets/images/face_id.png')}
-              style={{ width: 80, height: 80, tintColor: theme.colors.primary700 }}
-              resizeMode="contain"
-            />
-          )}
+        )}
+        <Box flex={1}>
+          <Text variant="p6" lineHeight={24} letterSpacing={0} color="textPrimary">
+            {biometricLabel}
+          </Text>
+          <Text variant="p7" lineHeight={22} letterSpacing={0} color="textSubheading">
+            Use {biometricLabel} Authentication
+          </Text>
         </Box>
-      </Box>
-
-      {/* Buttons */}
-      <Box pb="xl" gap={'m'}>
-        <Button
-          label="Continue"
-          variant="primary"
-          onPress={provisionAndContinue}
-          bg="primary700"
-          labelColor="black"
-          disabled={isProcessing}
+        <CompactSwitch
+          value={biometricUnlockOn}
+          onValueChange={setBiometricUnlockOn}
+          label={`Use ${biometricLabel} to unlock`}
         />
       </Box>
+
+      <Box flex={1} />
+
+      <SetupButton label="Continue" busy={isProcessing} onPress={provisionAndContinue} />
     </Box>
   );
 };

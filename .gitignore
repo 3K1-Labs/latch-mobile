@@ -62,3 +62,4 @@ GoogleService-Info.plist
 .env.local
 
 .env.local
+.playwright-mcp
