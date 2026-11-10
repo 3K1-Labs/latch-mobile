@@ -131,6 +131,13 @@ const Biometrics = () => {
     } else if (hasHardware && isEnrolled) {
       await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, 'true');
     }
+    if (from === 'new-wallet') {
+      router.replace({
+        pathname: '/(onboarding)/deploy-account',
+        params: { flow: 'new-wallet' },
+      });
+      return;
+    }
     // set-pin will forward through the rest of onboarding once confirmed.
     router.replace(
       from ? { pathname: '/(onboarding)/set-pin', params: { from } } : '/(onboarding)/set-pin',

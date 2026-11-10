@@ -15,6 +15,7 @@ import { logout, uploadBackup } from '@/src/api/latch-auth';
 import { deploySmartAccount as deploySmartAccountPasskey } from '@/src/api/passkey';
 import { deploySmartAccount as deploySmartAccountEd25519 } from '@/src/api/smart-account';
 import { discoverMigration } from '@/src/lib/migration';
+import { commitPendingAppearance, loadPendingAppearance } from '@/src/lib/wallet-customisation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { SetupButton, SetupHeading } from '@/src/components/onboarding/SetupChrome';
@@ -254,12 +255,13 @@ const DeployAccount = () => {
         // leave accounts and activeAccountIndex pointing at a previous session. Always
         // anchoring to index 0 here prevents the signing key from drifting out of sync
         // with the deployed contract.
+        const appearance = flow === 'new-wallet' ? await loadPendingAppearance() : null;
         let account0: WalletAccount;
         if (storedMnemonic) {
           const wallet = restoreStellarWallet(storedMnemonic);
           account0 = {
             index: 0,
-            name: accounts[0]?.name ?? 'Account 1',
+            name: appearance?.name ?? accounts[0]?.name ?? 'Account 1',
             gAddress: wallet.gAddress,
             publicKeyHex: wallet.publicKeyHex,
             smartAccountAddress: deployedAddress,
@@ -268,7 +270,7 @@ const DeployAccount = () => {
         } else {
           account0 = {
             index: -1,
-            name: accounts[0]?.name ?? 'Account 1',
+            name: appearance?.name ?? accounts[0]?.name ?? 'Account 1',
             gAddress: '',
             publicKeyHex: '',
             smartAccountAddress: deployedAddress,
@@ -280,6 +282,7 @@ const DeployAccount = () => {
         const freshAccounts = [account0, ...accounts.slice(1)];
         await SecureStore.setItemAsync(SECURE_KEYS.ACCOUNTS, JSON.stringify(freshAccounts));
         await SecureStore.setItemAsync(SECURE_KEYS.ACTIVE_ACCOUNT_INDEX, '0');
+        if (appearance) await commitPendingAppearance(deployedAddress, appearance);
 
         // ── Step 5: mark onboarding complete and hydrate store ────────────────
         await AsyncStorage.setItem('latch_onboarding_complete', 'true');
@@ -352,6 +355,14 @@ const DeployAccount = () => {
     // shared wallet will be appended as a second account in shared-wallet-review.
     if (flow === 'shared') {
       router.replace('/(onboarding)/create-shared');
+      return;
+    }
+
+    if (flow === 'new-wallet') {
+      router.replace({
+        pathname: '/(onboarding)/wallet-ready',
+        params: { accountAddress: address },
+      });
       return;
     }
 

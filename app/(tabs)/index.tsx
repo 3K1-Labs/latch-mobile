@@ -21,39 +21,72 @@ import { discoverMigration } from '@/src/lib/migration';
 import { useNotificationStore } from '@/src/store/notification-store';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { calculatePortfolio24hChangeFormatted, getTotalUSDBalance } from '@/src/utils';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import {
+  calculatePortfolio24hChangeFormatted,
+  getTotalUSDBalance,
+  shortenAddress,
+} from '@/src/utils';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { ImageBackground } from 'expo-image';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { memo, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  Dimensions,
   FlatList,
-  Image,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   TouchableOpacity,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ICONS = {
+  bell: require('@/src/assets/images/home/bell.svg'),
+  copy: require('@/src/assets/images/home/copy.svg'),
+  eye: require('@/src/assets/images/home/eye.svg'),
+  eyeOff: require('@/src/assets/images/home/eye-off.svg'),
+  chevron: require('@/src/assets/images/home/chevron.svg'),
+  emptyMascot: require('@/src/assets/images/home/empty-mascot.svg'),
+};
 
-function RaysBackgroundInner() {
-  return (
-    <Box position="absolute" style={{ top: -30, left: '28%' }}>
-      <ImageBackground
-        source={require('@/src/assets/icon/Circle.png')}
-        style={{ position: 'absolute', width: 182, height: 182 }}
-      />
-    </Box>
-  );
-}
-const RaysBackground = memo(RaysBackgroundInner);
+const ACTIONS = [
+  { label: 'Fund', icon: require('@/src/assets/images/home/plus.svg') },
+  { label: 'Send', icon: require('@/src/assets/images/home/send.svg'), route: '/send-token' },
+  {
+    label: 'Receive',
+    icon: require('@/src/assets/images/home/receive.svg'),
+    route: '/receive-token',
+  },
+  { label: 'Swap', icon: require('@/src/assets/images/home/swap.svg') },
+];
+
+const SectionHeader = ({
+  title,
+  action,
+  onPress,
+}: {
+  title: string;
+  action: string;
+  onPress: () => void;
+}) => (
+  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
+    <Text variant="p6" fontFamily="SFproMedium" lineHeight={20} letterSpacing={0.16} color="textPrimary">
+      {title}
+    </Text>
+    <TouchableOpacity onPress={onPress} hitSlop={8} style={styles.sectionAction}>
+      <Text variant="p7" lineHeight={20} letterSpacing={0.14} color="textSubheading">
+        {action}
+      </Text>
+      <Image source={ICONS.chevron} contentFit="contain" style={styles.chevron} />
+    </TouchableOpacity>
+  </Box>
+);
 
 const banners = [
   { id: 1, image: require('@/src/assets/banners/smart-accounts.png') },
@@ -65,14 +98,10 @@ const banners = [
 function TokenRow({
   token,
   showBalance,
-  isDark,
-  theme,
   fiatLabel,
 }: {
   token: TokenBalance;
   showBalance: boolean;
-  isDark: boolean;
-  theme: Theme;
   fiatLabel: string;
 }) {
   const iconUrl = useTokenIcon(token.code, token.issuer);
@@ -90,40 +119,29 @@ function TokenRow({
     <Box
       flexDirection="row"
       alignItems="center"
-      backgroundColor={'bg11'}
-      padding="m"
-      borderRadius={20}
-      mb="s"
-      style={
-        !isDark
-          ? {
-              borderWidth: 1,
-              borderColor: '#F5F5F5',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.05,
-              shadowRadius: 4,
-              elevation: 2,
-            }
-          : {}
-      }
+      gap="sm"
+      backgroundColor="inputBox"
+      borderWidth={1}
+      borderColor="inputOutline"
+      borderRadius={16}
+      style={styles.tokenRow}
     >
-      <Box backgroundColor={isDark ? 'black' : 'text400'} borderRadius={24} mr="m">
-        <TokenIcon iconUrl={iconUrl} size={48} />
+      <Box borderRadius={16} overflow="hidden">
+        <TokenIcon iconUrl={iconUrl} size={32} />
       </Box>
-      <Box flex={1}>
-        <Text variant="h11" color="textPrimary" fontWeight="700">
+      <Box flex={1} gap="xs">
+        <Text variant="p6" fontFamily="SFproMedium" lineHeight={24} letterSpacing={0} color="textPrimary">
           {token.code}
         </Text>
-        <Text variant="p8" color="textSecondary" mt="xs">
+        <Text variant="p7" lineHeight={14} letterSpacing={0} color="textSubheading">
           {token.code === 'XLM' ? 'Stellar Lumens' : token.code}
         </Text>
       </Box>
-      <Box alignItems="flex-end">
-        <Text variant="h11" color="textPrimary" fontWeight="700">
+      <Box alignItems="flex-end" gap="xs">
+        <Text variant="p6" fontFamily="SFproSemibold" lineHeight={24} letterSpacing={0} color="textPrimary">
           {showBalance ? `${formattedAmount} ${token.code}` : '****'}
         </Text>
-        <Text variant="p8" color="textSecondary" mt="xs">
+        <Text variant="p7" lineHeight={14} letterSpacing={0} color="textSubheading">
           {showBalance ? fiatLabel : '****'}
         </Text>
       </Box>
@@ -160,9 +178,9 @@ function estimateXlmForFiat(fiatAmount?: string, xlmUsdPrice?: string): string |
 
 const Home = () => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
-  // const statusBarStyle = useStatusBarStyle();
+  const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const tabBarScroll = useTabBarScroll();
 
   const { smartAccountAddress, accounts, activeAccountIndex, mnemonic, avatars } = useWalletStore();
@@ -382,27 +400,22 @@ const Home = () => {
   };
 
   return (
-    <Box flex={1} backgroundColor="onboardingbg">
-      <StatusBar style={'dark'} />
-      {/* Header */}
+    <Box flex={1} backgroundColor="surfaceBase">
+      <StatusBar style={statusBarStyle} />
       <Box
         flexDirection="row"
         justifyContent="space-between"
         alignItems="center"
-        paddingHorizontal="m"
-        style={{ paddingTop: insets.top + 8 }}
-        mb="m"
+        paddingHorizontal="l"
+        style={{ paddingTop: insets.top + 12 }}
       >
-        <TouchableOpacity activeOpacity={0.7} onPress={openDrawer}>
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            backgroundColor={isDark ? 'gray900' : 'gray100'}
-            borderRadius={100}
-            paddingVertical="xs"
-            paddingHorizontal="s"
-            gap="s"
-            style={!isDark ? { borderWidth: 1, borderColor: '#F0F0F0' } : {}}
+        <Box flexDirection="row" alignItems="center" gap="s" flexShrink={1}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Switch account"
+            activeOpacity={0.7}
+            onPress={openDrawer}
+            style={styles.headerAccount}
           >
             <Box
               width={32}
@@ -411,49 +424,70 @@ const Home = () => {
               backgroundColor="primary700"
               justifyContent="center"
               alignItems="center"
-              overflow={'hidden'}
+              overflow="hidden"
             >
               {activeAccountImage ? (
-                <Image source={{ uri: activeAccountImage }} style={{ width: 32, height: 32 }} />
+                <Image source={{ uri: activeAccountImage }} style={styles.avatar} />
               ) : (
                 <Text variant="p7" color="textWhite" fontWeight="700">
                   {activeAccountName.charAt(0)}
                 </Text>
               )}
             </Box>
-            <Text variant="h11" color="textPrimary" fontWeight="700">
-              {activeAccountName}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color={theme.colors.textPrimary} />
-            {unreadNotifications > 0 && (
-              <Box
-                position="absolute"
-                width={10}
-                height={10}
-                borderRadius={5}
-                backgroundColor="primary700"
-                style={{ top: 0, left: 0, borderWidth: 2, borderColor: theme.colors.mainBackground }}
-              />
-            )}
-          </Box>
-        </TouchableOpacity>
-
-        <Box flexDirection="row" gap="m">
-          <TouchableOpacity>
-            <Ionicons
-              name="search-outline"
-              size={24}
-              color={isDark ? theme.colors.bgDark700 : theme.colors.bgDark100}
-            />
+            <Box flexShrink={1} style={styles.headerText}>
+              <Text
+                variant="p8"
+                lineHeight={14}
+                letterSpacing={0.12}
+                numberOfLines={1}
+                style={styles.greeting}
+              >
+                Hi, {activeAccountName}
+              </Text>
+              <Text
+                variant="p6"
+                fontFamily="SFproMedium"
+                lineHeight={24}
+                letterSpacing={0}
+                color="textPrimary"
+              >
+                {shortenAddress(smartAccountAddress)}
+              </Text>
+            </Box>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/qrcode-scan')}>
-            <MaterialCommunityIcons
-              name="qrcode-scan"
-              size={24}
-              color={isDark ? theme.colors.bgDark700 : theme.colors.bgDark100}
-            />
-          </TouchableOpacity>
+          {smartAccountAddress && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Copy wallet address"
+              hitSlop={10}
+              onPress={() => copyToClipboard(smartAccountAddress)}
+              style={styles.copy}
+            >
+              <Image source={ICONS.copy} contentFit="contain" style={styles.copyIcon} />
+            </TouchableOpacity>
+          )}
         </Box>
+
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+          activeOpacity={0.7}
+          onPress={() => router.push('/notification')}
+        >
+          <Box
+            width={36}
+            height={36}
+            borderRadius={18}
+            backgroundColor="inputOutline"
+            justifyContent="center"
+            alignItems="center"
+          >
+            <Image source={ICONS.bell} contentFit="contain" style={styles.bell} />
+          </Box>
+          {unreadNotifications > 0 && (
+            <Box style={styles.unreadDot} backgroundColor="primary700" borderColor="surfaceBase" />
+          )}
+        </TouchableOpacity>
       </Box>
 
       <ScrollView
@@ -470,31 +504,31 @@ const Home = () => {
       >
         <PendingApprovalBanner />
 
-        {/* Balance Section */}
-        <Box alignItems="center" pb="xl" position="relative" mt="xl">
-          {!isDark && <RaysBackground />}
+        <Box alignItems="center" style={styles.balance}>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={showBalance ? 'Hide balance' : 'Show balance'}
             onPress={() => setShowBalance(!showBalance)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
+            style={styles.balanceToggle}
           >
-            <Text variant="p7" color="textSecondary" fontWeight="600">
+            <Image
+              source={showBalance ? ICONS.eyeOff : ICONS.eye}
+              contentFit="contain"
+              style={styles.eye}
+            />
+            <Text variant="p8" fontFamily="SFproMedium" lineHeight={20} letterSpacing={0} color="textSubheading">
               Total Balance
             </Text>
-            <Ionicons
-              name={showBalance ? 'eye-outline' : 'eye-off-outline'}
-              size={14}
-              color={theme.colors.textSecondary}
-            />
           </TouchableOpacity>
 
           {portfolioLoading ? (
             <Box my="s">
-              <Skeleton width={180} height={38} borderRadius={10} />
+              <Skeleton width={180} height={40} borderRadius={10} />
             </Box>
           ) : (
-            <Text variant="h5" color="textPrimary" style={{ fontWeight: '700', letterSpacing: -1 }}>
+            <Text style={styles.balanceValue} color="textPrimary">
               {!showBalance
-                ? '***'
+                ? '****'
                 : // No figure at all beats a fabricated one: with nothing fetched
                   // and nothing cached, "$0.00" would read as an empty wallet.
                   portfolio
@@ -503,8 +537,8 @@ const Home = () => {
             </Text>
           )}
 
-          <Box flexDirection="row" alignItems="center" gap="s" mt="xs">
-            <Text variant="p7" color="textSecondary" fontWeight="600">
+          <Box flexDirection="row" alignItems="center" gap="xs" mt="xs">
+            <Text variant="p8" lineHeight={20} letterSpacing={0} color="textSubheading">
               {showBalance
                 ? `${spendableXlm.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
@@ -512,64 +546,37 @@ const Home = () => {
                   })} XLM`
                 : '****'}
             </Text>
-            <Box
-              backgroundColor={isDark ? 'gray900' : 'gray100'}
-              borderRadius={6}
-              paddingHorizontal="s"
-              justifyContent={'center'}
-              alignItems={'center'}
-              paddingVertical="xs"
-              style={
-                dayChangeTint
-                  ? { backgroundColor: dayChangeTint.background }
-                  : !isDark
-                    ? { borderWidth: 1, borderColor: '#F0F0F0' }
-                    : {}
-              }
+            <Text
+              variant="p8"
+              lineHeight={20}
+              letterSpacing={0}
+              style={{ color: dayChangeTint?.text ?? 'rgba(162,162,162,0.55)' }}
             >
-              <Text
-                variant="p7"
-                color="textPrimary"
-                fontWeight="700"
-                style={dayChangeTint ? { color: dayChangeTint.text } : undefined}
-              >
-                {showBalance ? `${dayChange ?? 0.0}%` : '****'}
-              </Text>
-            </Box>
+              {showBalance ? `${dayChange ?? 0.0}%` : '****'}
+            </Text>
           </Box>
 
           {/* Freshness, not a spinner. A background refresh has to be visible
               without blocking, and a persisted snapshot must never pass for a
               live figure. */}
           {balanceStatus && (
-            <Text variant="p8" color="textSecondary" mt="xs">
+            <Text variant="p8" color="textSubheading" mt="xs">
               {balanceStatus}
             </Text>
           )}
           {usedFallback && showBalance && (
-            <Text variant="p8" color="textSecondary" mt="xs">
+            <Text variant="p8" color="textSubheading" mt="xs">
               Showing USD — rate unavailable
             </Text>
           )}
         </Box>
 
-        {/* Action Buttons */}
-        <Box flexDirection="row" justifyContent="space-around" paddingHorizontal="m" mb="xl" mt="m">
-          {[
-            { label: 'Fund', icon: require('@/src/assets/icon/plus-big.png') },
-            { label: 'Send', icon: require('@/src/assets/icon/ArrowUp.png'), route: '/send-token' },
-            {
-              label: 'Receive',
-              icon: require('@/src/assets/icon/arrowDown.png'),
-              route: '/receive-token',
-            },
-            {
-              label: 'Swap',
-              icon: require('@/src/assets/icon/RepeatGold.png'),
-            },
-          ].map((item, index) => (
-            <Box key={index} alignItems="center" gap="s">
+        <Box flexDirection="row" justifyContent="center" style={styles.actions}>
+          {ACTIONS.map((item) => (
+            <Box key={item.label} alignItems="center" style={styles.action}>
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={item.label}
                 activeOpacity={0.7}
                 onPress={() => {
                   if (item.label === 'Fund') {
@@ -586,63 +593,32 @@ const Home = () => {
                 }}
               >
                 <Box
-                  width={68}
-                  height={68}
-                  borderRadius={34}
-                  backgroundColor={isDark ? 'gray900' : 'gray100'}
+                  width={64}
+                  height={64}
+                  borderRadius={32}
+                  backgroundColor="inputBox"
+                  borderWidth={1}
+                  borderColor="inputOutline"
                   justifyContent="center"
                   alignItems="center"
                 >
-                  <Image
-                    source={item.icon}
-                    style={{ width: 28, height: 28 }}
-                    resizeMode="contain"
-                    tintColor={
-                      index === 3 ? undefined : isDark ? theme.colors.primary700 : '#FFAD00'
-                    }
-                  />
+                  <Image source={item.icon} contentFit="contain" style={styles.actionIcon} />
                 </Box>
               </TouchableOpacity>
-              <Text variant="p7" color="bgDark600">
+              <Text
+                variant="p7"
+                fontFamily="SFproMedium"
+                lineHeight={22}
+                letterSpacing={0}
+                color="textSubheading"
+              >
                 {item.label}
               </Text>
             </Box>
           ))}
         </Box>
 
-        {/* Your Assets */}
-        {(portfolio ?? []).length > 0 && (
-          <Box paddingHorizontal="m" mb="xl">
-            <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-              <Text variant="h9" color="textPrimary" fontWeight="700">
-                Your Assets
-              </Text>
-              <TouchableOpacity onPress={() => router.push('/add-token')}>
-                <Text variant="p7" color="primary700" fontWeight="700">
-                  Manage
-                </Text>
-              </TouchableOpacity>
-            </Box>
-            {(portfolio ?? []).map((token) => {
-              const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
-              return (
-                <TokenRow
-                  key={token.code + (token.issuer ?? '')}
-                  token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
-                  fiatLabel={
-                    formatToken(token.amount, livePrices[token.code]?.price, { approx: false }).text
-                  }
-                  showBalance={showBalance}
-                  isDark={isDark}
-                  theme={theme}
-                />
-              );
-            })}
-          </Box>
-        )}
-
-        {/* Banner Carousel */}
-        <Box mb="xl">
+        <Box style={styles.banners}>
           <FlatList
             horizontal
             pagingEnabled
@@ -650,38 +626,33 @@ const Home = () => {
             data={banners}
             onScroll={(e) => {
               const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / SCREEN_WIDTH);
-              setBannerIndex(index);
+              setBannerIndex(Math.round(x / screenWidth));
             }}
+            scrollEventThrottle={16}
             keyExtractor={(item) => item.id.toString()}
             renderItem={({ item }) => (
-              <Box width={SCREEN_WIDTH} alignItems="center" justifyContent="center">
-                <Box width={SCREEN_WIDTH - 32} height={101} overflow={'hidden'} borderRadius={12}>
-                  <Image
-                    source={item.image}
-                    style={{ height: '100%', width: '100%' }}
-                    resizeMode="cover"
-                  />
+              <Box width={screenWidth} alignItems="center" justifyContent="center">
+                <Box width={screenWidth - 48} height={100} overflow="hidden" borderRadius={20}>
+                  <Image source={item.image} contentFit="cover" style={styles.fill} />
                 </Box>
               </Box>
             )}
           />
-          <Box flexDirection="row" justifyContent="center" mt="m" gap="xs">
+          <Box flexDirection="row" justifyContent="center" style={styles.dots}>
             {banners.map((banner, i) => (
               <Box
                 key={banner.id}
-                width={bannerIndex === i ? 20 : 6}
+                width={bannerIndex === i ? 12 : 6}
                 height={6}
                 borderRadius={3}
-                backgroundColor={bannerIndex === i ? 'primary700' : isDark ? 'gray800' : 'gray200'}
+                style={{ backgroundColor: bannerIndex === i ? '#FFC508' : '#413F3F' }}
               />
             ))}
           </Box>
         </Box>
 
-        {/* Migration banner */}
         {migrationState?.state === 'not_started' && (
-          <Box paddingHorizontal="m" mb="m">
+          <Box paddingHorizontal="l" mb="m">
             <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/(migration)')}>
               <Box
                 borderRadius={16}
@@ -689,11 +660,7 @@ const Home = () => {
                 flexDirection="row"
                 alignItems="center"
                 gap="m"
-                style={{
-                  backgroundColor: isDark ? '#2C2000' : '#FFFBEB',
-                  borderWidth: 1,
-                  borderColor: isDark ? '#4A3800' : '#FFE58F',
-                }}
+                style={styles.migration}
               >
                 <Box
                   width={40}
@@ -706,39 +673,29 @@ const Home = () => {
                   <Ionicons name="swap-horizontal" size={20} color="#000" />
                 </Box>
                 <Box flex={1}>
-                  <Text
-                    variant="h11"
-                    fontWeight="700"
-                    style={{ color: isDark ? '#FFD666' : '#874D00' }}
-                  >
+                  <Text variant="p7" fontFamily="SFproMedium" style={{ color: '#FFD666' }}>
                     Assets on classic account
                   </Text>
-                  <Text variant="p8" style={{ color: isDark ? '#B8860B' : '#AD6800' }} mt="xs">
+                  <Text variant="p8" style={{ color: '#B8860B' }} mt="xs">
                     Tap to migrate them to your smart account
                   </Text>
                 </Box>
-                <Ionicons name="chevron-forward" size={16} color={isDark ? '#B8860B' : '#AD6800'} />
+                <Ionicons name="chevron-forward" size={16} color="#B8860B" />
               </Box>
             </TouchableOpacity>
           </Box>
         )}
 
-        {/* Recent Activity */}
-        <Box paddingHorizontal="m">
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="h9" color="textPrimary" fontWeight="700">
-              Recent Activity
-            </Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/history')}>
-              <Text variant="p7" color="primary700" fontWeight="700">
-                View All
-              </Text>
-            </TouchableOpacity>
-          </Box>
+        <Box paddingHorizontal="l" style={styles.section}>
+          <SectionHeader
+            title="Recent Activity"
+            action="View all"
+            onPress={() => router.push('/(tabs)/history')}
+          />
 
           {/* The history scan is much slower than the balance fetch, so it gets
-              its own state here rather than holding the screen. "No transactions
-              found" is only the truth once a fetch has actually completed —
+              its own state here rather than holding the screen. "No Activity
+              Yet" is only the truth once a fetch has actually completed —
               while one is still running it would be a guess. */}
           {txLoading ? (
             <Box>
@@ -747,15 +704,16 @@ const Home = () => {
               ))}
             </Box>
           ) : recentTx.length === 0 ? (
-            <Box
-              py="xl"
-              alignItems="center"
-              backgroundColor={isDark ? 'gray900' : 'gray100'}
-              borderRadius={16}
-            >
-              <Text color="textSecondary" variant="p7">
-                No transactions found
-              </Text>
+            <Box alignItems="center" gap="l" style={styles.empty}>
+              <Image source={ICONS.emptyMascot} contentFit="contain" style={styles.emptyMascot} />
+              <Box alignItems="center" gap="xs">
+                <Text variant="p6" fontFamily="SFproMedium" lineHeight={20} letterSpacing={0.16} color="textPrimary">
+                  No Activity Yet
+                </Text>
+                <Text variant="p7" lineHeight={20} letterSpacing={0.14} color="textSubheading">
+                  Fund your wallet & get started!
+                </Text>
+              </Box>
             </Box>
           ) : (
             recentTx.map((tx) => (
@@ -768,6 +726,32 @@ const Home = () => {
             ))
           )}
         </Box>
+
+        {(portfolio ?? []).length > 0 && (
+          <Box paddingHorizontal="l" style={styles.section}>
+            <SectionHeader
+              title="Your Assets"
+              action="Manage"
+              onPress={() => router.push('/add-token')}
+            />
+            <Box gap="s">
+              {(portfolio ?? []).map((token) => {
+                const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
+                return (
+                  <TokenRow
+                    key={token.code + (token.issuer ?? '')}
+                    token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
+                    fiatLabel={
+                      formatToken(token.amount, livePrices[token.code]?.price, { approx: false })
+                        .text
+                    }
+                    showBalance={showBalance}
+                  />
+                );
+              })}
+            </Box>
+          </Box>
+        )}
       </ScrollView>
 
       <BuyXLMSheet
@@ -792,5 +776,118 @@ const Home = () => {
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  fill: {
+    width: '100%',
+    height: '100%',
+  },
+  headerAccount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+  },
+  headerText: {
+    gap: 2,
+  },
+  greeting: {
+    color: '#A09F9F',
+    opacity: 0.7,
+  },
+  copy: {
+    marginTop: 16,
+  },
+  copyIcon: {
+    width: 13.3,
+    height: 12.8,
+  },
+  bell: {
+    width: 20,
+    height: 20,
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+  },
+  balance: {
+    marginTop: 40,
+  },
+  balanceToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 14,
+  },
+  eye: {
+    width: 13.6,
+    height: 13.6,
+  },
+  balanceValue: {
+    fontFamily: 'SFproRoundedBold',
+    fontSize: 44,
+    lineHeight: 48,
+    letterSpacing: -2,
+  },
+  actions: {
+    gap: 14,
+    marginTop: 24,
+  },
+  action: {
+    width: 66,
+    gap: 9,
+  },
+  actionIcon: {
+    width: 32,
+    height: 32,
+  },
+  banners: {
+    marginTop: 28,
+  },
+  dots: {
+    gap: 3,
+    marginTop: 11,
+  },
+  migration: {
+    marginTop: 8,
+    backgroundColor: '#2C2000',
+    borderWidth: 1,
+    borderColor: '#4A3800',
+  },
+  section: {
+    marginTop: 34,
+  },
+  sectionAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chevron: {
+    width: 10,
+    height: 20,
+  },
+  empty: {
+    marginTop: 32,
+  },
+  emptyMascot: {
+    width: 172.5,
+    height: 164.5,
+  },
+  tokenRow: {
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+});
 
 export default Home;

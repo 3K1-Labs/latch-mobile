@@ -122,7 +122,7 @@ const CreateWallet = () => {
       <Box px="l" pt="m" style={{ paddingBottom: footerPadding }}>
         <SetupButton
           label="Continue"
-          onPress={() => router.push('/(auth)/biometric')}
+          onPress={() => router.push('/(onboarding)/customise-wallet')}
         />
       </Box>
 

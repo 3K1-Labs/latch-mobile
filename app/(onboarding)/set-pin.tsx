@@ -1,5 +1,10 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
-import { RoundBackButton, SetupButton, SetupTitle } from '@/src/components/onboarding/SetupChrome';
+import {
+  RoundBackButton,
+  SetupButton,
+  SetupTitle,
+  StepIndicator,
+} from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { useSecureScreen } from '@/src/hooks/use-secure-screen';
@@ -61,6 +66,11 @@ const SetPin = () => {
       return;
     }
 
+    if (from === 'new-wallet') {
+      router.replace('/(onboarding)/request-authentication');
+      return;
+    }
+
     // Collect email for recovery backup before deploying. Carry the
     // shared marker so the rest of the chain ends at the multisig
     // build screens instead of the personal deploy.
@@ -110,7 +120,13 @@ const SetPin = () => {
         <Box flex={1} px="l" style={{ paddingTop: insets.top + 12 }}>
           <RoundBackButton onPress={handleBack} />
 
-          <Box style={styles.title}>
+          {from === 'new-wallet' && (
+            <Box style={styles.step}>
+              <StepIndicator step={2} />
+            </Box>
+          )}
+
+          <Box style={from === 'new-wallet' ? styles.titleAfterStep : styles.title}>
             {phase === 'set' ? (
               <SetupTitle title="Create your 4-Digit PIN">
                 This is used to secure your wallet on all your devices.{' '}
@@ -182,8 +198,14 @@ const styles = StyleSheet.create({
   fill: {
     flex: 1,
   },
+  step: {
+    marginTop: 56,
+  },
   title: {
     marginTop: 56,
+  },
+  titleAfterStep: {
+    marginTop: 32,
   },
   boxes: {
     flexDirection: 'row',
