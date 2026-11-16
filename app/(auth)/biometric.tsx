@@ -6,7 +6,6 @@ import {
   SetupTitle,
 } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
 import { hashPin } from '@/src/lib/hash-pin';
 import {
@@ -23,7 +22,6 @@ import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -37,7 +35,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Vibration,
-  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -515,243 +512,187 @@ const Biometrics = () => {
   // ─── Unlock UI ────────────────────────────────────────────────────────────
 
   if (isUnlockMode) {
-    return (
-      <Box flex={1} backgroundColor="onboardingbg">
-        <LinearGradient
-          colors={['rgba(50, 60, 14, 0.74)', '#121212']}
-          locations={[0, 0.2772]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 0.91 }}
-          style={StyleSheet.absoluteFill}
+    const resetting = pinResetPhase !== 'idle';
+    const activeLen = !resetting
+      ? pin.length
+      : (pinResetPhase === 'set' ? newPin : newPinConfirm).length;
+    const activeError = !resetting ? pinError : newPinError;
+
+    const renderBiometricGlyph = (size: number) =>
+      biometricIcon === 'finger-print' ? (
+        <Ionicons name="finger-print" size={size} color="#FFC508" />
+      ) : (
+        <Image
+          source={require('@/src/assets/images/face_id.png')}
+          style={{ width: size, height: size, tintColor: '#FFC508' }}
+          resizeMode="contain"
         />
+      );
+
+    return (
+      <Box
+        flex={1}
+        backgroundColor="surfaceBase"
+        style={{ paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 24) }}
+      >
         <StatusBar style={statusBarStyle} />
-        <View style={{ flex: 1 }}>
-          {/* Header */}
-          <Box
-            flexDirection="row"
-            justifyContent="space-between"
-            alignItems="center"
-            mt="xxl"
-            mb="m"
-            paddingHorizontal="m"
-            style={{ paddingTop: insets.top }}
-          >
-            {showPin && biometricEnabledForUnlock ? (
-              <TouchableOpacity onPress={handleCancelPin} hitSlop={12}>
-                <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-              </TouchableOpacity>
-            ) : (
-              <Box width={24} />
-            )}
-            <Image
-              source={require('@/src/assets/images/logoLoading.png')}
-              style={{ width: 35, height: 35 }}
-              resizeMode="contain"
-            />
-            <Box width={24} />
-          </Box>
 
-          {showPin ? (
-            <>
-              {/* PIN title */}
-              <Box alignItems="center" mt="xl" paddingHorizontal="m">
-                <Text
-                  variant="h8"
-                  fontSize={28}
-                  fontWeight="700"
-                  textAlign="center"
-                  color="textPrimary"
-                >
-                  {pinResetPhase === 'set'
-                    ? 'Set a New PIN'
-                    : pinResetPhase === 'confirm'
-                      ? 'Confirm New PIN'
-                      : 'Welcome Back'}
-                </Text>
-                {pinResetPhase !== 'idle' ? (
-                  <Text
-                    variant="body"
-                    color={newPinError ? 'danger900' : 'textSecondary'}
-                    mt="s"
-                    textAlign="center"
-                  >
-                    {newPinError
-                      ? "PINs don't match. Try again."
-                      : pinResetPhase === 'set'
-                        ? 'Choose a new 4-digit PIN'
-                        : 'Enter it once more to confirm'}
-                  </Text>
-                ) : lockedUntil ? (
-                  <Text variant="body" color="danger900" mt="s" textAlign="center">
-                    Too many attempts. Try again in {lockoutSecondsLeft}s
-                  </Text>
-                ) : (
-                  <Text variant="body" color="textSecondary" mt="s" textAlign="center">
-                    Enter your PIN to unlock
-                  </Text>
-                )}
-              </Box>
-
-              {/* PIN dots */}
-              <Box flexDirection="row" justifyContent="center" mt="xl" mb="l" gap="l">
-                {Array.from({ length: PIN_LENGTH }).map((_, i) => {
-                  const activeLen =
-                    pinResetPhase === 'idle'
-                      ? pin.length
-                      : (pinResetPhase === 'set' ? newPin : newPinConfirm).length;
-                  const activeError = pinResetPhase === 'idle' ? pinError : newPinError;
-                  return (
-                    <View
-                      key={i}
-                      style={[
-                        styles.dot,
-                        i < activeLen
-                          ? {
-                              backgroundColor: activeError
-                                ? theme.colors.danger900
-                                : theme.colors.primary700,
-                            }
-                          : { backgroundColor: theme.colors.gray900, opacity: 0.8 },
-                      ]}
-                    />
-                  );
-                })}
-              </Box>
-
-              {/* {pinResetPhase === 'idle' && (
-                <TouchableOpacity
-                  onPress={handleForgotPin}
-                  hitSlop={12}
-                  style={{ alignItems: 'center', marginBottom: theme.spacing.l }}
-                >
-                  <Text variant="p7" color="primary700">
-                    Forgot PIN?
-                  </Text>
-                </TouchableOpacity>
-              )} */}
-
-              {/* Keypad */}
-              <Box flex={1} justifyContent="flex-end" paddingHorizontal="m" pb="m">
-                {KEYPAD_ROWS.map((row, rIdx) => (
-                  <Box key={rIdx} flexDirection="row" justifyContent="space-between" mb="m">
-                    {row.map((key, kIdx) => {
-                      if (key === '') {
-                        // Biometric shortcut — only on the normal unlock keypad. Reset
-                        // entry got here BY biometric auth already succeeding, so
-                        // there's nothing to shortcut to.
-                        return pinResetPhase === 'idle' && biometricEnabledForUnlock ? (
-                          <TouchableOpacity
-                            key={kIdx}
-                            activeOpacity={0.6}
-                            onPress={triggerBiometrics}
-                            style={{ width: keySize, height: 64 }}
-                          >
-                            <Box
-                              flex={1}
-                              backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
-                              borderRadius={16}
-                              justifyContent="center"
-                              alignItems="center"
-                            >
-                              <Ionicons
-                                name={biometricIcon}
-                                size={28}
-                                color={theme.colors.primary700}
-                              />
-                            </Box>
-                          </TouchableOpacity>
-                        ) : (
-                          <Box key={kIdx} style={{ width: keySize, height: 64 }} />
-                        );
-                      }
-
-                      return (
-                        <TouchableOpacity
-                          key={kIdx}
-                          activeOpacity={0.6}
-                          onPress={() =>
-                            pinResetPhase === 'idle' ? handlePinKey(key) : handleResetPinKey(key)
-                          }
-                          style={{ width: keySize, height: 64 }}
-                        >
-                          <Box
-                            flex={1}
-                            backgroundColor={statusBarStyle !== 'light' ? 'text50' : 'gray900'}
-                            borderRadius={16}
-                            justifyContent="center"
-                            alignItems="center"
-                          >
-                            {key === 'del' ? (
-                              <Ionicons
-                                name="backspace-outline"
-                                size={28}
-                                color={theme.colors.textPrimary}
-                              />
-                            ) : (
-                              <Text
-                                variant="h8"
-                                fontSize={24}
-                                fontWeight="600"
-                                color={statusBarStyle === 'light' ? 'textPrimary' : 'gray900'}
-                              >
-                                {key}
-                              </Text>
-                            )}
-                          </Box>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </Box>
-                ))}
-              </Box>
-            </>
+        <Box flexDirection="row" alignItems="center" justifyContent="space-between" px="l">
+          {showPin && biometricEnabledForUnlock ? (
+            <RoundBackButton onPress={handleCancelPin} />
           ) : (
-            <>
-              {/* Waiting for biometrics */}
-              <Box flex={1} justifyContent="center" alignItems="center" gap="xl">
+            <Box width={40} height={40} />
+          )}
+          <Image
+            source={require('@/src/assets/images/logoLoading.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Box width={40} />
+        </Box>
+
+        {showPin ? (
+          <>
+            <Box alignItems="center" px="l" style={styles.pinTitle}>
+              <Text fontSize={20} lineHeight={28} fontFamily="SFproMedium" color="textPrimary" textAlign="center">
+                {pinResetPhase === 'set'
+                  ? 'Set a New PIN'
+                  : pinResetPhase === 'confirm'
+                    ? 'Confirm New PIN'
+                    : 'Welcome Back'}
+              </Text>
+              <Text
+                fontSize={16}
+                lineHeight={24}
+                color={(resetting ? newPinError : !!lockedUntil) ? 'danger900' : 'textSubheading'}
+                textAlign="center"
+                mt="s"
+              >
+                {resetting
+                  ? newPinError
+                    ? "PINs don't match. Try again."
+                    : pinResetPhase === 'set'
+                      ? 'Choose a new 4-digit PIN'
+                      : 'Enter it once more to confirm'
+                  : lockedUntil
+                    ? `Too many attempts. Try again in ${lockoutSecondsLeft}s`
+                    : 'Enter your PIN to unlock'}
+              </Text>
+            </Box>
+
+            <Box flexDirection="row" justifyContent="center" style={styles.pinBoxes}>
+              {Array.from({ length: PIN_LENGTH }).map((_, i) => (
                 <Box
-                  backgroundColor="bg800"
+                  key={i}
+                  width={48}
+                  height={48}
                   borderRadius={16}
-                  height={115}
-                  width={115}
+                  borderWidth={1}
                   alignItems="center"
                   justifyContent="center"
+                  backgroundColor="inputBox"
+                  borderColor={activeError ? 'danger900' : 'inputOutline'}
                 >
-                  {biometricIcon === 'finger-print' ? (
-                    <Ionicons name="finger-print" size={80} color={theme.colors.primary700} />
-                  ) : (
-                    <Image
-                      source={require('@/src/assets/images/face_id.png')}
-                      style={{ width: 80, height: 80, tintColor: theme.colors.primary700 }}
-                      resizeMode="contain"
+                  {i < activeLen && (
+                    <Box
+                      style={styles.pinMask}
+                      backgroundColor={activeError ? 'danger900' : 'textPrimary'}
                     />
                   )}
                 </Box>
-                <Text variant="h8" fontSize={24} textAlign="center" color="textPrimary">
-                  Unlock with {biometricLabel}
-                </Text>
-              </Box>
+              ))}
+            </Box>
 
-              <Box paddingHorizontal="m" pb="xl">
-                <Button
-                  label={`Use ${biometricLabel}`}
-                  variant="primary"
-                  onPress={triggerBiometrics}
-                  bg="primary700"
-                  labelColor="black"
-                />
-                <Button
-                  label="Use PIN instead"
-                  variant="outline"
-                  onPress={() => setShowPin(true)}
-                  mt="m"
-                  borderColor={statusBarStyle === 'light' ? 'textWhite' : 'textDark900'}
-                  labelColor={statusBarStyle === 'light' ? 'textWhite' : 'black'}
-                />
+            <Box flex={1} justifyContent="flex-end" px="m" gap="sm">
+              {KEYPAD_ROWS.map((row, rIdx) => (
+                <Box key={rIdx} flexDirection="row" justifyContent="space-between">
+                  {row.map((key, kIdx) => {
+                    if (key === '') {
+                      // Biometric shortcut — only on the normal unlock keypad. Reset
+                      // entry got here BY biometric auth already succeeding, so
+                      // there's nothing to shortcut to.
+                      return !resetting && biometricEnabledForUnlock ? (
+                        <TouchableOpacity
+                          key={kIdx}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Unlock with ${biometricLabel}`}
+                          activeOpacity={0.6}
+                          onPress={triggerBiometrics}
+                          style={[styles.key, { width: keySize }]}
+                        >
+                          {renderBiometricGlyph(26)}
+                        </TouchableOpacity>
+                      ) : (
+                        <Box key={kIdx} style={{ width: keySize, height: 64 }} />
+                      );
+                    }
+
+                    return (
+                      <TouchableOpacity
+                        key={kIdx}
+                        accessibilityRole="button"
+                        accessibilityLabel={key === 'del' ? 'Delete' : key}
+                        activeOpacity={0.6}
+                        onPress={() => (!resetting ? handlePinKey(key) : handleResetPinKey(key))}
+                        style={[styles.key, { width: keySize }]}
+                      >
+                        {key === 'del' ? (
+                          <Ionicons name="backspace-outline" size={26} color={theme.colors.textPrimary} />
+                        ) : (
+                          <Text fontSize={24} lineHeight={30} fontFamily="SFproMedium" color="textPrimary">
+                            {key}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </Box>
+              ))}
+            </Box>
+          </>
+        ) : (
+          <>
+            <Box flex={1} justifyContent="center" alignItems="center" px="l">
+              <Box
+                alignItems="center"
+                justifyContent="center"
+                backgroundColor="inputBox"
+                borderColor="inputOutline"
+                borderWidth={1}
+                style={styles.biometricCard}
+              >
+                {renderBiometricGlyph(64)}
               </Box>
-            </>
-          )}
-        </View>
+              <Text
+                fontSize={20}
+                lineHeight={28}
+                fontFamily="SFproMedium"
+                color="textPrimary"
+                textAlign="center"
+                style={styles.unlockTitle}
+              >
+                Unlock with {biometricLabel}
+              </Text>
+              <Text fontSize={16} lineHeight={24} color="textSubheading" textAlign="center" mt="xs">
+                Your wallet is locked. Verify it&apos;s you to continue.
+              </Text>
+            </Box>
+
+            <Box px="l" gap="sm">
+              <SetupButton label={`Use ${biometricLabel}`} onPress={triggerBiometrics} />
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.8}
+                onPress={() => setShowPin(true)}
+                style={styles.secondaryButton}
+              >
+                <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+                  Use PIN instead
+                </Text>
+              </TouchableOpacity>
+            </Box>
+          </>
+        )}
       </Box>
     );
   }
@@ -829,10 +770,47 @@ const Biometrics = () => {
 };
 
 const styles = StyleSheet.create({
-  dot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  logo: {
+    width: 35,
+    height: 35,
+  },
+  pinTitle: {
+    marginTop: 40,
+  },
+  pinBoxes: {
+    gap: 14,
+    marginTop: 32,
+  },
+  pinMask: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  key: {
+    height: 64,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    backgroundColor: '#0F0F0F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  biometricCard: {
+    width: 115,
+    height: 115,
+    borderRadius: 24,
+  },
+  unlockTitle: {
+    marginTop: 32,
+  },
+  secondaryButton: {
+    height: 48,
+    borderRadius: 100,
+    backgroundColor: '#0F0F0F',
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

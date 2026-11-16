@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { ScrollView, TouchableOpacity } from 'react-native';
-
-import Box from '@/src/components/shared/Box';
-import Input from '@/src/components/shared/Input';
-import Text from '@/src/components/shared/Text';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+
+import { SetupButton } from '@/src/components/onboarding/SetupChrome';
+import Box from '@/src/components/shared/Box';
+import { PillField, PillInput } from '@/src/components/shared/PillField';
+import Text from '@/src/components/shared/Text';
 import SessionKeyTokenPicker, { largestBalanceCode, useHeldTokens } from './SessionKeyTokenPicker';
 
 interface Props {
@@ -19,6 +19,7 @@ interface Props {
   onNext: () => void;
 }
 
+const GREEN = '#76B101';
 const DURATIONS = ['1 Hour', '1 Day', '1 Week', '1 Month'];
 const ACTIONS = [
   { id: 'transfer', title: 'Transfer Tokens', description: 'Allow sending funds within limit' },
@@ -26,8 +27,13 @@ const ACTIONS = [
   { id: 'offers', title: 'Manage Offers', description: 'Create or cancel trade offers' },
 ];
 
+const SectionLabel = ({ children }: { children: string }) => (
+  <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textSubheading">
+    {children}
+  </Text>
+);
+
 const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
-  const { isDark } = useAppTheme();
   const tokens = useHeldTokens();
   const [pickerVisible, setPickerVisible] = useState(false);
 
@@ -52,146 +58,110 @@ const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
 
   return (
     <Box flex={1}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}>
-        {/* Duration Section */}
-        <Text variant="h11" color="textPrimary" fontWeight="700" mb="s" mt="m">
-          Duration
-        </Text>
-        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-between">
-          {DURATIONS.map((d) => (
-            <TouchableOpacity
-              key={d}
-              activeOpacity={0.7}
-              onPress={() => setFieldValue('duration', d)}
-              style={{ width: '48%', marginBottom: 12 }}
-            >
-              <Box
-                height={56}
-                backgroundColor="bg11"
-                borderRadius={12}
-                justifyContent="center"
-                alignItems="center"
-                borderWidth={1}
-                borderColor={values.duration === d ? 'primary' : 'transparent'}
-              >
-                <Text
-                  variant="p7"
-                  color={values.duration === d ? 'textPrimary' : 'textSecondary'}
-                  fontWeight="600"
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Box gap="s">
+          <SectionLabel>Duration</SectionLabel>
+          <Box flexDirection="row" flexWrap="wrap" style={styles.grid}>
+            {DURATIONS.map((d) => {
+              const selected = values.duration === d;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  activeOpacity={0.7}
+                  onPress={() => setFieldValue('duration', d)}
+                  style={[styles.duration, selected && styles.durationSelected]}
                 >
-                  {d}
-                </Text>
-              </Box>
-            </TouchableOpacity>
-          ))}
-        </Box>
-
-        {/* Total Spending Limit Section */}
-        <Text variant="h11" color="textPrimary" fontWeight="700" mb="s" mt="m">
-          Total Spending Limit
-        </Text>
-        <Box mb="l">
-          <Input
-            placeholder="0.00"
-            value={values.spendingLimit}
-            onChangeText={(text: string) => setFieldValue('spendingLimit', text)}
-            keyboardType="decimal-pad"
-            rightElement={
-              <TouchableOpacity activeOpacity={0.7} onPress={() => setPickerVisible(true)}>
-                <Box
-                  flexDirection="row"
-                  alignItems="center"
-                  backgroundColor={isDark ? 'gray800' : 'cardbg'}
-                  paddingHorizontal="m"
-                  py="s"
-                  borderRadius={12}
-                >
-                  <Text variant="p6" color="textPrimary" fontWeight="700">
-                    {values.spendingLimitAsset || 'USDC'}
-                  </Text>
-                  <Ionicons
-                    name="chevron-down"
-                    size={14}
-                    color={isDark ? '#fff' : '#000'}
-                    style={{ marginLeft: 4 }}
-                  />
-                </Box>
-              </TouchableOpacity>
-            }
-          />
-        </Box>
-
-        {/* Allowed Actions Section */}
-        <Text variant="h11" color="textPrimary" fontWeight="700" mb="s">
-          Allowed Actions
-        </Text>
-        {ACTIONS.map((action) => {
-          const isSelected = values.allowedActions.includes(action.id);
-          return (
-            <TouchableOpacity
-              key={action.id}
-              activeOpacity={0.7}
-              onPress={() => toggleAction(action.id)}
-              style={{ marginBottom: 12 }}
-            >
-              <Box
-                backgroundColor="bg11"
-                borderRadius={16}
-                padding="m"
-                flexDirection="row"
-                alignItems="center"
-              >
-                {isSelected ? (
-                  <Box
-                    width={24}
-                    height={24}
-                    borderRadius={12}
-                    backgroundColor="primary"
-                    justifyContent="center"
-                    alignItems="center"
-                    mr="m"
+                  <Text
+                    fontSize={14}
+                    lineHeight={22}
+                    fontFamily="SFproMedium"
+                    color={selected ? 'textPrimary' : 'textMuted'}
                   >
-                    <Ionicons name="checkmark" size={16} color="black" />
-                  </Box>
-                ) : (
-                  <Box
-                    width={24}
-                    height={24}
-                    borderRadius={12}
-                    borderWidth={1}
-                    borderColor="gray800"
-                    mr="m"
-                  />
-                )}
-                <Box flex={1}>
-                  <Text variant="h11" color="textPrimary" fontWeight="700" mb="xs">
-                    {action.title}
+                    {d}
                   </Text>
-                  <Text variant="p7" color="textSecondary">
-                    {action.description}
-                  </Text>
-                </Box>
-              </Box>
+                </TouchableOpacity>
+              );
+            })}
+          </Box>
+        </Box>
+
+        <Box style={styles.section}>
+          <PillField label="Total Spending Limit">
+            <PillInput
+              placeholder="0.00"
+              value={values.spendingLimit}
+              onChangeText={(text) => setFieldValue('spendingLimit', text)}
+              keyboardType="decimal-pad"
+            />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Choose spending limit token"
+              activeOpacity={0.7}
+              onPress={() => setPickerVisible(true)}
+              style={styles.assetChip}
+            >
+              <Text fontSize={14} lineHeight={16} fontFamily="SFproMedium" color="textPrimary">
+                {values.spendingLimitAsset || 'USDC'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color="#FFFFFF" />
             </TouchableOpacity>
-          );
-        })}
+          </PillField>
+        </Box>
+
+        <Box gap="s" style={styles.section}>
+          <SectionLabel>Allowed Actions</SectionLabel>
+          <Box
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            style={styles.actionsCard}
+          >
+            {ACTIONS.map((action, i) => {
+              const selected = values.allowedActions.includes(action.id);
+              const next = ACTIONS[i + 1];
+              const linked = selected && !!next && values.allowedActions.includes(next.id);
+              return (
+                <TouchableOpacity
+                  key={action.id}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  activeOpacity={0.7}
+                  onPress={() => toggleAction(action.id)}
+                  style={styles.actionRow}
+                >
+                  <Box alignItems="center" style={styles.rail}>
+                    <Box
+                      alignItems="center"
+                      justifyContent="center"
+                      style={[styles.radio, selected && styles.radioSelected]}
+                    >
+                      {selected && <Box style={styles.radioDot} />}
+                    </Box>
+                    {next && <Box style={[styles.connector, linked && styles.connectorLinked]} />}
+                  </Box>
+                  <Box flex={1} gap="xs" style={styles.actionText}>
+                    <Text fontSize={14} lineHeight={22} color={selected ? 'textPrimary' : 'textMuted'}>
+                      {action.title}
+                    </Text>
+                    <Text fontSize={14} lineHeight={18} color="textMuted">
+                      {action.description}
+                    </Text>
+                  </Box>
+                </TouchableOpacity>
+              );
+            })}
+          </Box>
+        </Box>
       </ScrollView>
 
-      {/* Footer */}
-      <Box position="absolute" bottom={20} left={16} right={16}>
-        <TouchableOpacity activeOpacity={0.7} onPress={onNext}>
-          <Box
-            height={64}
-            backgroundColor="primary"
-            borderRadius={32}
-            justifyContent="center"
-            alignItems="center"
-          >
-            <Text variant="h10" color="black" fontWeight="700">
-              Continue
-            </Text>
-          </Box>
-        </TouchableOpacity>
+      <Box style={styles.footer}>
+        <SetupButton label="Continue" onPress={onNext} />
       </Box>
 
       <SessionKeyTokenPicker
@@ -206,5 +176,93 @@ const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  scroll: {
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 24,
+  },
+  grid: {
+    gap: 8,
+  },
+  duration: {
+    width: '48.6%',
+    height: 50,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 60,
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    backgroundColor: '#0F0F0F',
+  },
+  durationSelected: {
+    borderColor: GREEN,
+  },
+  section: {
+    marginTop: 24,
+  },
+  // Sits 4pt inside the pill's right edge, as in the design.
+  assetChip: {
+    height: 40,
+    minWidth: 68,
+    marginRight: -16,
+    paddingHorizontal: 14,
+    borderRadius: 100,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(118,177,1,0.16)',
+  },
+  actionsCard: {
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  actionRow: {
+    flexDirection: 'row',
+  },
+  rail: {
+    width: 24,
+    paddingTop: 9,
+  },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#2A2A2A',
+  },
+  radioSelected: {
+    borderColor: GREEN,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: GREEN,
+  },
+  connector: {
+    flex: 1,
+    width: 2,
+    minHeight: 24,
+    marginVertical: 4,
+    borderRadius: 1,
+    backgroundColor: '#1A1A1A',
+  },
+  connectorLinked: {
+    backgroundColor: GREEN,
+  },
+  actionText: {
+    marginLeft: 16,
+    paddingVertical: 8,
+    paddingBottom: 18,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+});
 
 export default SessionKeyStep2;

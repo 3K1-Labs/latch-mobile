@@ -16,19 +16,20 @@
  * backup → run the ceremony (create, authorize on-chain, confirm) → success.
  */
 
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Formik } from 'formik';
 import { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Yup from 'yup';
 
 import { confirmAddBackupSigner } from '@/src/api/backup-signer';
+import { RoundBackButton, SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Input from '@/src/components/shared/Input';
+import { PillField, PillInput } from '@/src/components/shared/PillField';
 import Text from '@/src/components/shared/Text';
 import { STELLAR_FACTORY_ADDRESS } from '@/src/constants/config';
 import {
@@ -41,10 +42,14 @@ import { deviceFromPairingResponse } from '@/src/lib/pairing-context';
 import { PasskeyProvisionError } from '@/src/lib/provision-passkey';
 import { Device, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 import { summarizeError } from '@/src/utils/summarize-error';
 
 const log = createLogger('add-backup-signer');
+
+const ART = {
+  success: require('@/src/assets/images/result/tx-success.svg'),
+  failed: require('@/src/assets/images/result/tx-failed.svg'),
+};
 
 type Step =
   | { kind: 'name' }
@@ -56,12 +61,11 @@ type Step =
   | { kind: 'success' };
 
 const NameSchema = Yup.object().shape({
-  label: Yup.string().trim().min(1, 'Give this backup a name').required('Give this backup a name'),
+  label: Yup.string().trim().min(1, 'Give this signer a name').required('Give this signer a name'),
 });
 
 export default function AddBackupSigner() {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { accounts, activeAccountIndex, updateAccountDevicesAt } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
@@ -149,142 +153,158 @@ export default function AddBackupSigner() {
     }
   };
 
-  return (
-    <Box flex={1} backgroundColor="mainBackground" style={{ paddingTop: insets.top }}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+  const busy = step.kind === 'ceremony';
 
-      <Box flexDirection="row" alignItems="center" paddingHorizontal="m">
-        <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text
-          variant="h10"
-          color="textPrimary"
-          fontFamily="SFproSemibold"
-          flex={1}
-          textAlign="center"
-          mr="xl"
-        >
-          Add a backup signer
+  return (
+    <Box
+      flex={1}
+      backgroundColor="surfaceBase"
+      style={{ paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 20) }}
+    >
+      <StatusBar style="light" />
+
+      <Box flexDirection="row" alignItems="center" style={styles.header}>
+        <RoundBackButton onPress={() => router.back()} disabled={busy} />
+        <Text flex={1} textAlign="center" fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+          Add Signer
         </Text>
+        <Box width={40} />
       </Box>
 
       {step.kind === 'name' && (
         <Formik
-          initialValues={{ label: 'Backup' }}
+          initialValues={{ label: '' }}
           validationSchema={NameSchema}
           onSubmit={(v) => runCeremony(v.label.trim())}
         >
-          {({ values, errors, touched, handleChange, handleBlur, handleSubmit }) => (
-            <Box flex={1} paddingHorizontal="l" pt="m">
-              <Text variant="p7" color="textSecondary" mb="l" lineHeight={22}>
-                This creates a second passkey that can sign for this wallet on its own, either one
-                works alone, so this never raises the bar for spending. Name it so you can tell it
-                apart later.
-              </Text>
-              <Text variant="h11" color="textPrimary" mb="s" fontWeight="700">
-                Name
-              </Text>
-              <Input
-                value={values.label}
-                onChangeText={handleChange('label')}
-                onBlur={handleBlur('label')}
-                placeholder="Backup"
-                autoFocus
-                status={touched.label && errors.label ? 'danger' : 'basic'}
-              />
-              {touched.label && errors.label && (
-                <Text variant="h12" color="inputError" mt="xs">
-                  {errors.label}
+          {({ values, errors, touched, handleChange, handleBlur, handleSubmit, isValid, dirty }) => (
+            <Box flex={1} style={styles.body}>
+              <Box gap="m">
+                <PillField label="Signer Name" error={touched.label ? errors.label : undefined}>
+                  <PillInput
+                    value={values.label}
+                    onChangeText={handleChange('label')}
+                    onBlur={handleBlur('label')}
+                    placeholder="e.g iPad, etc"
+                    autoCapitalize="words"
+                    returnKeyType="done"
+                    onSubmitEditing={() => handleSubmit()}
+                    autoFocus
+                  />
+                </PillField>
+                <Text fontSize={14} lineHeight={20} letterSpacing={0.14} color="textSubheading">
+                  This creates a passkey that can sign for this wallet on its own. Either signer
+                  works alone, so it never raises the bar for spending.
                 </Text>
-              )}
-              <Box flex={1} />
-              <TouchableOpacity onPress={() => handleSubmit()} activeOpacity={0.7}>
-                <Box
-                  height={56}
-                  backgroundColor="primary"
-                  borderRadius={32}
-                  justifyContent="center"
-                  alignItems="center"
-                  mb="l"
-                >
-                  <Text variant="h10" color="black" fontWeight="700">
-                    Continue
-                  </Text>
-                </Box>
-              </TouchableOpacity>
+              </Box>
+              <SetupButton
+                label="Add Signer"
+                onPress={() => handleSubmit()}
+                disabled={!(isValid && dirty)}
+              />
             </Box>
           )}
         </Formik>
       )}
 
       {step.kind === 'ceremony' && (
-        <Box flex={1} justifyContent="center" alignItems="center" paddingHorizontal="l">
+        <Box flex={1} justifyContent="center" alignItems="center">
           <ActivityIndicator color={theme.colors.textPrimary} />
-          <Text variant="p7" color="textSecondary" mt="m">
+          <Text fontSize={14} lineHeight={22} color="textSubheading" mt="m">
             {step.busyLabel}
           </Text>
         </Box>
       )}
 
       {step.kind === 'success' && (
-        <Box flex={1} justifyContent="center" alignItems="center" paddingHorizontal="l">
-          <Ionicons name="checkmark-circle" size={48} color={theme.colors.textPrimary} />
-          <Text variant="h11" color="textPrimary" mt="m" fontFamily="SFproSemibold">
-            Backup signer added
-          </Text>
-          <TouchableOpacity onPress={() => router.replace('/account-signers')} style={styles.cta}>
-            <Text variant="p6" color="textPrimary" fontFamily="SFproSemibold">
-              View signers
-            </Text>
-          </TouchableOpacity>
-        </Box>
+        <Result
+          art={ART.success}
+          artSize={229}
+          title="Signer Added!"
+          message="Your new signer can now authorize transactions for this wallet."
+          action="Back to Signers"
+          onAction={() => router.replace('/account-signers')}
+        />
       )}
 
       {step.kind === 'error' && (
-        <ScrollView style={styles.errorScrollOuter} contentContainerStyle={styles.errorScroll}>
-          <Ionicons name="alert-circle" size={40} color={theme.colors.inputError} />
-          <Text variant="p7" color="textPrimary" mt="m" textAlign="center">
-            {summarizeError(step.message)}
-          </Text>
-          <TouchableOpacity onPress={() => setStep({ kind: 'name' })} style={styles.cta}>
-            <Text variant="p6" color="textPrimary">
-              Try again
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
+        <Result
+          art={ART.failed}
+          artSize={243}
+          title="Failed to add Signer"
+          message={summarizeError(step.message)}
+          action="Try Again"
+          onAction={() => setStep({ kind: 'name' })}
+        />
       )}
 
       {step.kind === 'confirmError' && (
-        <ScrollView style={styles.errorScrollOuter} contentContainerStyle={styles.errorScroll}>
-          <Ionicons name="alert-circle" size={40} color={theme.colors.inputError} />
-          <Text variant="p7" color="textPrimary" mt="m" textAlign="center">
-            Backup signer was added on-chain, but Latch couldn&apos;t confirm it yet:{' '}
-            {summarizeError(step.message)}
-          </Text>
-          <Text variant="p7" color="textSecondary" mt="s" textAlign="center" lineHeight={20}>
-            It&apos;s saved locally as unconfirmed. Retry from the Signers list.
-          </Text>
-          <TouchableOpacity onPress={() => router.replace('/account-signers')} style={styles.cta}>
-            <Text variant="p6" color="textPrimary">
-              View signers
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
+        <Result
+          art={ART.failed}
+          artSize={243}
+          title="Signer Not Confirmed Yet"
+          message={`The signer was added on-chain, but Latch couldn't confirm it yet: ${summarizeError(step.message)} It's saved as unconfirmed — retry from the Signers list.`}
+          action="View Signers"
+          onAction={() => router.replace('/account-signers')}
+        />
       )}
     </Box>
   );
 }
 
+const Result = ({
+  art,
+  artSize,
+  title,
+  message,
+  action,
+  onAction,
+}: {
+  art: number;
+  artSize: number;
+  title: string;
+  message: string;
+  action: string;
+  onAction: () => void;
+}) => (
+  <Box flex={1} style={styles.body}>
+    <ScrollView bounces={false} contentContainerStyle={styles.resultScroll}>
+      <Image source={art} contentFit="contain" style={{ width: artSize, height: artSize }} />
+      <Box alignItems="center" style={styles.resultCopy}>
+        <Text fontSize={20} lineHeight={28} fontFamily="SFproSemibold" color="textPrimary" textAlign="center">
+          {title}
+        </Text>
+        <Text fontSize={16} lineHeight={24} color="textSubheading" textAlign="center">
+          {message}
+        </Text>
+      </Box>
+    </ScrollView>
+    <SetupButton label={action} onPress={onAction} />
+  </Box>
+);
+
 const styles = StyleSheet.create({
-  backBtn: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
-  cta: { marginTop: 24, paddingVertical: 12, paddingHorizontal: 24 },
-  errorScrollOuter: { flex: 1 },
-  errorScroll: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  header: {
+    height: 64,
+    marginTop: 4,
     paddingHorizontal: 24,
+    gap: 12,
+  },
+  body: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 30,
+    justifyContent: 'space-between',
+  },
+  resultScroll: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 24,
+  },
+  resultCopy: {
+    width: 281,
+    gap: 2,
+    marginTop: 4,
   },
 });

@@ -4,7 +4,7 @@ import UtilityHeader from '@/src/components/shared/UtilityHeader';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { ScrollView } from 'react-native';
+import { Linking, ScrollView } from 'react-native';
 
 const HelpSupportScreen = () => {
   const router = useRouter();
@@ -25,17 +25,10 @@ const HelpSupportScreen = () => {
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 20 }}>
         <SupportItem
-          title="Live Chat Support"
-          description="Chat with our support team"
-          icon="chatbubble-outline"
-          image={require('@/src/assets/icon/chatbubble.png')}
-          onPress={() => {}}
-        />
-        <SupportItem
           title="Email Support"
-          description="support@latch.com"
+          description="support@getlatch.co"
           icon="mail-outline"
-          onPress={() => {}}
+          onPress={() => Linking.openURL('mailto:support@getlatch.co').catch(() => {})}
         />
       </ScrollView>
     </Box>

@@ -12,16 +12,17 @@
  */
 
 import { confirmAddBackupSigner, confirmRemoveBackupSigner } from '@/src/api/backup-signer';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { removeBackupSignerOnChain } from '@/src/lib/backup-signer-tx';
 import { createLogger } from '@/src/lib/logger';
 import { Device, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+import { shortenAddress } from '@/src/utils';
 import { summarizeError } from '@/src/utils/summarize-error';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -30,18 +31,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const log = createLogger('account-signers');
 
+const ICONS = {
+  plus: require('@/src/assets/images/address-book/plus.svg'),
+  phone: require('@/src/assets/images/signers/phone.svg'),
+  more: require('@/src/assets/images/signers/more.svg'),
+};
+
 export default function AccountSigners() {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { accounts, activeAccountIndex, updateAccountDevicesAt, syncSignersFromChain } =
     useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
   const devices = activeAccount?.devices ?? [];
-  // This screen is reached via the "Backup Signers" setting — show only backup
-  // signers, not the primary device. The primary can never be removed from here
-  // anyway, so showing it only confuses the count.
-  const backupDevices = devices.filter((d) => d.isBackupSigner);
+  // The primary device is listed (as in the design) but can never be removed here.
+  const primaryDevice = devices.find((d) => d.isLocal && !d.isBackupSigner);
+  const otherDevices = devices.filter((d) => d !== primaryDevice);
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,128 +184,224 @@ export default function AccountSigners() {
     }
   };
 
-  return (
-    <Box flex={1} backgroundColor="mainBackground" style={{ paddingTop: insets.top }}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+  const renderDevice = (device: Device, primary: boolean) => {
+    const isPendingAdd = device.pendingConfirm?.action === 'add';
+    const isPendingRemove = device.pendingConfirm?.action === 'remove';
+    const busy = busyKey === device.signerKey;
+    const status = isPendingRemove ? 'Removing…' : isPendingAdd ? 'Pending confirmation' : null;
 
-      <Box height={56} flexDirection="row" alignItems="center" paddingHorizontal="m">
-        <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text
-          variant="h10"
-          color="textPrimary"
-          fontFamily="SFproSemibold"
-          flex={1}
-          textAlign="center"
-          mr="xl"
-        >
-          Signers
-        </Text>
-      </Box>
-
-      {syncing && (
-        <Box flexDirection="row" alignItems="center" paddingHorizontal="l" mb="s">
-          <ActivityIndicator size="small" color={theme.colors.textSecondary} />
-          <Text variant="p7" color="textSecondary" ml="s">
-            Syncing signers from chain…
-          </Text>
-        </Box>
-      )}
-
-      <Box paddingHorizontal="l" pt="s" flex={1}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
-          {error && (
-            <Box backgroundColor="bg11" borderRadius={12} padding="m" mb="m">
-              <Text variant="p7" color="inputError">
-                {summarizeError(error)}
-              </Text>
-            </Box>
-          )}
-
-          {!syncing && backupDevices.length === 0 && (
-            <Text variant="p7" color="textSecondary">
-              No backup signers yet. Tap the button below to add one.
-            </Text>
-          )}
-
-          {backupDevices.map((device) => {
-            const isPendingAdd = device.pendingConfirm?.action === 'add';
-            const isPendingRemove = device.pendingConfirm?.action === 'remove';
-            const busy = busyKey === device.signerKey;
-            const role = device.isBackupSigner ? 'Backup' : device.isLocal ? 'Primary' : 'Signer';
-            const statusLabel = isPendingRemove
-              ? 'Removing…'
-              : isPendingAdd
-                ? 'Pending confirmation'
-                : 'Active';
-
-            return (
-              <Box
-                key={device.signerKey}
-                backgroundColor="bg11"
-                borderRadius={16}
-                padding="m"
-                mb="m"
-                flexDirection="row"
-                alignItems="center"
-              >
-                <Box flex={1}>
-                  <Text variant="h11" color="textPrimary" fontFamily="SFproSemibold">
-                    {device.label}
-                  </Text>
-                  <Text variant="p7" color="textSecondary" mt="xs">
-                    {role} · {statusLabel}
-                  </Text>
-                </Box>
-
-                {busy && <ActivityIndicator color={theme.colors.textSecondary} />}
-
-                {!busy && isPendingAdd && (
-                  <TouchableOpacity onPress={() => retryConfirmAdd(device)} hitSlop={8}>
-                    <Text variant="p6" color="primary" fontFamily="SFproSemibold">
-                      Retry
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                {!busy && isPendingRemove && (
-                  <TouchableOpacity onPress={() => retryConfirmRemove(device)} hitSlop={8}>
-                    <Text variant="p6" color="primary" fontFamily="SFproSemibold">
-                      Retry
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                {!busy && device.isBackupSigner && !device.pendingConfirm && (
-                  <TouchableOpacity onPress={() => startRemove(device)} hitSlop={8}>
-                    <Ionicons name="trash-outline" size={20} color={theme.colors.inputError} />
-                  </TouchableOpacity>
-                )}
-              </Box>
-            );
-          })}
-        </ScrollView>
-
-        <TouchableOpacity onPress={() => router.push('/add-backup-signer')} activeOpacity={0.7}>
-          <Box
-            height={56}
-            backgroundColor="primary"
-            borderRadius={32}
-            justifyContent="center"
-            alignItems="center"
-            mb="l"
-          >
-            <Text variant="h10" color="black" fontWeight="700">
-              Add a backup signer
+    return (
+      <Box
+        key={device.signerKey}
+        backgroundColor="inputBox"
+        borderColor="inputOutline"
+        borderWidth={1}
+        style={styles.card}
+      >
+        {primary && (
+          <Box alignSelf="flex-start" backgroundColor="inputOutline" style={styles.pill}>
+            <Text fontSize={12} lineHeight={12} style={styles.pillText}>
+              Primary Device
             </Text>
           </Box>
+        )}
+        <Box flexDirection="row" alignItems="center" justifyContent="space-between">
+          <Box flex={1} flexDirection="row" alignItems="center" gap="m">
+            <Image
+              source={ICONS.phone}
+              contentFit="contain"
+              style={[styles.deviceIcon, !device.isLocal && styles.tabletIcon]}
+            />
+            <Box flex={1} gap="xs">
+              <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary" numberOfLines={1}>
+                {device.isLocal && !device.isBackupSigner ? `${device.label} (This Device)` : device.label}
+              </Text>
+              <Text fontSize={12} lineHeight={14} letterSpacing={0.12} color="textSubheading">
+                {status ?? shortenAddress(device.signerKey)}
+              </Text>
+            </Box>
+          </Box>
+
+          {busy && <ActivityIndicator color={theme.colors.textSubheading} />}
+
+          {!busy && (isPendingAdd || isPendingRemove) && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => (isPendingAdd ? retryConfirmAdd(device) : retryConfirmRemove(device))}
+            >
+              <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="accentGreen">
+                Retry
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {!busy && device.isBackupSigner && !device.pendingConfirm && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Options for ${device.label}`}
+              hitSlop={8}
+              onPress={() => startRemove(device)}
+            >
+              <Image source={ICONS.more} contentFit="contain" style={styles.moreIcon} />
+            </TouchableOpacity>
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
+  return (
+    <Box flex={1} backgroundColor="surfaceBase" style={{ paddingTop: insets.top }}>
+      <StatusBar style="light" />
+
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.header}>
+        <RoundBackButton onPress={() => router.back()} />
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+          Signers
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Add signer"
+          activeOpacity={0.7}
+          hitSlop={8}
+          onPress={() => router.push('/add-backup-signer')}
+          style={styles.addButton}
+        >
+          <Image source={ICONS.plus} contentFit="contain" style={styles.addIcon} />
         </TouchableOpacity>
       </Box>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+      >
+        <Box gap="s">
+          <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+            Signer Management
+          </Text>
+          <Text fontSize={14} lineHeight={20} letterSpacing={0.14} color="textSubheading">
+            Signers are devices or accounts allowed to authorize transactions. Requiring multiple
+            signers adds extra security.
+          </Text>
+        </Box>
+
+        <Box
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="space-between"
+          backgroundColor="inputBox"
+          borderColor="inputOutline"
+          borderWidth={1}
+          style={styles.summary}
+        >
+          <Text fontSize={16} lineHeight={24} color="textPrimary">
+            Active Signers
+          </Text>
+          {syncing ? (
+            <ActivityIndicator size="small" color={theme.colors.textSubheading} />
+          ) : (
+            <Text fontSize={16} lineHeight={24} fontFamily="SFproSemibold" color="textPrimary">
+              {devices.length}
+            </Text>
+          )}
+        </Box>
+
+        {error && (
+          <Box
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            style={styles.errorBox}
+          >
+            <Text fontSize={14} lineHeight={20} color="inputError">
+              {summarizeError(error)}
+            </Text>
+          </Box>
+        )}
+
+        <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textSubheading" style={styles.sectionTitle}>
+          Active Signers
+        </Text>
+
+        {!syncing && devices.length === 0 ? (
+          <Text fontSize={14} lineHeight={22} color="textSubheading">
+            No signers yet. Tap + to add a backup signer.
+          </Text>
+        ) : (
+          <Box style={styles.list}>
+            {primaryDevice && renderDevice(primaryDevice, true)}
+            {otherDevices.map((d) => renderDevice(d, false))}
+          </Box>
+        )}
+      </ScrollView>
     </Box>
   );
 }
 
 const styles = StyleSheet.create({
-  backBtn: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
+  header: {
+    height: 64,
+    marginTop: 4,
+    paddingHorizontal: 24,
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: {
+    width: 20,
+    height: 20,
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 30,
+  },
+  summary: {
+    height: 48,
+    marginTop: 20,
+    borderRadius: 40,
+    paddingHorizontal: 20,
+  },
+  errorBox: {
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 16,
+  },
+  sectionTitle: {
+    marginTop: 47,
+    marginBottom: 35,
+  },
+  list: {
+    gap: 10,
+  },
+  card: {
+    borderRadius: 20,
+    padding: 20,
+    gap: 12,
+  },
+  pill: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  pillText: {
+    color: '#413F3F',
+  },
+  deviceIcon: {
+    width: 13.71,
+    height: 20.57,
+  },
+  // The design draws non-primary devices as a tablet: the same glyph on its side.
+  tabletIcon: {
+    transform: [{ rotate: '90deg' }],
+  },
+  moreIcon: {
+    width: 24,
+    height: 24,
+  },
 });

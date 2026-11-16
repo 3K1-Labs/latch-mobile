@@ -8,6 +8,7 @@ import {
 import { findDeployedNetwork, type NetworkId } from '@/src/lib/account-network';
 import { clearSacTransferCache } from '@/src/lib/sac-transfer-cache';
 import { deriveWalletAtIndex, restoreStellarWallet, StellarWallet } from '@/src/lib/seed-wallet';
+import { loadWalletAppearance } from '@/src/lib/wallet-customisation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
@@ -412,6 +413,10 @@ async function persistAccounts(accounts: WalletAccount[]): Promise<void> {
   await SecureStore.setItemAsync(SECURE_KEYS.ACCOUNTS, JSON.stringify(accounts));
 }
 
+/** Passkey accounts have no publicKeyHex, so fall back to the contract address. */
+export const avatarKey = (account: Pick<WalletAccount, 'publicKeyHex' | 'smartAccountAddress'>) =>
+  account.publicKeyHex || account.smartAccountAddress || '';
+
 async function loadAvatars(): Promise<Record<string, string>> {
   try {
     const raw = await AsyncStorage.getItem(ASYNC_KEYS.AVATARS);
@@ -625,7 +630,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     const { accounts, avatars } = get();
     const account = accounts[listIndex];
     if (!account) return;
-    const key = account.publicKeyHex;
+    const key = avatarKey(account);
     let updatedAvatars: Record<string, string>;
     if (imageDataUri && key) {
       updatedAvatars = { ...avatars, [key]: imageDataUri };
@@ -1075,6 +1080,18 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           : null;
 
       const storedAvatars = await loadAvatars();
+      // Backfill images picked on customise-wallet before they were written here.
+      let backfilled = false;
+      for (const account of accounts) {
+        const key = avatarKey(account);
+        if (!key || storedAvatars[key] || !account.smartAccountAddress) continue;
+        const image = (await loadWalletAppearance(account.smartAccountAddress))?.image;
+        if (image) {
+          storedAvatars[key] = image;
+          backfilled = true;
+        }
+      }
+      if (backfilled) persistAvatars(storedAvatars).catch(() => {});
 
       set({
         mnemonic,

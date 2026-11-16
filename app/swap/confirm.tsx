@@ -1,14 +1,19 @@
+import { RoundBackButton, SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import TxAuthModal from '@/src/components/shared/TxAuthModal';
+import SwapCard from '@/src/components/swap/SwapCard';
+import { SummaryCard, SummaryRow, SummaryValue } from '@/src/components/swap/SwapSummary';
 import { swapTokenImage } from '@/src/components/swap/token-image';
 import { usePrices } from '@/src/hooks/use-prices';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useSwapQuote } from '@/src/hooks/use-swap-quote';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { friendlyTxError, retryOnStaleFeeQuote } from '@/src/lib/tx-errors';
+import type { NetworkFee } from '@/src/api/transaction-build';
 import {
+  estimateSwapFee,
   executeSwapFromPasskeyAccount,
   executeSwapFromSmartAccount,
 } from '@/src/services/swap/execute-swap';
@@ -16,20 +21,18 @@ import { signingRaisesBiometricPrompt } from '@/src/lib/cosign-packet-flow';
 import { createSwap } from '@/src/lib/cosign-transport';
 import { getActiveSwapProvider } from '@/src/services/swap/registry';
 import { useWalletStore } from '@/src/store/wallet';
-import { Theme } from '@/src/theme/theme';
 import { maskAddress } from '@/src/utils';
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const FLIP = require('@/src/assets/images/swap/flip.svg');
+
 const ConfirmSwap = () => {
-  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
@@ -94,6 +97,36 @@ const ConfirmSwap = () => {
     authResolveRef.current?.(confirmed);
     authResolveRef.current = null;
   };
+
+  const [feeEstimate, setFeeEstimate] = useState<NetworkFee | 'loading' | 'failed'>('loading');
+  useEffect(() => {
+    if (!quote || !smartAccountAddress) return;
+    // Shared wallets go through cosign, not build-swap.
+    if (activeAccount?.isMultisig) {
+      setFeeEstimate('failed');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const op = await provider.buildSwapOperation(quote, smartAccountAddress);
+      const signer = activeAccount?.gAddress
+        ? { keypair: (await import('@/src/lib/seed-wallet')).deriveWalletAtIndex(mnemonic!, activeAccount.index).keypair }
+        : { listIndex: activeAccountIndex };
+      return estimateSwapFee({ ...op, smartAccountAddress, signer });
+    })()
+      .then((fee) => !cancelled && setFeeEstimate(fee))
+      .catch(() => !cancelled && setFeeEstimate('failed'));
+    return () => {
+      cancelled = true;
+    };
+  }, [quote, smartAccountAddress, activeAccount, activeAccountIndex, mnemonic, provider]);
+
+  const feeLabel =
+    feeEstimate === 'loading'
+      ? 'Estimating…'
+      : feeEstimate === 'failed'
+        ? 'Calculated when signing'
+        : `${feeEstimate.maxAmount} ${feeEstimate.symbol} (max)`;
 
   const spendFiat = formatToken(params.amountIn, prices?.[params.fromCode]?.price).text;
   const receiveFiat = formatToken(quote?.amountOut ?? '0', prices?.[params.toCode]?.price).text;
@@ -167,7 +200,7 @@ const ConfirmSwap = () => {
           title: 'Your swap was successful',
           subtext: `Swapped ${params.amountIn} ${params.fromCode} for ~${effectiveQuote.amountOut} ${params.toCode}. Network fee: ${result.networkFee.maxAmount} ${result.networkFee.symbol}. Tx ${result.hash.slice(0, 8)}…`,
           buttonLabel: 'Go to Dashboard',
-          imageSource: 'success',
+          imageSource: 'tx-success',
         },
       });
     } catch (err) {
@@ -181,7 +214,7 @@ const ConfirmSwap = () => {
           subtext: friendlyTxError(err),
           buttonLabel: 'Try Again',
           buttonFunctionRaw: `true`,
-          imageSource: 'error',
+          imageSource: 'tx-failed',
         },
       });
     } finally {
@@ -190,222 +223,72 @@ const ConfirmSwap = () => {
   };
 
   return (
-    <Box flex={1} backgroundColor="mainBackground" style={{ paddingTop: insets.top }}>
+    <Box flex={1} backgroundColor="surfaceBase" style={{ paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      {/* Header */}
-      <Box
-        height={56}
-        flexDirection="row"
-        alignItems="center"
-        justifyContent="center"
-        paddingHorizontal="m"
-      >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text variant="h10" color="textPrimary" fontFamily="SFproSemibold">
+      <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+        <RoundBackButton onPress={() => router.back()} style={styles.backButton} />
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
           Confirm Swap
         </Text>
       </Box>
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* From Section */}
-        <Box mt="m">
-          <Text variant="p7" color="textSecondary" mb="s">
-            From
-          </Text>
-          <Box
-            backgroundColor="bg900"
-            borderRadius={18}
-            padding="m"
-            flexDirection="row"
-            alignItems="center"
-          >
-            <Box
-              width={44}
-              height={44}
-              borderRadius={12}
-              backgroundColor="bg800"
-              justifyContent="center"
-              alignItems="center"
-              mr="m"
-            >
-              <Image source={fromIcon} style={{ width: 44, height: 44 }} />
-            </Box>
-            <Box flex={1}>
-              <Text variant="h10" color="textPrimary">
-                {params.fromCode} on Stellar
-              </Text>
-              <Text variant="p8" color="textSecondary">
-                From: {accountLabel}
-              </Text>
-            </Box>
-            <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="pencil-outline" size={20} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
+        <Box style={styles.cards}>
+          <SwapCard
+            label="You Pay"
+            tokenCode={params.fromCode}
+            tokenIcon={fromIcon}
+            amount={params.amountIn}
+            fiatValue={spendFiat}
+          />
+          <SwapCard
+            label="You Receive (Estimated)"
+            tokenCode={params.toCode}
+            tokenIcon={toIcon}
+            amount={quote?.amountOut ?? ''}
+            fiatValue={receiveFiat}
+          />
+          <Box style={styles.flip}>
+            <Image source={FLIP} tintColor="#121212" style={styles.flipIcon} />
           </Box>
         </Box>
 
-        {/* Spend Section */}
-        <Box mt="m">
-          <Text variant="p7" color="textSecondary" mb="s">
-            Spend
-          </Text>
-          <Box
-            backgroundColor="bg900"
-            borderRadius={18}
-            padding="m"
-            flexDirection="row"
-            alignItems="center"
-          >
-            <Box
-              width={44}
-              height={44}
-              borderRadius={12}
-              backgroundColor="bg800"
-              justifyContent="center"
-              alignItems="center"
-              mr="m"
-            >
-              <Image source={fromIcon} style={{ width: 44, height: 44 }} />
-            </Box>
-            <Box flex={1}>
-              <Text variant="h9" color="textPrimary">
-                -{params.amountIn} {params.fromCode}
-              </Text>
-              <Text variant="p8" color="textSecondary">
-                {spendFiat}
-              </Text>
-            </Box>
-          </Box>
-        </Box>
+        <Box height={1} backgroundColor="inputOutline" style={styles.divider} />
 
-        {/* Receive Section */}
-        <Box mt="m">
-          <Text variant="p7" color="textSecondary" mb="s">
-            Receive (Estimated)
-          </Text>
-          <Box
-            backgroundColor="bg900"
-            borderRadius={18}
-            padding="m"
-            flexDirection="row"
-            alignItems="center"
-          >
-            <Box
-              width={44}
-              height={44}
-              borderRadius={12}
-              backgroundColor="bg800"
-              justifyContent="center"
-              alignItems="center"
-              mr="m"
-            >
-              <Image source={toIcon} style={{ width: 44, height: 44, resizeMode: 'cover' }} />
+        <SummaryCard>
+          <SummaryRow label="Min. Received">
+            <SummaryValue>{quote ? `${quote.minReceived} ${params.toCode}` : '—'}</SummaryValue>
+          </SummaryRow>
+          <SummaryRow label="Network Fee">
+            <SummaryValue>{feeLabel}</SummaryValue>
+          </SummaryRow>
+          <SummaryRow label="Provider">
+            <Box flexDirection="row" alignItems="center" gap="s" flexShrink={1}>
+              <Image source={provider.icon} style={styles.providerIcon} />
+              <SummaryValue>{provider.name}</SummaryValue>
             </Box>
-            <Box flex={1}>
-              <Text variant="h9" color="textPrimary">
-                +{quote?.amountOut ?? '—'} {params.toCode}
-              </Text>
-              <Text variant="p8" color="textSecondary">
-                {receiveFiat}
-              </Text>
-            </Box>
-            <Box>
-              {/* <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} /> */}
-            </Box>
-          </Box>
-        </Box>
-
-        {/* Details Section */}
-        <Box mt="xl">
-          {/* <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
-              MEV Protection
-            </Text>
-            <Switch value={mevProtection} onValueChange={setMevProtection} />
-          </Box> */}
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Network Fee
-            </Text>
-            <Box flexDirection="row" alignItems="center">
-              <Text variant="p7" color="textPrimary" mr="xs">
-                Paid by you — shown after you confirm
-              </Text>
-            </Box>
-          </Box>
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Min. Received
-            </Text>
-            <Text variant="p7" color="textPrimary">
-              {quote ? `${quote.minReceived} ${params.toCode}` : '—'}
-            </Text>
-          </Box>
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Provider
-            </Text>
-            <Box flexDirection="row" alignItems="center">
-              <Image
-                source={provider.icon}
-                style={{ width: 18, height: 18, borderRadius: 4, marginRight: 6 }}
-              />
-              <Text variant="p7" color="textPrimary">
-                {provider.name}
-              </Text>
-            </Box>
-          </Box>
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Receive Address
-            </Text>
-            <Text variant="p7" color="textPrimary">
-              {accountLabel}
-            </Text>
-          </Box>
-        </Box>
+          </SummaryRow>
+          <SummaryRow label="From">
+            <SummaryValue>{accountLabel}</SummaryValue>
+          </SummaryRow>
+          <SummaryRow label="Receive Address">
+            <SummaryValue>{accountLabel}</SummaryValue>
+          </SummaryRow>
+        </SummaryCard>
       </ScrollView>
 
-      {/* Footer Buttons */}
-      <Box
-        paddingHorizontal="m"
-        paddingBottom="m"
-        flexDirection="row"
-        justifyContent="space-between"
-        style={{ paddingBottom: insets.bottom + 16 }}
-      >
-        <TouchableOpacity
-          style={[styles.footerButton, styles.cancelButton]}
-          onPress={() => router.back()}
-        >
-          <Text variant="h10" color="textPrimary">
-            Cancel
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+      <Box style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+        <SetupButton
+          label="Confirm Swap"
+          busy={submitting}
+          disabled={!quote}
           onPress={handleConfirm}
-          disabled={!quote || submitting}
-          style={[
-            styles.footerButton,
-            styles.confirmButton,
-            (!quote || submitting) && styles.disabled,
-          ]}
-        >
-          <Text variant="h10" color="bgDark900" style={{ fontWeight: '600' }}>
-            Confirm Swap
-          </Text>
-        </TouchableOpacity>
+        />
       </Box>
 
       <TxAuthModal
@@ -425,27 +308,50 @@ const ConfirmSwap = () => {
 };
 
 const styles = StyleSheet.create({
+  header: {
+    height: 64,
+    marginTop: 4,
+  },
   backButton: {
     position: 'absolute',
-    left: 16,
+    left: 24,
   },
-  footerButton: {
-    height: 48,
-    borderRadius: 28,
-    justifyContent: 'center',
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 30,
+    paddingBottom: 40,
+  },
+  cards: {
+    gap: 11,
+  },
+  flip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: 125,
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: '#FFC508',
     alignItems: 'center',
-    flex: 0.48,
+    justifyContent: 'center',
   },
-  cancelButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#e1e1e1',
+  flipIcon: {
+    width: 22,
+    height: 22,
+    transform: [{ rotate: '-90deg' }],
   },
-  confirmButton: {
-    backgroundColor: '#FFAD00',
+  divider: {
+    marginTop: 32,
+    marginBottom: 16,
   },
-  disabled: {
-    opacity: 0.5,
+  providerIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
   },
 });
 

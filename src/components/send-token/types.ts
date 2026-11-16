@@ -1,7 +1,7 @@
 import type { TokenBalance } from '@/src/hooks/use-portfolio';
 
 export type SendToken = TokenBalance;
-export type Recipient = { address: string };
+export type Recipient = { address: string; label?: string };
 export type SendStatus = 'initial' | 'sending' | 'success' | 'error' | 'view_transaction';
 
 export const NUMERIC_KEYS = [

@@ -5,7 +5,8 @@ import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Dimensions, Image, TouchableOpacity } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { Dimensions, Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Box from '@/src/components/shared/Box';
@@ -38,6 +39,8 @@ const ThankYou = () => {
     params.subtext || 'Your email has been confirmed. Please proceed to sign in to your account.';
   const buttonLabel = params.buttonLabel || 'Go to Home';
   const imageSource = params.imageSource || 'success';
+  const isTxResult = imageSource === 'tx-success' || imageSource === 'tx-failed';
+  const isFailure = imageSource === 'error' || imageSource === 'tx-failed';
 
   const handleButtonPress = () => {
     if (params.buttonFunctionRaw === 'true') {
@@ -65,6 +68,11 @@ const ThankYou = () => {
         return require('@/src/assets/images/mailbox.png');
       case 'error':
         return require('@/src/assets/images/error.png');
+      // Transaction outcomes (swap, send) use the Figma mascots.
+      case 'tx-success':
+        return require('@/src/assets/images/result/tx-success.svg');
+      case 'tx-failed':
+        return require('@/src/assets/images/result/tx-failed.svg');
       default:
         // Use exactly the image check3d.png if it becomes available, otherwise default to success
         return require('@/src/assets/images/success.png');
@@ -82,7 +90,7 @@ const ThankYou = () => {
 
       {/* Header */}
       <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-        {imageSource === 'error' ? (
+        {isFailure ? (
           <TouchableOpacity
             onPress={() => router.back()}
             activeOpacity={0.7}
@@ -104,11 +112,15 @@ const ThankYou = () => {
 
       {/* Main Content */}
       <Box flex={1} justifyContent="center" alignItems="center">
-        <Image
-          source={getImageSource()}
-          style={{ width: width, height: width * 0.55 }}
-          resizeMode="contain"
-        />
+        {isTxResult ? (
+          <ExpoImage source={getImageSource()} contentFit="contain" style={styles.txIllustration} />
+        ) : (
+          <Image
+            source={getImageSource()}
+            style={{ width: width, height: width * 0.55 }}
+            resizeMode="contain"
+          />
+        )}
 
         <Box alignItems="center" mt="xl" width="100%">
           <Text variant="h8" fontSize={28} fontWeight="700" textAlign="center" color="textPrimary">
@@ -125,7 +137,7 @@ const ThankYou = () => {
           </Text>
         </Box>
 
-        {imageSource !== 'error' && params.accountAddress && (
+        {!isFailure && params.accountAddress && (
           <Box
             width="100%"
             mt="xl"
@@ -172,5 +184,12 @@ const ThankYou = () => {
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  txIllustration: {
+    width: 229,
+    height: 229,
+  },
+});
 
 export default ThankYou;

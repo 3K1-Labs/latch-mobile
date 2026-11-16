@@ -80,6 +80,37 @@ async function markPendingAnnounce(account: string): Promise<void> {
   }
 }
 
+// Set when a wallet is restored on this device (recovery phrase or passkey
+// sign-in). The background sweep never signs in, so on a fresh restore with no
+// cached session it would defer forever and the user's shared wallets would
+// never reappear. This flag buys exactly one sign-in-allowed discovery, right
+// after the user has authenticated anyway.
+const DISCOVER_AFTER_RESTORE_KEY = 'latch.discoverAfterRestore.v1';
+
+export async function requestDiscoveryAfterRestore(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(DISCOVER_AFTER_RESTORE_KEY, '1');
+  } catch {
+    // best-effort; the background sweep still finds them once a session exists
+  }
+}
+
+export async function isDiscoveryAfterRestorePending(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(DISCOVER_AFTER_RESTORE_KEY)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function clearDiscoveryAfterRestore(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(DISCOVER_AFTER_RESTORE_KEY);
+  } catch {
+    // best-effort
+  }
+}
+
 async function clearPendingAnnounce(account: string): Promise<void> {
   const list = await getPendingAnnounces();
   if (!list.includes(account)) return;

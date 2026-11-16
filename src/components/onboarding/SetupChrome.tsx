@@ -1,6 +1,9 @@
 import Box from '@/src/components/shared/Box';
 import Button from '@/src/components/shared/Button';
 import Text from '@/src/components/shared/Text';
+import { Theme } from '@/src/theme/theme';
+import { useAppTheme } from '@/src/theme/ThemeContext';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React, { useEffect } from 'react';
 import { Pressable, StyleProp, StyleSheet, TouchableOpacity, ViewStyle } from 'react-native';
@@ -22,23 +25,35 @@ export const RoundBackButton = ({
   onPress: () => void;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
-}) => (
-  <TouchableOpacity
-    accessibilityRole="button"
-    accessibilityLabel="Go back"
-    activeOpacity={0.7}
-    hitSlop={8}
-    disabled={disabled}
-    onPress={onPress}
-    style={[styles.back, disabled && styles.backDisabled, style]}
-  >
-    <Image
-      source={require('@/src/assets/images/onboarding/create-wallet/back-arrow.svg')}
-      contentFit="fill"
-      style={styles.backIcon}
-    />
-  </TouchableOpacity>
-);
+}) => {
+  const theme = useTheme<Theme>();
+  const { isDark } = useAppTheme();
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="Go back"
+      activeOpacity={0.7}
+      hitSlop={8}
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.back,
+        { backgroundColor: theme.colors.controlBg },
+        // Figma's light control sits on a white 2pt ring.
+        !isDark && styles.backLight,
+        disabled && styles.backDisabled,
+        style,
+      ]}
+    >
+      <Image
+        source={require('@/src/assets/images/onboarding/create-wallet/back-arrow.svg')}
+        contentFit="fill"
+        tintColor={theme.colors.iconPrimary}
+        style={styles.backIcon}
+      />
+    </TouchableOpacity>
+  );
+};
 
 export const SetupHeading = ({
   title,
@@ -83,7 +98,7 @@ export const SetupButton = ({
     <Button
       {...rest}
       variant={off ? 'disabled' : 'ghost'}
-      bg={off ? 'btnDisabled' : 'white'}
+      bg={off ? 'btnDisabled' : 'buttonBg'}
       labelColor={off ? 'gray600' : 'buttonLabel'}
       labelStyle={styles.buttonLabel}
       disabled={off}
@@ -185,12 +200,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1A1A1A',
     shadowColor: '#B1B1B1',
     shadowOffset: { width: -1, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 4,
+  },
+  backLight: {
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   backDisabled: {
     opacity: 0.5,

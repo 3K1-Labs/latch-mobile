@@ -1,38 +1,36 @@
 import Box from '@/src/components/shared/Box';
-import Text from '@/src/components/shared/Text';
+import { Image } from 'expo-image';
 import React from 'react';
-import { TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
+
+const ICON = require('@/src/assets/images/multisig/profile-add.svg');
 
 interface AddMemberButtonProps {
   onPress: () => void;
 }
 
-const AddMemberButton: React.FC<AddMemberButtonProps> = ({ onPress }) => {
-  return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
-      <Box
-        bg={'bg11'}
-        mb={'m'}
-        style={{
-          borderWidth: 1,
-          borderStyle: 'dashed',
-          borderColor: '#3A3A3A',
-          borderRadius: 16,
-          paddingVertical: 24,
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'row',
-        }}
-      >
-        <Text color="textPrimary" style={{ fontSize: 18, marginRight: 8 }}>
-          +
-        </Text>
-        <Text variant="h10" color="textPrimary">
-          Add Member
-        </Text>
-      </Box>
-    </TouchableOpacity>
-  );
-};
+const AddMemberButton: React.FC<AddMemberButtonProps> = ({ onPress }) => (
+  <TouchableOpacity
+    accessibilityRole="button"
+    accessibilityLabel="Add owner"
+    activeOpacity={0.7}
+    onPress={onPress}
+  >
+    <Box backgroundColor="inputBox" alignItems="center" justifyContent="center" style={styles.card}>
+      <Image source={ICON} contentFit="contain" style={styles.icon} />
+    </Box>
+  </TouchableOpacity>
+);
+
+const styles = StyleSheet.create({
+  card: {
+    height: 92,
+    borderRadius: 14,
+  },
+  icon: {
+    width: 40,
+    height: 40,
+  },
+});
 
 export default AddMemberButton;

@@ -16,7 +16,7 @@ interface MemberListProps {
 
 const MemberList: React.FC<MemberListProps> = ({ members, onRemove }) => {
   return (
-    <Box>
+    <Box gap="m">
       {members.map((member) => (
         <MemberCard
           key={member.id}

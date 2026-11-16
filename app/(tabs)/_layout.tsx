@@ -1,9 +1,9 @@
 import SharedWalletNamingModal from '@/src/components/account/SharedWalletNamingModal';
-import { CustomTabBar } from '@/src/components/CustomTabBar';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import { DrawerProvider } from '@/src/context/drawer-context';
 import { TabBarScrollProvider } from '@/src/context/tab-bar-scroll';
 // import { usePushNotifications } from '@/src/hooks/use-push-notifications';
+import { useSharedWalletDiscovery } from '@/src/hooks/use-shared-wallet-discovery';
 // import { useUnreadCount } from '@/src/hooks/use-unread-count';
 import { useLoadingOverlay } from '@/src/store/loading-overlay';
 import { useWalletStore } from '@/src/store/wallet';
@@ -27,13 +27,17 @@ const TabsLayout = () => {
   // usePushNotifications();
   // useUnreadCount();
 
+  // Kept separate from push: this is what restores shared wallets after a
+  // logout, and it must run whether or not push is enabled.
+  useSharedWalletDiscovery();
+
   return (
     <BottomSheetModalProvider>
       <DrawerProvider drawerContent={<Profile />}>
         <View style={{ flex: 1 }}>
           <TabBarScrollProvider>
             <Tabs
-              tabBar={(props) => <CustomTabBar {...props} />}
+              tabBar={() => null}
               screenOptions={{ headerShown: false }}
             >
               <Tabs.Screen name="index" options={{ title: 'Home' }} />

@@ -1,19 +1,24 @@
 import { StellarPayment } from '@/src/hooks/use-stellar-transactions';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { formatRelativeTime, shortenAddress } from '@/src/utils';
+import { Image } from 'expo-image';
 import { StyleSheet, TouchableOpacity } from 'react-native';
 import Box from '../shared/Box';
 import Text from '../shared/Text';
 import TokenIcon from '../shared/TokenIcon';
 
+const ARROW = require('@/src/assets/images/history/arrow-down.svg');
+
 const HistoryItem = ({
   item,
   smartAccountAddress,
   handleRowPress,
+  showDirection = false,
 }: {
   item: StellarPayment;
   smartAccountAddress: string | null;
   handleRowPress: (tx: StellarPayment) => void;
+  showDirection?: boolean;
 }) => {
   const iconUrl = useTokenIcon(item.assetCode);
 
@@ -54,9 +59,18 @@ const HistoryItem = ({
           <TokenIcon iconUrl={iconUrl} size={32} />
         </Box>
         <Box flex={1} gap="xs">
-          <Text variant="p6" fontFamily="SFproMedium" lineHeight={24} letterSpacing={0} color="textPrimary">
-            {label}
-          </Text>
+          <Box flexDirection="row" alignItems="center" gap="s">
+            <Text variant="p6" fontFamily="SFproMedium" lineHeight={24} letterSpacing={0} color="textPrimary">
+              {label}
+            </Text>
+            {showDirection && (isSent || isReceived) && (
+              <Image
+                source={ARROW}
+                tintColor="#FFFFFF"
+                style={[styles.arrow, isSent && styles.arrowUp]}
+              />
+            )}
+          </Box>
           <Text
             variant="p7"
             lineHeight={14}
@@ -88,6 +102,14 @@ const styles = StyleSheet.create({
   row: {
     paddingHorizontal: 18,
     paddingVertical: 16,
+  },
+  arrow: {
+    width: 16,
+    height: 16,
+  },
+  // The design flips the received arrow vertically for sent rows.
+  arrowUp: {
+    transform: [{ scaleY: -1 }],
   },
 });
 

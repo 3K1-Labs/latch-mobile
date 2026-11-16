@@ -5,7 +5,7 @@ import Box from '@/src/components/shared/Box';
 import UtilityHeader from '@/src/components/shared/UtilityHeader';
 import { useWalletConnectPairing } from '@/src/hooks/use-walletconnect-pairing';
 import { useCameraPermissions } from 'expo-camera';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -14,6 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const QRScanScreen = () => {
   const router = useRouter();
+  // Opened from Send's recipient step: hand the address back to that screen
+  // rather than starting a second send flow on top of it.
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
@@ -98,10 +101,9 @@ const QRScanScreen = () => {
           <AddressResultCard
             address={scannedAddress}
             onSend={() => {
-              router.push({
-                pathname: '/send-token',
-                params: { address: scannedAddress },
-              });
+              const target = { pathname: '/send-token' as const, params: { address: scannedAddress } };
+              if (from === 'send') router.dismissTo(target);
+              else router.push(target);
             }}
             onScanAgain={() => setScannedAddress(null)}
           />

@@ -1,8 +1,9 @@
-import { Swap as SwapIcon } from '@/src/components/CustomTabBar';
+import { RoundBackButton, SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import SwapCard from '@/src/components/swap/SwapCard';
 import SwapRoutePickerSheet from '@/src/components/swap/SwapRoutePickerSheet';
+import { SummaryCard, SummaryRow, SummaryValue } from '@/src/components/swap/SwapSummary';
 import SwapTokenPickerSheet from '@/src/components/swap/SwapTokenPickerSheet';
 import { swapTokenImage } from '@/src/components/swap/token-image';
 import { STELLAR_NETWORK_PASSPHRASE } from '@/src/constants/config';
@@ -18,7 +19,8 @@ import { getActiveSwapProvider, listSwapProviders } from '@/src/services/swap/re
 import type { SwapToken } from '@/src/services/swap/types';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { useAppTheme } from '@/src/theme/ThemeContext';
+import { shortenAddress } from '@/src/utils';
 import { useTheme } from '@shopify/restyle';
 import { Asset } from '@stellar/stellar-sdk';
 import { useQueryClient } from '@tanstack/react-query';
@@ -28,7 +30,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useFormik } from 'formik';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -41,10 +42,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Yup from 'yup';
 
 const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
+const QUICK_USD_AMOUNTS = [100, 500];
+
+const ICONS = {
+  flip: require('@/src/assets/images/swap/flip.svg'),
+  chevronDown: require('@/src/assets/images/swap/chevron-down.svg'),
+  chevronRight: require('@/src/assets/images/home/chevron.svg'),
+  rate: require('@/src/assets/images/swap/flip-small.svg'),
+};
+
+// Round down so a quick-fill amount never exceeds what was asked for, and keep
+// it within Stellar's 7-decimal precision without exponent notation.
+const toAmountString = (value: number) =>
+  (Math.floor(value * 1e7) / 1e7).toFixed(7).replace(/\.?0+$/, '');
 
 const Swap = () => {
   const theme = useTheme<Theme>();
-  const isDark = theme.colors.mainBackground === '#000000';
+  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const tabBarScroll = useTabBarScroll();
   const queryClient = useQueryClient();
@@ -169,6 +183,7 @@ const Swap = () => {
   const [showSlippageOptions, setShowSlippageOptions] = useState(false);
   const [customSlippage, setCustomSlippage] = useState('');
   const [showUsdRate, setShowUsdRate] = useState(false);
+  const [amountFocused, setAmountFocused] = useState(false);
 
   const applyCustomSlippage = (pct: string) => {
     setCustomSlippage(pct);
@@ -220,13 +235,9 @@ const Swap = () => {
     }
   }, [tokens, swappableTokens, fromToken, toToken]);
 
-  const rotation = useSharedValue(90);
+  const rotation = useSharedValue(-90);
   const animatedIconStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  const animatedIconStyle2 = useAnimatedStyle(() => ({
-    transform: [{ rotate: '90deg' }],
   }));
 
   const handleSwap = () => {
@@ -337,8 +348,10 @@ const Swap = () => {
   };
 
   const fromValue = formatToken(formik.values.amount, prices?.[fromToken?.code ?? '']?.price).text;
-  const toAmount = quote?.amountOut ?? '0.00';
-  const toValue = formatToken(quote?.amountOut ?? '0', prices?.[toToken?.code ?? '']?.price).text;
+  // A cleared amount must not keep showing the last quote's output.
+  const quotedOut = amountNum > 0 ? quote?.amountOut : undefined;
+  const toAmount = quotedOut ?? '';
+  const toValue = formatToken(quotedOut ?? '0', prices?.[toToken?.code ?? '']?.price).text;
 
   const fromUsdPrice = parseFloat(prices?.[fromToken?.code ?? '']?.price ?? '');
   // An unpriced token falls back to the token-denominated rate rather than
@@ -353,30 +366,46 @@ const Swap = () => {
         `1 ${fromToken.code} ≈ ${quote.rate.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${toToken.code}`)
       : '—';
 
-  return (
-    <Box flex={1} backgroundColor="onboardingbg" style={{ paddingTop: insets.top }}>
-<StatusBar style={isDark ? 'light' : 'dark'} />
+  // Quick-fill chips. Dollar chips need a live price for the From token; with
+  // none they stay disabled rather than guessing a conversion.
+  const fillUsd = (usd: number) => {
+    if (!(fromUsdPrice > 0)) return;
+    handleAmountChange(toAmountString(usd / fromUsdPrice));
+  };
+  const fillMax = () => {
+    const bal = parseFloat(balanceOf(fromToken));
+    if (bal > 0) handleAmountChange(toAmountString(bal));
+  };
+  const showSummary = !amountFocused && !!fromToken && !!toToken && amountNum > 0;
 
-      {/* Header */}
-      <Box
-        flexDirection="row"
-        alignItems="center"
-        justifyContent="center"
-        paddingHorizontal="m"
-        style={styles.header}
-      >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text variant="h10" color="textPrimary" fontFamily={'SFproSemibold'}>
-          Swap
+  const buttonLabel = !amountNum
+    ? 'Enter Amount'
+    : insufficient
+      ? 'Insufficient Balance'
+      : quotePending
+        ? 'Fetching Quote…'
+        : badPrice
+          ? 'Price unavailable — try again'
+          : noRoute
+            ? 'No route for this pair'
+            : 'Confirm Swap';
+
+  return (
+    <Box flex={1} backgroundColor="surfaceBase" style={{ paddingTop: insets.top }}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+
+      <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+        <RoundBackButton onPress={() => router.back()} style={styles.backButton} />
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+          Swap Tokens
         </Text>
       </Box>
 
       <ScrollView
         {...tabBarScroll}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         // `bounces={false}` was removed rather than tightened: iOS drives
         // RefreshControl off the overscroll bounce, and any narrowing of it
         // (alwaysBounceVertical) makes the pull unreachable whenever the form is
@@ -388,239 +417,102 @@ const Swap = () => {
             tintColor={theme.colors.primary700}
           />
         }
-        style={{ flex: 1 }}
+        style={styles.fill}
       >
-        <Box paddingHorizontal="m" paddingTop="m">
-          {/* From Section Header */}
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            justifyContent="space-between"
-            marginBottom="s"
-          >
-            <Text variant="p7" color="textSecondary">
-              From
-            </Text>
-            {/* Non-functional placeholder toggle from the original mock — see
-                the useExchangeBalance declaration above. */}
-            {/* <Box flexDirection="row" alignItems="center">
-              <Text variant="p7" color="textSecondary" style={styles.exchangeLabel}>
-                Use Exchange Balance
-              </Text>
-              <Switch value={useExchangeBalance} onValueChange={setUseExchangeBalance} />
-            </Box> */}
-          </Box>
-
-          {/* First Swap Card (From) */}
+        <Box style={styles.cards}>
           <SwapCard
-            tokenName={fromToken?.code ?? '—'}
-            tokenSubtitle={fromToken?.code ? `${fromToken.code} on Stellar` : 'Select a token'}
+            label="You Pay"
+            tokenCode={fromToken?.code ?? '—'}
             tokenIcon={fromIconUrl ? { uri: fromIconUrl } : swapTokenImage(fromToken?.code)}
             amount={formik.values.amount}
+            fiatValue={fromValue}
+            balance={`${balanceOf(fromToken)} ${fromToken?.code ?? ''}`}
+            editable
             onAmountChange={handleAmountChange}
-            value={fromValue}
-            walletName="My Wallet"
-            walletBalance={`${balanceOf(fromToken)} ${fromToken?.code ?? ''}`}
-            walletValue={`${balanceOf(fromToken)} ${fromToken?.code ?? ''}`}
-            showAddFunds={insufficient}
-            showWalletDropdown
+            onFocusChange={setAmountFocused}
             onTokenSelect={() => setPickerSide('from')}
           />
 
-          {/* Swap button + From label for second section */}
-          <Box flexDirection="row" alignItems="center" mt={'m'} mb={'xs'}>
-            <Text variant="p7" color="textSecondary">
-              To
-            </Text>
-            <Box
-              flex={1}
-              alignItems="center"
-              position={'absolute'}
-              left={'43%'}
-              top={-25}
-              style={{ zIndex: 99999, elevation: 9999 }}
-            >
-              <TouchableOpacity onPress={handleSwap} activeOpacity={0.8}>
-                <Box
-                  width={56}
-                  height={56}
-                  borderRadius={28}
-                  backgroundColor="primary"
-                  justifyContent="center"
-                  alignItems="center"
-                >
-                  <Animated.View style={animatedIconStyle}>
-                    <SwapIcon width={24} color="#000000" />
-                  </Animated.View>
-                </Box>
-              </TouchableOpacity>
-            </Box>
-          </Box>
-
-          {/* Second Swap Card (To) */}
           <SwapCard
-            tokenName={toToken?.code ?? '—'}
-            tokenSubtitle={toToken?.code ? `${toToken.code} on Stellar` : 'Select a token'}
+            label="You Receive"
+            tokenCode={toToken?.code ?? '—'}
             tokenIcon={toIconUrl ? { uri: toIconUrl } : swapTokenImage(toToken?.code)}
             amount={toAmount}
-            value={toValue}
-            walletName="My Wallet"
-            walletBalance={`${balanceOf(toToken)} ${toToken?.code ?? ''}`}
-            walletValue={`${balanceOf(toToken)} ${toToken?.code ?? ''}`}
-            showAddFunds={false}
-            showWalletDropdown
+            fiatValue={toValue}
+            balance={`${balanceOf(toToken)} ${toToken?.code ?? ''}`}
             onTokenSelect={() => setPickerSide('to')}
           />
 
-          {/* Approve Swap Button */}
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Switch tokens"
+            onPress={handleSwap}
             activeOpacity={0.8}
-            style={styles.enterAmountButton}
-            disabled={!canApprove}
-            onPress={handleApprove}
+            style={styles.flip}
           >
-            <Box
-              height={56}
-              backgroundColor={canApprove ? 'primary' : 'bg900'}
-              borderRadius={28}
-              justifyContent="center"
-              alignItems="center"
-              flexDirection={'row'}
-              gap={'sm'}
-            >
-              {quotePending && <ActivityIndicator color={theme.colors.textPrimary} />}
-              <Text
-                variant="h10"
-                color={quotePending || insufficient || !amountNum ? 'white' : 'bgDark900'}
-                style={{ fontWeight: '600' }}
-              >
-                {!amountNum
-                  ? 'Enter Amount'
-                  : insufficient
-                    ? 'Insufficient Balance'
-                    : quotePending
-                      ? 'Fetching Quote…'
-                      : badPrice
-                        ? 'Price unavailable — try again'
-                        : noRoute
-                          ? 'No route for this pair'
-                          : 'Approve Swap'}
-              </Text>
-            </Box>
+            <Animated.View style={animatedIconStyle}>
+              <Image source={ICONS.flip} tintColor="#121212" style={styles.flipIcon} />
+            </Animated.View>
           </TouchableOpacity>
+        </Box>
 
-          {/* Swap Details — Route row is always shown when an amount is entered so
-              the user can switch providers even when the current one has no usable
-              quote. Rate/slippage/min-received are only meaningful once a quote
-              has come back, so they stay behind the quote guard. */}
-          {fromToken && toToken && amountNum > 0 && (
-            <Box mt="xl">
-              {/* Route / provider picker row */}
-              <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                <Text variant="p7" color="textSecondary">
-                  Route
-                </Text>
+        <Box height={1} backgroundColor="inputOutline" style={styles.divider} />
+
+        {showSummary ? (
+          <SummaryCard>
+              <SummaryRow label="Provider">
                 {availableProviders.length < 2 ? (
-                  // Single-provider network (testnet) — show the provider name
-                  // with a label instead of a dead tappable control.
-                  <Box flexDirection="row" alignItems="center">
-                    <Image
-                      source={provider.icon}
-                      style={{ width: 24, height: 24, borderRadius: 6, marginRight: 8 }}
-                    />
-                    <Text variant="p7" color="textPrimary" style={{ marginRight: 8 }}>
-                      {provider.name}
-                    </Text>
-                    <Box
-                      paddingHorizontal="s"
-                      paddingVertical="xs"
-                      borderRadius={4}
-                      style={{ backgroundColor: '#1A1A2E' }}
-                    >
-                      <Text variant="p8" color="textSecondary" style={{ fontSize: 10 }}>
-                        Only on this network
-                      </Text>
-                    </Box>
+                  <Box flexDirection="row" alignItems="center" gap="s">
+                    <Image source={provider.icon} style={styles.providerIcon} />
+                    <SummaryValue>{provider.name}</SummaryValue>
                   </Box>
                 ) : (
                   <TouchableOpacity
                     activeOpacity={0.7}
                     onPress={() => setShowRoutePicker(true)}
-                    style={{ flexDirection: 'row', alignItems: 'center' }}
+                    style={styles.rowValue}
                   >
-                    <Image
-                      source={provider.icon}
-                      style={{ width: 24, height: 24, borderRadius: 6, marginRight: 8 }}
-                    />
-                    <Text variant="p7" color="textPrimary" style={{ marginRight: 8 }}>
-                      {provider.name}
-                    </Text>
-                    {provider.id === availableProviders[0]?.id && (
-                      <Box
-                        backgroundColor="bg800"
-                        paddingHorizontal="s"
-                        paddingVertical="xs"
-                        borderRadius={4}
-                        style={{ backgroundColor: '#211B0C' }}
-                      >
-                        <Text variant="p8" color="primary" style={{ fontSize: 10 }}>
-                          Recommend
-                        </Text>
-                      </Box>
-                    )}
-                    <Ionicons
-                      name="chevron-forward"
-                      size={14}
-                      color={theme.colors.textSecondary}
-                      style={{ marginLeft: 8 }}
-                    />
+                    <Image source={provider.icon} style={styles.providerIcon} />
+                    <SummaryValue>{provider.name}</SummaryValue>
+                    <Image source={ICONS.chevronRight} contentFit="contain" style={styles.chevron} />
                   </TouchableOpacity>
                 )}
-              </Box>
+              </SummaryRow>
 
-              {/* Quote-dependent rows — only render once we have a real result */}
               {quote && toToken && (
                 <>
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                    <Text variant="p7" color="textSecondary">
-                      Rate
-                    </Text>
+                  <SummaryRow label="Rate">
                     <TouchableOpacity
                       activeOpacity={0.7}
                       onPress={() => setShowUsdRate((v) => !v)}
-                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                      style={styles.rowValue}
                     >
-                      <Text variant="p7" color="textPrimary" style={{ marginRight: 4 }}>
-                        {rateLabel}
-                      </Text>
-                      <Animated.View style={animatedIconStyle2}>
-                        <SwapIcon width={14} color={theme.colors.white} />
-                      </Animated.View>
+                      <SummaryValue>{rateLabel}</SummaryValue>
+                      <Box style={styles.rateBadge}>
+                        <Image source={ICONS.rate} style={styles.rateIcon} />
+                      </Box>
                     </TouchableOpacity>
-                  </Box>
+                  </SummaryRow>
 
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                    <Text variant="p7" color="textSecondary">
-                      Slippage
-                    </Text>
+                  <SummaryRow label="Slippage">
                     <TouchableOpacity
                       activeOpacity={0.7}
                       onPress={() => setShowSlippageOptions((v) => !v)}
-                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                      style={styles.rowValue}
                     >
-                      <Text variant="p7" color="textPrimary" style={{ marginRight: 4 }}>
+                      <SummaryValue>
                         {(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 1 : 2)}%
-                      </Text>
-                      <Ionicons
-                        name={showSlippageOptions ? 'chevron-up' : 'chevron-down'}
-                        size={14}
-                        color={theme.colors.textSecondary}
+                      </SummaryValue>
+                      <Image
+                        source={ICONS.chevronDown}
+                        contentFit="contain"
+                        style={[styles.chevron, showSlippageOptions && styles.chevronUp]}
                       />
                     </TouchableOpacity>
-                  </Box>
+                  </SummaryRow>
 
                   {showSlippageOptions && (
-                    <Box flexDirection="row" alignItems="center" mb="m" flexWrap="wrap">
+                    <Box flexDirection="row" alignItems="center" flexWrap="wrap" gap="s">
                       {[10, 50, 100].map((bps) => {
                         const selected = slippageBps === bps && !customSlippage;
                         return (
@@ -631,15 +523,15 @@ const Swap = () => {
                               setCustomSlippage('');
                               setSlippageBps(bps);
                             }}
-                            style={{ marginRight: 8 }}
                           >
                             <Box
-                              paddingHorizontal="m"
-                              paddingVertical="s"
-                              borderRadius={8}
-                              backgroundColor={selected ? 'primary' : 'bg900'}
+                              borderRadius={40}
+                              borderWidth={1}
+                              borderColor={selected ? 'accentGreen' : 'inputOutline'}
+                              backgroundColor="inputBox"
+                              style={styles.slippageChip}
                             >
-                              <Text variant="p8" color={selected ? 'bgDark900' : 'textPrimary'}>
+                              <Text fontSize={14} lineHeight={20} color="textPrimary">
                                 {(bps / 100).toFixed(1)}%
                               </Text>
                             </Box>
@@ -649,62 +541,79 @@ const Swap = () => {
                       <Box
                         flexDirection="row"
                         alignItems="center"
-                        paddingHorizontal="m"
-                        paddingVertical="s"
-                        borderRadius={8}
-                        backgroundColor="bg900"
+                        borderRadius={40}
+                        borderWidth={1}
+                        borderColor={customSlippage ? 'accentGreen' : 'inputOutline'}
+                        backgroundColor="inputBox"
+                        style={styles.slippageChip}
                       >
                         <TextInput
-                          style={styles.slippageInput}
+                          style={[styles.slippageInput, { color: theme.colors.textPrimary }]}
                           value={customSlippage}
                           onChangeText={applyCustomSlippage}
                           placeholder="Custom"
-                          placeholderTextColor={theme.colors.textSecondary}
+                          placeholderTextColor={theme.colors.textSubheading}
                           keyboardType="decimal-pad"
                         />
-                        <Text variant="p8" color="textSecondary">
+                        <Text fontSize={14} lineHeight={20} color="textSubheading">
                           %
                         </Text>
                       </Box>
                     </Box>
                   )}
 
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                    <Text variant="p7" color="textSecondary">
-                      Min. Received
-                    </Text>
-                    <Text variant="p7" color="textPrimary">
+                  <SummaryRow label="Min. Received">
+                    <SummaryValue>
                       {quote.minReceived} {toToken.code}
-                    </Text>
-                  </Box>
+                    </SummaryValue>
+                  </SummaryRow>
 
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                    <Text variant="p7" color="textSecondary">
-                      Price Impact
-                    </Text>
-                    <Text variant="p7" color="textPrimary">
-                      {quote.priceImpactPct.toFixed(2)}%
-                    </Text>
-                  </Box>
+                  <SummaryRow label="Price Impact">
+                    <SummaryValue>{quote.priceImpactPct.toFixed(2)}%</SummaryValue>
+                  </SummaryRow>
 
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
-                    <Text variant="p7" color="textSecondary">
-                      Network Fee
-                    </Text>
-                    <Text variant="p7" color="textPrimary">
-                      Sponsored
-                    </Text>
-                  </Box>
+                  <SummaryRow label="Network Fee">
+                    <SummaryValue>Shown on confirm</SummaryValue>
+                  </SummaryRow>
                 </>
               )}
-            </Box>
-          )}
+
+              {smartAccountAddress && (
+                <SummaryRow label="Receive Address">
+                  <SummaryValue>{shortenAddress(smartAccountAddress)}</SummaryValue>
+                </SummaryRow>
+              )}
+          </SummaryCard>
+        ) : (
+          <Box flexDirection="row" gap="sm">
+            {QUICK_USD_AMOUNTS.map((usd) => (
+              <QuickChip
+                key={usd}
+                label={`$${usd}`}
+                disabled={!(fromUsdPrice > 0)}
+                onPress={() => fillUsd(usd)}
+              />
+            ))}
+            <QuickChip
+              label="Max"
+              disabled={!(parseFloat(balanceOf(fromToken)) > 0)}
+              onPress={fillMax}
+            />
+          </Box>
+        )}
+
+        <Box style={styles.cta}>
+          <SetupButton
+            label={buttonLabel}
+            disabled={!canApprove}
+            onPress={handleApprove}
+          />
         </Box>
       </ScrollView>
 
       <SwapTokenPickerSheet
         visible={pickerSide !== null}
-        title={pickerSide === 'from' ? 'Swap From' : 'Swap To'}
+        title="Select Token"
         tokens={swappableTokens}
         excludeSacId={pickerSide === 'from' ? toToken?.sacContractId : fromToken?.sacContractId}
         onClose={() => setPickerSide(null)}
@@ -729,27 +638,131 @@ const Swap = () => {
   );
 };
 
+const QuickChip = ({
+  label,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) => (
+  <TouchableOpacity
+    activeOpacity={0.7}
+    disabled={disabled}
+    onPress={onPress}
+    style={[styles.quickChip, disabled && styles.disabled]}
+  >
+    <Box
+      flex={1}
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor="inputBox"
+      borderColor="inputOutline"
+      borderWidth={1}
+      borderRadius={40}
+      style={styles.quickChipInner}
+    >
+      <Text fontSize={16} lineHeight={24} letterSpacing={0.32} color="textPrimary">
+        {label}
+      </Text>
+    </Box>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
+  fill: {
+    flex: 1,
+  },
   header: {
-    height: 52,
+    height: 64,
+    marginTop: 4,
   },
   backButton: {
     position: 'absolute',
-    left: 16,
+    left: 24,
   },
-  exchangeLabel: {
-    marginRight: 8,
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 30,
   },
-  enterAmountButton: {
-    marginTop: 40,
+  cards: {
+    gap: 11,
+  },
+  flip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    // Straddles the gap between the two 140pt-tall cards.
+    top: 125,
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: '#FFC508',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flipIcon: {
+    width: 22,
+    height: 22,
+  },
+  divider: {
+    marginTop: 32,
+    marginBottom: 16,
+  },
+  rowValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  providerIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+  },
+  chevron: {
+    width: 18,
+    height: 18,
+  },
+  chevronUp: {
+    transform: [{ rotate: '180deg' }],
+  },
+  rateBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F8FCEB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rateIcon: {
+    width: 12,
+    height: 12,
+    transform: [{ rotate: '-90deg' }],
+  },
+  slippageChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   slippageInput: {
-    minWidth: 44,
+    minWidth: 52,
     padding: 0,
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: 'SFproRegular',
-    color: '#FFFFFF',
     textAlign: 'right',
+  },
+  quickChip: {
+    flex: 1,
+  },
+  quickChipInner: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  disabled: {
+    opacity: 0.4,
+  },
+  cta: {
+    marginTop: 40,
   },
 });
 

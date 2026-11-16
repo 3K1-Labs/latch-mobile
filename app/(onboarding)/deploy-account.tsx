@@ -29,7 +29,13 @@ import {
 } from '@/src/lib/provision-passkey';
 import { getNetworkId } from '@/src/constants/config';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
-import { ASYNC_KEYS, SECURE_KEYS, useWalletStore, type WalletAccount } from '@/src/store/wallet';
+import {
+  ASYNC_KEYS,
+  avatarKey,
+  SECURE_KEYS,
+  useWalletStore,
+  type WalletAccount,
+} from '@/src/store/wallet';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -282,6 +288,16 @@ const DeployAccount = () => {
         const freshAccounts = [account0, ...accounts.slice(1)];
         await SecureStore.setItemAsync(SECURE_KEYS.ACCOUNTS, JSON.stringify(freshAccounts));
         await SecureStore.setItemAsync(SECURE_KEYS.ACTIVE_ACCOUNT_INDEX, '0');
+        if (appearance?.image) {
+          // The app reads avatars from this store, not from the wallet appearance.
+          const raw = await AsyncStorage.getItem(ASYNC_KEYS.AVATARS);
+          const avatars = {
+            ...(raw ? (JSON.parse(raw) as Record<string, string>) : {}),
+            [avatarKey(account0)]: appearance.image,
+          };
+          await AsyncStorage.setItem(ASYNC_KEYS.AVATARS, JSON.stringify(avatars));
+          useWalletStore.setState({ avatars });
+        }
         if (appearance) await commitPendingAppearance(deployedAddress, appearance);
 
         // ── Step 5: mark onboarding complete and hydrate store ────────────────

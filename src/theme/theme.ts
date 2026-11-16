@@ -185,12 +185,27 @@ const sharedColors = {
   btnHover: '#6D3E04',
   btnBorder: '#2B2A29',
 
+  // Dark values of Figma's "Backround" variable collection; lightColors below
+  // holds the Light mode of the same variables.
   surfaceBase: '#020202',
   textSubheading: '#706F6F',
   textSubtle: '#413F3F',
+  buttonBg: '#FFFFFF',
   buttonLabel: '#111111',
   inputBox: '#0F0F0F',
   inputOutline: '#1A1A1A',
+  /** Round icon buttons (back, close) and other raised controls. */
+  controlBg: '#1A1A1A',
+  /** Fill behind token icons and similar small badges. */
+  badgeBg: '#121212',
+  /** Tint for monochrome SVG icons (they ship white). */
+  iconPrimary: '#FFFFFF',
+  dotInactive: '#413F3F',
+  chipBg: '#1F1F1F',
+  warningSurface: '#2C2000',
+  warningBorder: '#4A3800',
+  warningTitle: '#FFD666',
+  warningBody: '#B8860B',
   textMuted: '#A09F9F',
   accentGreen: '#76B101',
   sheetDim: '#101010',
@@ -536,6 +551,42 @@ const darkTheme = createTheme({
   borderVariants: {},
 });
 
-export { darkTheme };
+// Light mode of Figma's "Backround" collection, plus the light-page values the
+// design uses where that collection has no variable (cards, badges, controls).
+const lightColors: Partial<typeof darkTheme.colors> = {
+  surfaceBase: '#FAFAFA',
+  mainBackground: '#FAFAFA',
+  onboardingbg: '#FAFAFA',
+  secondaryBackground: '#FFFFFF',
+  cardBackground: '#FFFFFF',
+  cardbg: '#FFFFFF',
+  inputBox: '#FFFFFF',
+  inputOutline: '#F5F5F5',
+  buttonBg: '#111111',
+  buttonLabel: '#FFFFFF',
+  textPrimary: '#110F0F',
+  textSecondary: '#706F6F',
+  textTertiary: '#A09F9F',
+  textSubheading: '#A09F9F',
+  textMuted: '#706F6F',
+  controlBg: '#FBFBFB',
+  badgeBg: '#F3F3F3',
+  sheetDim: '#F3F3F3',
+  btnDisabled: '#E3E3E3',
+  iconPrimary: '#363636',
+  dotInactive: '#E3E3E3',
+  chipBg: '#F8F8F8',
+  warningSurface: '#FFF9EC',
+  warningBorder: '#FFF4DD',
+  warningTitle: '#907500',
+  warningBody: '#CBA400',
+};
+
+const lightTheme: Theme = {
+  ...darkTheme,
+  colors: { ...darkTheme.colors, ...lightColors },
+};
+
+export { darkTheme, lightTheme };
 export type Theme = typeof darkTheme;
 export default darkTheme;

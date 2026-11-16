@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   shareBtn: {
     width: '100%',
     height: 52,
-    backgroundColor: '#C9F542',
+    backgroundColor: '#FFFFFF',
     borderRadius: 26,
     flexDirection: 'row',
     justifyContent: 'center',

@@ -270,6 +270,38 @@ export interface SendTokenResult {
   networkFee: NetworkFee;
 }
 
+/** The signer a build request is simulated for: a seed keypair or a stored passkey. */
+export type FeeSigner = { keypair: Keypair } | { listIndex: number };
+
+export async function buildSignerFields(signer: FeeSigner) {
+  if ('keypair' in signer) {
+    const raw = StrKey.decodeEd25519PublicKey(signer.keypair.publicKey());
+    return { signerType: 'ed25519' as const, keyDataHex: Buffer.from(raw).toString('hex') };
+  }
+  return {
+    signerType: 'passkey' as const,
+    keyDataHex: (await getStoredKeyDataHex(signer.listIndex)) ?? undefined,
+  };
+}
+
+/** Fee preview for the review screen. build-send only simulates, so nothing is signed or sent. */
+export async function estimateSendFee(params: {
+  smartAccountAddress: string;
+  signer: FeeSigner;
+  sacContractId: string;
+  destinationAddress: string;
+  amount: string;
+}): Promise<NetworkFee> {
+  const built = await buildSend({
+    smartAccountAddress: params.smartAccountAddress,
+    ...(await buildSignerFields(params.signer)),
+    contractId: params.sacContractId,
+    recipient: params.destinationAddress,
+    amount: params.amount,
+  });
+  return built.networkFee;
+}
+
 /**
  * Sends tokens from a Latch smart account (C-address) to any Stellar address.
  *

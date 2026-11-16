@@ -25,7 +25,7 @@ import ApprovalRuleCard from '@/src/components/shared-wallet-review/ApprovalRule
 import CreateWalletButton from '@/src/components/shared-wallet-review/CreateWalletButton';
 import MemberReviewList from '@/src/components/shared-wallet-review/MemberReviewList';
 import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard';
-import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import AppToast from '@/src/components/toast/AppToast';
@@ -57,13 +57,13 @@ import { signInToExistingWalletWithPlatformPasskey } from '@/src/lib/wallet-auth
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
 import {
   accountUsableOnNetwork,
+  avatarKey,
   getPasskeyStorageKeys,
   SECURE_KEYS,
   useWalletStore,
   type WalletAccount,
 } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sentry from '@sentry/react-native';
 import { useTheme } from '@shopify/restyle';
@@ -166,7 +166,6 @@ const AccountSwitcherSheet = ({
   switchBackLabel,
 }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   const {
@@ -971,17 +970,10 @@ const AccountSwitcherSheet = ({
               flexDirection="row"
               alignItems="center"
               justifyContent="space-between"
-              paddingHorizontal="m"
-              py="xs"
-              mb="m"
+              style={{ marginTop: 23, marginBottom: 24, paddingHorizontal: 24 }}
             >
-              <TouchableOpacity
-                onPress={handleMultisigBack}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-              </TouchableOpacity>
-              <Text variant="h10" color="textPrimary" fontWeight="800">
+              <RoundBackButton onPress={handleMultisigBack} />
+              <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
                 {MULTISIG_STEP_TITLES[step]}
               </Text>
               <Box width={40} />
@@ -1036,7 +1028,7 @@ const AccountSwitcherSheet = ({
                 : undefined
             }
             isDeploying={deployingIndex === listIndex}
-            avatarDataUri={avatars[account.publicKeyHex]}
+            avatarDataUri={avatars[avatarKey(account)]}
           />
         );
 
@@ -1045,30 +1037,32 @@ const AccountSwitcherSheet = ({
             <AccountSheetHeader
               onClose={onClose}
               onAdd={() => setStep('add-prompt')}
-              label={activeNetwork === 'testnet' ? 'Testnet' : 'Mainnet '}
+              label={activeNetwork === 'testnet' ? 'Testnet' : undefined}
             />
             <KeyboardAwareScrollView
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
+              contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40, gap: 24 }}
               style={{ flexShrink: 1 }}
               bottomOffset={16}
             >
               {regular.length > 0 && (
-                <>
-                  <AccountSectionHeader label="Regular accounts" count={regular.length} />
-                  {regular.map(renderAccount)}
-                </>
+                <Box>
+                  {multisig.length > 0 && (
+                    <AccountSectionHeader label="Accounts" count={regular.length} />
+                  )}
+                  <Box gap="m">{regular.map(renderAccount)}</Box>
+                </Box>
               )}
               {multisig.length > 0 && (
-                <>
-                  <AccountSectionHeader label="Multisig accounts" count={multisig.length} />
-                  {multisig.map(renderAccount)}
-                </>
+                <Box>
+                  <AccountSectionHeader label="Multisig Accounts" count={multisig.length} />
+                  <Box gap="m">{multisig.map(renderAccount)}</Box>
+                </Box>
               )}
 
               {regular.length === 0 && multisig.length === 0 && (
                 <Box py="l" alignItems="center">
-                  <Text variant="p7" color="textSecondary" textAlign="center">
+                  <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
                     No accounts on {thisNetworkLabel}
                   </Text>
                 </Box>
@@ -1084,21 +1078,22 @@ const AccountSwitcherSheet = ({
                     flexDirection="row"
                     alignItems="center"
                     justifyContent="space-between"
-                    backgroundColor="bg11"
-                    borderRadius={16}
-                    padding="m"
-                    mt="s"
+                    backgroundColor="inputBox"
+                    borderColor="inputOutline"
+                    borderWidth={1}
+                    borderRadius={20}
+                    style={{ paddingHorizontal: 20, paddingVertical: 14 }}
                   >
                     <Box flex={1} pr="s">
-                      <Text variant="p7" color="textPrimary" fontWeight="600">
+                      <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
                         {offNetworkCount} account{offNetworkCount === 1 ? '' : 's'} on{' '}
                         {otherNetworkLabel}
                       </Text>
-                      <Text variant="p8" color="textSecondary" mt="xs">
+                      <Text fontSize={14} lineHeight={22} color="textSubheading">
                         {switchingNetwork ? 'Switching…' : `Tap to switch to ${otherNetworkLabel}`}
                       </Text>
                     </Box>
-                    <Ionicons name="swap-horizontal" size={18} color={theme.colors.textSecondary} />
+                    <Ionicons name="swap-horizontal" size={18} color={theme.colors.textSubheading} />
                   </Box>
                 </TouchableOpacity>
               )}
@@ -1135,7 +1130,7 @@ const AccountSwitcherSheet = ({
             style={[
               styles.sheet,
               {
-                backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
+                backgroundColor: theme.colors.surfaceBase,
                 paddingBottom: Math.max(insets.bottom, 16),
                 transform: [{ translateY }],
                 flex: 1,
@@ -1143,7 +1138,9 @@ const AccountSwitcherSheet = ({
               },
             ]}
           >
-            <BottomSheetHandle />
+            <Box alignItems="center" style={{ paddingTop: 10 }}>
+              <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
+            </Box>
             {renderContent()}
             <LoadingBlur
               visible={isAddingAccount || deployingIndex !== null}
@@ -1208,13 +1205,13 @@ const AccountSwitcherSheet = ({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',
     minHeight: 300,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.25,

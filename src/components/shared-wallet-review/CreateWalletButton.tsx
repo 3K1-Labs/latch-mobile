@@ -1,4 +1,4 @@
-import Button from '@/src/components/shared/Button';
+import { SetupButton } from '@/src/components/onboarding/SetupChrome';
 import React from 'react';
 
 interface CreateWalletButtonProps {
@@ -6,8 +6,8 @@ interface CreateWalletButtonProps {
   loading?: boolean;
 }
 
-const CreateWalletButton: React.FC<CreateWalletButtonProps> = ({ onPress, loading }) => {
-  return <Button label="Create Multisig Wallet" onPress={onPress} loading={loading} />;
-};
+const CreateWalletButton: React.FC<CreateWalletButtonProps> = ({ onPress, loading }) => (
+  <SetupButton label="Create Multisig Wallet" onPress={onPress} loading={loading} />
+);
 
 export default CreateWalletButton;

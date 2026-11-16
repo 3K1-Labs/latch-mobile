@@ -1,11 +1,9 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React from 'react';
-import { ImageSourcePropType, TouchableOpacity } from 'react-native';
+import { ImageSourcePropType, StyleSheet, TouchableOpacity } from 'react-native';
 
 interface MethodOptionCardProps {
   icon: keyof typeof Ionicons.glyphMap;
@@ -27,64 +25,73 @@ const MethodOptionCard: React.FC<MethodOptionCardProps> = ({
   image,
   disabled,
   badge,
-}) => {
-  const theme = useTheme<Theme>();
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.7}
-      disabled={disabled}
-      style={disabled ? { opacity: 0.5 } : undefined}
+}) => (
+  <TouchableOpacity
+    accessibilityRole="button"
+    onPress={onPress}
+    activeOpacity={0.7}
+    disabled={disabled}
+    style={disabled ? styles.disabled : undefined}
+  >
+    <Box
+      flexDirection="row"
+      alignItems="center"
+      gap="sm"
+      backgroundColor="inputBox"
+      borderColor="inputOutline"
+      borderWidth={1}
+      style={styles.card}
     >
-      <Box
-        flexDirection="row"
-        alignItems="center"
-        bg={'bg11'}
-        borderColor={'btnDisabled'}
-        style={{
-          borderWidth: 1,
-          borderRadius: 16,
-          paddingVertical: 16,
-          paddingHorizontal: 16,
-          marginBottom: 12,
-        }}
-      >
-        {/* Icon container */}
-
+      <Box alignItems="center" justifyContent="center" style={styles.iconBox}>
         {image ? (
-          <Image
-            source={image}
-            style={{
-              width: 24,
-              height: 24,
-              // tintColor: theme.colors.gray900,
-            }}
-          />
+          <Image source={image} contentFit="contain" style={styles.image} />
         ) : (
-          <Ionicons name={icon} size={24} color={theme.colors.textPrimary} />
+          <Ionicons name={icon} size={18} color="#FFC508" />
         )}
-
-        {/* Text content */}
-        <Box flex={1} ml={'m'}>
-          <Text variant="h10" color="textPrimary" fontWeight="700">
-            {title}
-          </Text>
-          <Text variant="p7" color="textSecondary" mt="xs">
-            {subtitle}
+      </Box>
+      <Box flex={1}>
+        <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+          {title}
+        </Text>
+        <Text fontSize={12} lineHeight={18} color="textSubheading">
+          {subtitle}
+        </Text>
+      </Box>
+      {badge ? (
+        <Box borderColor="inputOutline" borderWidth={1} style={styles.badge}>
+          <Text fontSize={12} lineHeight={14} color="textSubheading">
+            {badge}
           </Text>
         </Box>
+      ) : null}
+    </Box>
+  </TouchableOpacity>
+);
 
-        {badge ? (
-          <Box backgroundColor="bg200" borderRadius={10} px="s" py="xs">
-            <Text variant="p8" color="textSecondary" style={{ fontWeight: '600' }}>
-              {badge}
-            </Text>
-          </Box>
-        ) : null}
-      </Box>
-    </TouchableOpacity>
-  );
-};
+const styles = StyleSheet.create({
+  disabled: {
+    opacity: 0.5,
+  },
+  card: {
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  iconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#1A1A1A',
+  },
+  image: {
+    width: 18,
+    height: 18,
+  },
+  badge: {
+    borderRadius: 26,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+});
 
 export default MethodOptionCard;

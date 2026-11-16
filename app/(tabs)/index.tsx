@@ -19,7 +19,7 @@ import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
 import { discoverMigration } from '@/src/lib/migration';
 import { useNotificationStore } from '@/src/store/notification-store';
-import { useWalletStore } from '@/src/store/wallet';
+import { avatarKey, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import {
@@ -72,19 +72,21 @@ const SectionHeader = ({
   onPress,
 }: {
   title: string;
-  action: string;
-  onPress: () => void;
+  action?: string;
+  onPress?: () => void;
 }) => (
   <Box flexDirection="row" justifyContent="space-between" alignItems="center" mb="m">
     <Text variant="p6" fontFamily="SFproMedium" lineHeight={20} letterSpacing={0.16} color="textPrimary">
       {title}
     </Text>
-    <TouchableOpacity onPress={onPress} hitSlop={8} style={styles.sectionAction}>
-      <Text variant="p7" lineHeight={20} letterSpacing={0.14} color="textSubheading">
-        {action}
-      </Text>
-      <Image source={ICONS.chevron} contentFit="contain" style={styles.chevron} />
-    </TouchableOpacity>
+    {action && (
+      <TouchableOpacity onPress={onPress} hitSlop={8} style={styles.sectionAction}>
+        <Text variant="p7" lineHeight={20} letterSpacing={0.14} color="textSubheading">
+          {action}
+        </Text>
+        <Image source={ICONS.chevron} contentFit="contain" style={styles.chevron} />
+      </TouchableOpacity>
+    )}
   </Box>
 );
 
@@ -293,7 +295,7 @@ const Home = () => {
 
   const activeAccount = accounts[activeAccountIndex];
   const activeAccountName = activeAccount?.name ?? 'Account 1';
-  const activeAccountImage = activeAccount ? avatars[activeAccount.publicKeyHex] : undefined;
+  const activeAccountImage = activeAccount ? avatars[avatarKey(activeAccount)] : undefined;
 
   const { openDrawer } = useDrawer();
   const unreadNotifications = useNotificationStore((s) => s.unreadCount);
@@ -482,7 +484,12 @@ const Home = () => {
             justifyContent="center"
             alignItems="center"
           >
-            <Image source={ICONS.bell} contentFit="contain" style={styles.bell} />
+            <Image
+              source={ICONS.bell}
+              contentFit="contain"
+              tintColor={theme.colors.iconPrimary}
+              style={styles.bell}
+            />
           </Box>
           {unreadNotifications > 0 && (
             <Box style={styles.unreadDot} backgroundColor="primary700" borderColor="surfaceBase" />
@@ -602,7 +609,12 @@ const Home = () => {
                   justifyContent="center"
                   alignItems="center"
                 >
-                  <Image source={item.icon} contentFit="contain" style={styles.actionIcon} />
+                  <Image
+                    source={item.icon}
+                    contentFit="contain"
+                    tintColor={theme.colors.iconPrimary}
+                    style={styles.actionIcon}
+                  />
                 </Box>
               </TouchableOpacity>
               <Text
@@ -617,6 +629,28 @@ const Home = () => {
             </Box>
           ))}
         </Box>
+
+        {(portfolio ?? []).length > 0 && (
+          <Box paddingHorizontal="l" style={styles.section}>
+            <SectionHeader title="My Assets" />
+            <Box gap="s">
+              {(portfolio ?? []).map((token) => {
+                const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
+                return (
+                  <TokenRow
+                    key={token.code + (token.issuer ?? '')}
+                    token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
+                    fiatLabel={
+                      formatToken(token.amount, livePrices[token.code]?.price, { approx: false })
+                        .text
+                    }
+                    showBalance={showBalance}
+                  />
+                );
+              })}
+            </Box>
+          </Box>
+        )}
 
         <Box style={styles.banners}>
           <FlatList
@@ -645,7 +679,9 @@ const Home = () => {
                 width={bannerIndex === i ? 12 : 6}
                 height={6}
                 borderRadius={3}
-                style={{ backgroundColor: bannerIndex === i ? '#FFC508' : '#413F3F' }}
+                style={{
+                  backgroundColor: bannerIndex === i ? '#FFC508' : theme.colors.dotInactive,
+                }}
               />
             ))}
           </Box>
@@ -660,6 +696,8 @@ const Home = () => {
                 flexDirection="row"
                 alignItems="center"
                 gap="m"
+                backgroundColor="warningSurface"
+                borderColor="warningBorder"
                 style={styles.migration}
               >
                 <Box
@@ -673,14 +711,14 @@ const Home = () => {
                   <Ionicons name="swap-horizontal" size={20} color="#000" />
                 </Box>
                 <Box flex={1}>
-                  <Text variant="p7" fontFamily="SFproMedium" style={{ color: '#FFD666' }}>
+                  <Text variant="p7" fontFamily="SFproMedium" style={{ color: theme.colors.warningTitle }}>
                     Assets on classic account
                   </Text>
-                  <Text variant="p8" style={{ color: '#B8860B' }} mt="xs">
+                  <Text variant="p8" style={{ color: theme.colors.warningBody }} mt="xs">
                     Tap to migrate them to your smart account
                   </Text>
                 </Box>
-                <Ionicons name="chevron-forward" size={16} color="#B8860B" />
+                <Ionicons name="chevron-forward" size={16} color={theme.colors.warningBody} />
               </Box>
             </TouchableOpacity>
           </Box>
@@ -726,32 +764,6 @@ const Home = () => {
             ))
           )}
         </Box>
-
-        {(portfolio ?? []).length > 0 && (
-          <Box paddingHorizontal="l" style={styles.section}>
-            <SectionHeader
-              title="Your Assets"
-              action="Manage"
-              onPress={() => router.push('/add-token')}
-            />
-            <Box gap="s">
-              {(portfolio ?? []).map((token) => {
-                const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
-                return (
-                  <TokenRow
-                    key={token.code + (token.issuer ?? '')}
-                    token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
-                    fiatLabel={
-                      formatToken(token.amount, livePrices[token.code]?.price, { approx: false })
-                        .text
-                    }
-                    showBalance={showBalance}
-                  />
-                );
-              })}
-            </Box>
-          </Box>
-        )}
       </ScrollView>
 
       <BuyXLMSheet
@@ -772,6 +784,13 @@ const Home = () => {
         proxyAddress={depositIntent?.pool_address}
         memo={depositIntent?.memo_id}
         memoExpiresAt={depositIntent?.expires_at}
+        // Bypasses depositMintPlan's reuse guard on purpose: the current memo's
+        // deposit failed, so the user needs a new one to send against.
+        onRetry={() => {
+          if (smartAccountAddress && !createDepositIntent.isPending) {
+            createDepositIntent.mutate({ smartAccountAddress });
+          }
+        }}
       />
     </Box>
   );
@@ -861,9 +880,7 @@ const styles = StyleSheet.create({
   },
   migration: {
     marginTop: 8,
-    backgroundColor: '#2C2000',
     borderWidth: 1,
-    borderColor: '#4A3800',
   },
   section: {
     marginTop: 34,

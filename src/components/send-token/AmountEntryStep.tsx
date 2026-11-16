@@ -1,199 +1,213 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
-import React from 'react';
-import { TouchableOpacity } from 'react-native';
-import { NUMERIC_KEYS, Recipient, SendToken } from './types';
+import TokenIcon from '@/src/components/shared/TokenIcon';
+import { useTokenIcon } from '@/src/hooks/use-token-list';
+import { Image } from 'expo-image';
+import React, { useRef } from 'react';
+import { Pressable, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { SendToken } from './types';
+
+const CHEVRON = require('@/src/assets/images/swap/chevron-down.svg');
+const PRESETS = [100, 500, 1000];
+const MAX_DECIMALS = 7;
+
+/** Keeps the field a plain decimal: digits, one point, at most 7 places, no leading zeros. */
+export const sanitizeAmount = (raw: string): string => {
+  let s = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
+  const dot = s.indexOf('.');
+  if (dot !== -1) {
+    s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '').slice(0, MAX_DECIMALS);
+  }
+  if (s.startsWith('.')) s = `0${s}`;
+  s = s.replace(/^0+(?=\d)/, '');
+  return s === '' ? '0' : s;
+};
 
 interface Props {
   selectedToken: SendToken;
-  selectedWallet: Recipient;
   amount: string;
-  fiatLabel?: string;
-  onKeyPress: (key: string) => void;
+  canUsePresets: boolean;
+  onChangeAmount: (amount: string) => void;
   onMaxPress: () => void;
   onPresetPress: (usdAmount: number) => void;
+  onChangeToken: () => void;
 }
 
 const AmountEntryStep = ({
   selectedToken,
-  selectedWallet,
   amount,
-  fiatLabel,
-  onKeyPress,
+  canUsePresets,
+  onChangeAmount,
   onMaxPress,
   onPresetPress,
+  onChangeToken,
 }: Props) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme()
-
-  const shortAddress = `${selectedWallet.address.slice(0, 6)}...${selectedWallet.address.slice(-4)}`;
-  const availableAmount = parseFloat(selectedToken.amount);
-  const enteredAmount = parseFloat(amount) || 0;
-  const isOverBalance = enteredAmount > availableAmount;
-
-  const rows = NUMERIC_KEYS.reduce((acc: { num: string }[][], val, i) => {
-    if (i % 3 === 0) acc.push([]);
-    acc[acc.length - 1].push(val);
-    return acc;
-  }, []);
-
-  const KeypadButton = ({ num, onPress }: { num: string; onPress: () => void }) => (
-    <TouchableOpacity
-      activeOpacity={0.6}
-      onPress={onPress}
-      style={{
-        flex: 1,
-        height: 60,
-        backgroundColor: isDark ? theme.colors.bg800 : theme.colors.white,
-        margin: 4,
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
-      <Text variant="h8" color={isDark ? "white" : "black"} fontWeight="400">
-        {num}
-      </Text>
-    </TouchableOpacity>
-  );
+  const inputRef = useRef<TextInput>(null);
+  const iconUrl = useTokenIcon(selectedToken.code, selectedToken.issuer);
+  const isEmpty = amount === '0';
+  const isOverBalance = (parseFloat(amount) || 0) > parseFloat(selectedToken.amount);
+  const balance = parseFloat(selectedToken.amount).toLocaleString('en-US', {
+    maximumFractionDigits: MAX_DECIMALS,
+  });
+  const big = amount.length < 9;
 
   return (
-    <Box flex={1}>
-      <Box paddingHorizontal="l" mb="m">
-        <Box
-          flexDirection="row"
-          alignItems="center"
-          justifyContent="space-between"
-          pb="s"
-          style={{ borderBottomWidth: 1, borderBottomColor: theme.colors.gray800 }}
-        >
-          <Box flexDirection="row" alignItems="center" flex={1}>
-            <Text variant="p7" color="textSecondary">
-              To:{' '}
-            </Text>
-            <Text variant="p7" color="textPrimary" fontWeight="700">
-              {shortAddress}
-            </Text>
-          </Box>
-        </Box>
-      </Box>
-
-      <Box flex={1} justifyContent="center" alignItems="center" mb="m">
-        <Box flexDirection="row" alignItems="center">
+    <KeyboardAvoidingView behavior="padding" style={styles.flex}>
+      <Pressable style={styles.display} onPress={() => inputRef.current?.focus()}>
+        <Box flexDirection="row" alignItems="flex-end">
           <Text
-            variant={amount.length < 10 ? 'h5' : 'h6'}
-            color={isOverBalance ? 'inputError' : amount !== '0' ? 'textPrimary' : 'textSecondary'}
+            fontFamily="SFproSemibold"
+            fontSize={big ? 56 : 40}
+            lineHeight={big ? 72 : 52}
+            letterSpacing={-1.4}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            color={isOverBalance ? 'inputError' : isEmpty ? 'textSubheading' : 'textPrimary'}
           >
             {amount}
           </Text>
-          <Box
-            width={3}
-            height={amount.length < 10 ? 50 : 30}
-            backgroundColor="primary700"
-            marginHorizontal="s"
-          />
+          <Box style={[styles.caret, { height: big ? 57 : 41, marginBottom: big ? 7 : 5 }]} />
           <Text
-            variant={amount.length < 10 ? 'h5' : 'h6'}
-            style={{ color: theme.colors.textPrimary, fontWeight: '600' }}
+            fontFamily="SFproSemibold"
+            fontSize={16}
+            lineHeight={24}
+            color="textSubheading"
+            style={{ marginBottom: big ? 12 : 8 }}
           >
             {selectedToken.code}
           </Text>
         </Box>
-        {fiatLabel ? (
-          <Text variant="p8" color="textSecondary" mt="s">
-            {fiatLabel}
-          </Text>
-        ) : null}
         {isOverBalance && (
-          <Text variant="p8" color="inputError" mt="s">
+          <Text fontSize={12} lineHeight={20} color="inputError" mt="s">
             Exceeds available balance
           </Text>
         )}
-      </Box>
+        {/* The visible amount is plain text; this hidden field drives the system keypad. */}
+        <TextInput
+          ref={inputRef}
+          value={isEmpty ? '' : amount}
+          onChangeText={(t) => onChangeAmount(sanitizeAmount(t))}
+          keyboardType="decimal-pad"
+          autoFocus
+          caretHidden
+          style={styles.hiddenInput}
+        />
+      </Pressable>
 
-      <Box paddingHorizontal="l" mb="m">
-        {/* <Box flexDirection="row" justifyContent="center" gap="m" mb="m" paddingHorizontal="l">
-            {[50, 500, 1000].map((usdAmount) => (
-              <TouchableOpacity
-                key={usdAmount}
-                style={{ flex: 1 }}
-                onPress={() => onPresetPress(usdAmount)}
-              >
-                <Box
-                  height={54}
-                  backgroundColor="bg900"
-                  borderRadius={12}
-                  justifyContent="center"
-                  alignItems="center"
-                >
-                  <Text variant="p6" color="textPrimary" fontWeight="700">
-                    {'$' + usdAmount}
-                  </Text>
-                </Box>
-              </TouchableOpacity>
-            ))}
-          </Box> */}
-
-        <Box height={1} backgroundColor="btnDisabled" mb="m" />
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-          <Box>
-            <Text variant="p8" color="textSecondary" mb="xs">
-              Available to Send
+      <Box flexDirection="row" justifyContent="center" alignItems="center" gap="m">
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Change token"
+          activeOpacity={0.7}
+          onPress={onChangeToken}
+        >
+          <Box flexDirection="row" alignItems="center" style={[styles.pill, styles.tokenPill]}>
+            <Box width={20} height={20} borderRadius={10} overflow="hidden" style={styles.tokenBg}>
+              <TokenIcon iconUrl={iconUrl} size={20} />
+            </Box>
+            <Text fontSize={12} lineHeight={20} color="textSubheading">
+              {balance} {selectedToken.code}
             </Text>
-            <Text variant="h11" color="textPrimary" fontWeight="700">
-              {availableAmount.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: selectedToken.code === 'XLM' ? 7 : 2,
-              })}{' '}
-              {selectedToken.code}
+            <Image source={CHEVRON} contentFit="contain" style={styles.chevron} />
+          </Box>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" activeOpacity={0.7} onPress={onMaxPress}>
+          <Box style={styles.pill}>
+            <Text fontSize={12} lineHeight={20} color="textSubheading">
+              Max
             </Text>
           </Box>
-          <TouchableOpacity onPress={onMaxPress}>
-            <Box px="m" py="s" backgroundColor="bg900" borderRadius={8}>
-              <Text variant="p8" color="textPrimary" fontWeight="700">
-                Max
+        </TouchableOpacity>
+      </Box>
+
+      <Box style={styles.divider} />
+
+      <Box flexDirection="row" gap="sm" style={styles.presets}>
+        {PRESETS.map((usd) => (
+          <TouchableOpacity
+            key={usd}
+            accessibilityRole="button"
+            activeOpacity={0.7}
+            disabled={!canUsePresets}
+            onPress={() => onPresetPress(usd)}
+            style={styles.flex}
+          >
+            <Box style={[styles.preset, !canUsePresets && styles.disabled]}>
+              <Text fontSize={16} lineHeight={24} letterSpacing={0.32} color="textPrimary">
+                ${usd}
               </Text>
             </Box>
           </TouchableOpacity>
-        </Box>
-      </Box>
-      <Box
-        backgroundColor={isDark ? "transparent" : "gray500"}
-        paddingHorizontal="xs"
-        paddingBottom="m"
-        style={{ paddingTop: 8 }}
-      >
-
-        {rows.map((row, rowIndex) => (
-          <Box key={rowIndex} flexDirection="row">
-            {row.map((item, i) => (
-              <KeypadButton key={i} num={item.num} onPress={() => onKeyPress(item.num)} />
-            ))}
-          </Box>
         ))}
-        <Box flexDirection="row">
-          <KeypadButton num="." onPress={() => onKeyPress('.')} />
-          <KeypadButton num="0" onPress={() => onKeyPress('0')} />
-          <TouchableOpacity
-            onPress={() => onKeyPress('backspace')}
-            style={{
-              flex: 1,
-              height: 60,
-              margin: 4,
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-          >
-            <Ionicons name="backspace-outline" size={24} color={isDark ? "white" : "black"} />
-          </TouchableOpacity>
-        </Box>
       </Box>
-    </Box>
+    </KeyboardAvoidingView>
   );
 };
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  display: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  caret: {
+    width: 2,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+    marginLeft: 2,
+    marginRight: 2,
+  },
+  hiddenInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  pill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    backgroundColor: '#0F0F0F',
+  },
+  tokenPill: {
+    gap: 8,
+  },
+  tokenBg: {
+    backgroundColor: '#121212',
+  },
+  chevron: {
+    width: 16,
+    height: 16,
+  },
+  divider: {
+    height: 1,
+    marginHorizontal: 24,
+    marginTop: 18,
+    marginBottom: 18,
+    backgroundColor: '#1A1A1A',
+  },
+  presets: {
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  preset: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    backgroundColor: '#0F0F0F',
+  },
+  disabled: {
+    opacity: 0.4,
+  },
+});
 
 export default AmountEntryStep;

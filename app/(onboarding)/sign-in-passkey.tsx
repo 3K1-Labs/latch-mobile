@@ -19,9 +19,8 @@
  */
 
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import { RoundBackButton, SetupButton, SetupTitle } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
-import Button from '@/src/components/shared/Button';
-import Header from '@/src/components/shared/Header';
 // import Input from '@/src/components/shared/Input';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
@@ -36,13 +35,13 @@ import { signInToExistingWalletWithPlatformPasskey } from '@/src/lib/wallet-auth
 import { getPasskeyStorageKeys, useWalletStore } from '@/src/store/wallet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // import * as Clipboard from 'expo-clipboard';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { Keyboard, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { requestDiscoveryAfterRestore } from '@/src/lib/membership';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
@@ -130,6 +129,7 @@ const SignInPasskey = () => {
       );
 
       await AsyncStorage.setItem('latch_onboarding_complete', 'true');
+      await requestDiscoveryAfterRestore();
       router.replace('/(tabs)');
     } catch (e: any) {
       // Same reasoning as deploy-account: this is where a passkey sign-in
@@ -176,77 +176,67 @@ const SignInPasskey = () => {
     }
   };
 
+  const features: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
+    {
+      icon: 'sparkles',
+      title: 'Zero Typing',
+      body: 'No seed phrases, passwords, or contract addresses to enter.',
+    },
+    {
+      icon: 'shield-checkmark',
+      title: 'Hardware Protected',
+      body: "Your signing key never leaves your device's Secure Enclave.",
+    },
+    {
+      icon: 'cloud-done',
+      title: 'Synced Across Devices',
+      body: 'Backed up with Google Password Manager or iCloud Keychain.',
+    },
+  ];
+
   return (
-    <Box flex={1} backgroundColor="onboardingbg">
-      <LinearGradient
-        colors={['rgba(50, 60, 14, 0.74)', '#121212']}
-        locations={[0, 0.2772]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.91 }}
-        style={StyleSheet.absoluteFill}
-      />
+    <Box flex={1} backgroundColor="surfaceBase">
       <StatusBar style={statusBarStyle} />
 
       <ScrollView
         bounces={false}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingHorizontal: theme.spacing.m,
-          paddingTop: insets.top,
-          paddingBottom: Math.max(insets.bottom, 24) + 16,
-          flexGrow: 1,
-        }}
-        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 24) },
+        ]}
       >
-        {/* Navigation Header */}
-        <Box mb="s">
-          <Header />
-        </Box>
+        <RoundBackButton
+          onPress={() => router.canGoBack() && router.back()}
+          disabled={isBusy}
+        />
 
-        {/* Title Section */}
-        <Box alignItems="center" mt="s" mb="l">
-          <Text variant="h7" fontSize={30} fontWeight="700" textAlign="center" color="textPrimary">
-            Sign In with Passkey
-          </Text>
-          <Text
-            variant="p6"
-            color="textSecondary"
-            mt="s"
-            textAlign="center"
-            style={{ maxWidth: 330, lineHeight: 22 }}
-          >
+        <Box style={styles.title}>
+          <SetupTitle title="Sign In with Passkey">
             {platformSupported
-              ? 'Restore your wallet seamlessly using your passkey synced to Google Password Manager or iCloud Keychain.'
-              : "This device doesn't support synced passkeys. Try another recovery method below."}
-          </Text>
+              ? 'Restore your wallet using the passkey synced to Google Password Manager or iCloud Keychain.'
+              : "This device doesn't support synced passkeys. Use another recovery method below."}
+          </SetupTitle>
         </Box>
 
-        {/* Alert / Error Banner */}
         {error && (
           <Box
-            borderWidth={1}
-            borderColor="danger900"
-            borderRadius={14}
-            padding="m"
-            mb="l"
             flexDirection="row"
             alignItems="flex-start"
             gap="s"
-            style={{ backgroundColor: 'rgba(254, 95, 56, 0.08)' }}
+            borderWidth={1}
+            borderColor="danger900"
+            style={styles.errorBox}
           >
-            <Ionicons
-              name="alert-circle"
-              size={20}
-              color={theme.colors.danger900}
-              style={{ marginTop: 2 }}
-            />
-            <Text variant="p7" color="danger900" style={{ flex: 1, lineHeight: 20 }}>
+            <Ionicons name="alert-circle" size={20} color={theme.colors.danger900} />
+            <Text flex={1} fontSize={14} lineHeight={20} color="danger900">
               {error}
             </Text>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss error"
               onPress={() => setError(null)}
-              activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={8}
             >
               <Ionicons name="close" size={18} color={theme.colors.danger900} />
             </TouchableOpacity>
@@ -254,203 +244,49 @@ const SignInPasskey = () => {
         )}
 
         {platformSupported ? (
-          <Box flex={1} justifyContent="space-between">
-            {/* Center Visual & Feature Highlight */}
-            <Box alignItems="center" my="m">
-              {/* Passkey Graphic Badge */}
-              <Box
-                width={100}
-                height={100}
-                borderRadius={30}
-                backgroundColor="bg11"
-                borderWidth={1.5}
-                alignItems="center"
-                justifyContent="center"
-                mb="l"
-                style={{
-                  borderColor: 'rgba(255, 173, 0, 0.35)',
-                  shadowColor: theme.colors.primary700,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 16,
-                  elevation: 5,
-                }}
-              >
-                <Ionicons name="finger-print" size={58} color={theme.colors.primary700} />
-              </Box>
-
-              {/* Benefits Card */}
-              <Box
-                backgroundColor="bg11"
-                borderRadius={20}
-                borderWidth={1}
-                borderColor="gray800"
-                padding="m"
-                width="100%"
-                gap="m"
-              >
-                {/* Feature 1 */}
+          <Box
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            style={styles.card}
+          >
+            {features.map((f, i) => (
+              <Box key={f.title}>
+                {i > 0 && <Box height={1} backgroundColor="inputOutline" style={styles.divider} />}
                 <Box flexDirection="row" alignItems="center" gap="m">
-                  <Box
-                    width={40}
-                    height={40}
-                    borderRadius={12}
-                    alignItems="center"
-                    justifyContent="center"
-                    style={{ backgroundColor: 'rgba(255, 173, 0, 0.12)' }}
-                  >
-                    <Ionicons name="sparkles" size={20} color={theme.colors.primary700} />
+                  <Box alignItems="center" justifyContent="center" style={styles.iconTile}>
+                    <Ionicons name={f.icon} size={18} color="#FFC508" />
                   </Box>
                   <Box flex={1}>
-                    <Text variant="h10" color="textPrimary" fontWeight="700">
-                      Zero Typing
+                    <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+                      {f.title}
                     </Text>
-                    <Text variant="p8" color="textSecondary" mt="xs">
-                      No seed phrases, passwords, or contract addresses to enter
-                    </Text>
-                  </Box>
-                </Box>
-
-                <Box height={1} backgroundColor="gray800" />
-
-                {/* Feature 2 */}
-                <Box flexDirection="row" alignItems="center" gap="m">
-                  <Box
-                    width={40}
-                    height={40}
-                    borderRadius={12}
-                    alignItems="center"
-                    justifyContent="center"
-                    style={{ backgroundColor: 'rgba(255, 173, 0, 0.12)' }}
-                  >
-                    <Ionicons name="shield-checkmark" size={20} color={theme.colors.primary700} />
-                  </Box>
-                  <Box flex={1}>
-                    <Text variant="h10" color="textPrimary" fontWeight="700">
-                      Hardware Protected
-                    </Text>
-                    <Text variant="p8" color="textSecondary" mt="xs">
-                      Your signing key never leaves your device&apos;s Secure Enclave
-                    </Text>
-                  </Box>
-                </Box>
-
-                <Box height={1} backgroundColor="gray800" />
-
-                {/* Feature 3 */}
-                <Box flexDirection="row" alignItems="center" gap="m">
-                  <Box
-                    width={40}
-                    height={40}
-                    borderRadius={12}
-                    alignItems="center"
-                    justifyContent="center"
-                    style={{ backgroundColor: 'rgba(255, 173, 0, 0.12)' }}
-                  >
-                    <Ionicons name="cloud-done" size={20} color={theme.colors.primary700} />
-                  </Box>
-                  <Box flex={1}>
-                    <Text variant="h10" color="textPrimary" fontWeight="700">
-                      Synced Across Devices
-                    </Text>
-                    <Text variant="p8" color="textSecondary" mt="xs">
-                      Backed up with Google Password Manager or iCloud Keychain
+                    <Text fontSize={14} lineHeight={20} color="textSubheading">
+                      {f.body}
                     </Text>
                   </Box>
                 </Box>
               </Box>
-            </Box>
-
-            {/* Bottom Actions */}
-            <Box mt="l" gap="m">
-              <Button
-                label={isDiscovering ? 'Looking for your passkey…' : 'Find My Wallet'}
-                variant="primary"
-                onPress={handleUseSyncedPasskey}
-                bg="primary700"
-                labelColor="black"
-                disabled={isBusy}
-                loading={isDiscovering}
-                leftIcon={
-                  !isDiscovering ? (
-                    <Ionicons name="finger-print" size={20} color="black" />
-                  ) : undefined
-                }
-              />
-
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => router.push('/(onboarding)/import-phrase')}
-                disabled={isBusy}
-                style={{ alignItems: 'center', paddingVertical: 8 }}
-              >
-                <Text variant="p7" color="textSecondary">
-                  Don&apos;t have a passkey?{' '}
-                  <Text variant="p7" color="primary700" fontWeight="600">
-                    Import Recovery Phrase
-                  </Text>
-                </Text>
-              </TouchableOpacity>
-            </Box>
+            ))}
           </Box>
         ) : (
-          /* Unsupported Platform State */
           <Box
-            backgroundColor="bg11"
-            borderRadius={18}
-            borderWidth={1}
-            borderColor="gray800"
-            padding="l"
             alignItems="center"
-            mb="m"
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            style={styles.card}
           >
-            <Box
-              width={64}
-              height={64}
-              borderRadius={20}
-              alignItems="center"
-              justifyContent="center"
-              mb="m"
-              style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}
-            >
-              <Ionicons name="hardware-chip-outline" size={32} color={theme.colors.gray500} />
+            <Box alignItems="center" justifyContent="center" style={styles.unsupportedIcon}>
+              <Ionicons name="hardware-chip-outline" size={28} color="#706F6F" />
             </Box>
-            <Text variant="h10" color="textPrimary" fontWeight="700" textAlign="center" mb="xs">
+            <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary" textAlign="center">
               Passkeys Not Supported
             </Text>
-            <Text
-              variant="p7"
-              color="textSecondary"
-              textAlign="center"
-              lineHeight={20}
-              mb="l"
-              style={{ maxWidth: 280 }}
-            >
+            <Text fontSize={14} lineHeight={20} color="textSubheading" textAlign="center" mt="xs">
               This device or operating system does not support synced platform passkeys. You can
-              still access your wallet using another method.
+              still access your wallet another way.
             </Text>
-
-            <Box width="100%" gap="s">
-              <Button
-                label="Import Recovery Phrase"
-                variant="primary"
-                onPress={() => router.push('/(onboarding)/import-phrase')}
-                bg="primary700"
-                labelColor="black"
-              />
-              <Button
-                label="Recover with Email"
-                variant="outline"
-                onPress={() =>
-                  router.push({
-                    pathname: '/(onboarding)/collect-email',
-                    params: { mode: 'recovery' },
-                  })
-                }
-                labelColor="textWhite"
-                borderColor="gray800"
-              />
-            </Box>
           </Box>
         )}
 
@@ -562,6 +398,54 @@ const SignInPasskey = () => {
         //   </Box>
         // )}
         */}
+
+        <Box flex={1} />
+
+        {platformSupported ? (
+          <Box gap="sm" style={styles.actions}>
+            <SetupButton
+              label={isDiscovering ? 'Looking for your passkey…' : 'Find My Wallet'}
+              onPress={handleUseSyncedPasskey}
+              busy={isBusy}
+            />
+            <TouchableOpacity
+              accessibilityRole="button"
+              activeOpacity={0.7}
+              onPress={() => router.push('/(onboarding)/import-phrase')}
+              disabled={isBusy}
+              style={styles.link}
+            >
+              <Text fontSize={14} lineHeight={22} color="textSubheading">
+                Don&apos;t have a passkey?{' '}
+                <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textPrimary">
+                  Import Recovery Phrase
+                </Text>
+              </Text>
+            </TouchableOpacity>
+          </Box>
+        ) : (
+          <Box gap="sm" style={styles.actions}>
+            <SetupButton
+              label="Import Recovery Phrase"
+              onPress={() => router.push('/(onboarding)/import-phrase')}
+            />
+            <TouchableOpacity
+              accessibilityRole="button"
+              activeOpacity={0.8}
+              onPress={() =>
+                router.push({
+                  pathname: '/(onboarding)/collect-email',
+                  params: { mode: 'recovery' },
+                })
+              }
+              style={styles.secondaryButton}
+            >
+              <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+                Recover with Email
+              </Text>
+            </TouchableOpacity>
+          </Box>
+        )}
       </ScrollView>
 
       <LoadingBlur
@@ -571,5 +455,59 @@ const SignInPasskey = () => {
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+  },
+  title: {
+    marginTop: 56,
+  },
+  errorBox: {
+    marginTop: 24,
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: 'rgba(254,95,56,0.08)',
+  },
+  card: {
+    marginTop: 32,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  divider: {
+    marginVertical: 16,
+  },
+  iconTile: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#1A1A1A',
+  },
+  unsupportedIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#1A1A1A',
+    marginBottom: 16,
+  },
+  actions: {
+    marginTop: 32,
+  },
+  link: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  secondaryButton: {
+    height: 48,
+    borderRadius: 100,
+    backgroundColor: '#0F0F0F',
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
 
 export default SignInPasskey;

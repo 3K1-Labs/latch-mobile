@@ -2,8 +2,6 @@ import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import type { SwapProviderMeta } from '@/src/services/swap/types';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React, { useEffect, useRef } from 'react';
@@ -18,6 +16,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const CLOSE = require('@/src/assets/images/swap/close.svg');
+
 interface RowProps {
   provider: SwapProviderMeta;
   selected: boolean;
@@ -26,53 +26,42 @@ interface RowProps {
 }
 
 function RouteRow({ provider, selected, recommended, onPress }: RowProps) {
-  const theme = useTheme<Theme>();
-
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      activeOpacity={0.7}
+      onPress={onPress}
+    >
       <Box
         flexDirection="row"
         alignItems="center"
-        backgroundColor="bg11"
-        borderRadius={16}
-        padding="m"
-        mb="s"
-        height={72}
+        backgroundColor="inputBox"
+        borderColor="inputOutline"
         borderWidth={1}
-        borderColor={selected ? 'primary' : 'bg11'}
+        borderRadius={16}
+        style={styles.row}
       >
-        <Box
-          width={40}
-          height={40}
-          borderRadius={12}
-          backgroundColor="black"
-          justifyContent="center"
-          alignItems="center"
-          mr="m"
-          overflow="hidden"
-        >
-          <Image source={provider.icon} style={{ width: 40, height: 40 }} />
-        </Box>
-        <Box flex={1} flexDirection="row" alignItems="center">
-          <Text variant="h10" color="textPrimary" fontWeight="700" style={{ marginRight: 8 }}>
-            {provider.name}
+        <Image source={provider.icon} style={styles.logo} />
+        <Text flex={1} fontSize={16} lineHeight={24} letterSpacing={0.32} color="textPrimary">
+          {provider.name}
+        </Text>
+        {recommended && (
+          <Text fontSize={12} lineHeight={24} letterSpacing={0.24} color="textMuted">
+            Recommended
           </Text>
-          {recommended && (
-            <Box
-              paddingHorizontal="s"
-              paddingVertical="xs"
-              borderRadius={4}
-              style={{ backgroundColor: '#211B0C' }}
-            >
-              <Text variant="p8" color="primary" style={{ fontSize: 10 }}>
-                Recommend
-              </Text>
-            </Box>
-          )}
-        </Box>
-        {selected && (
-          <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary} />
         )}
+        <Box
+          width={18}
+          height={18}
+          borderRadius={9}
+          borderWidth={1.5}
+          borderColor={selected ? 'accentGreen' : 'textMuted'}
+          alignItems="center"
+          justifyContent="center"
+        >
+          {selected && <Box width={10} height={10} borderRadius={5} backgroundColor="accentGreen" />}
+        </Box>
       </Box>
     </TouchableOpacity>
   );
@@ -88,7 +77,6 @@ interface Props {
 
 const SwapRoutePickerSheet = ({ visible, providers, selectedId, onClose, onSelect }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(600)).current;
 
@@ -115,28 +103,28 @@ const SwapRoutePickerSheet = ({ visible, providers, selectedId, onClose, onSelec
           style={[
             styles.sheet,
             {
-              backgroundColor: isDark ? theme.colors.gray900 : theme.colors.white,
+              backgroundColor: theme.colors.surfaceBase,
               paddingBottom: insets.bottom + 16,
               transform: [{ translateY }],
             },
           ]}
         >
-          <Box alignItems="center" pt="m" pb="s">
-            <Box width={36} height={4} borderRadius={2} backgroundColor="gray800" />
+          <Box alignItems="center" style={styles.grabberWrap}>
+            <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
           </Box>
 
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            justifyContent="space-between"
-            paddingHorizontal="m"
-            mb="m"
-          >
-            <Text variant="h10" color="textPrimary" fontWeight="700">
-              Select route
+          <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+            <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+              Change Provider
             </Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={22} color={theme.colors.textSecondary} />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={onClose}
+              hitSlop={8}
+              style={styles.close}
+            >
+              <Image source={CLOSE} contentFit="contain" style={styles.closeIcon} />
             </TouchableOpacity>
           </Box>
 
@@ -168,19 +156,53 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
     maxHeight: '80%',
+  },
+  grabberWrap: {
+    paddingTop: 10,
+  },
+  header: {
+    marginTop: 20,
+    marginBottom: 32,
+    paddingHorizontal: 24,
+    height: 40,
+  },
+  close: {
+    position: 'absolute',
+    right: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeIcon: {
+    width: 20,
+    height: 20,
   },
   scroll: {
     flexGrow: 0,
   },
   list: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingBottom: 16,
+    gap: 10,
+  },
+  row: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
 });
 

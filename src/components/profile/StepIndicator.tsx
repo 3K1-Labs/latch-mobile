@@ -6,21 +6,22 @@ interface Props {
   totalSteps: number;
 }
 
-const StepIndicator = ({ currentStep, totalSteps }: Props) => {
-  return (
-    <Box flexDirection="row" alignItems="center">
-      {Array.from({ length: totalSteps }).map((_, index) => (
+/** Dots with the current step stretched into a green pill. */
+const StepIndicator = ({ currentStep, totalSteps }: Props) => (
+  <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap="xs" width={40}>
+    {Array.from({ length: totalSteps }).map((_, index) => {
+      const active = index + 1 === currentStep;
+      return (
         <Box
           key={index}
-          width={index + 1 <= currentStep ? 14 : 6}
+          width={active ? 18 : 6}
           height={6}
           borderRadius={3}
-          backgroundColor={index + 1 <= currentStep ? 'primary' : 'gray800'}
-          marginLeft={index === 0 ? 'none' : 'xs'}
+          backgroundColor={active ? 'accentGreen' : 'inputOutline'}
         />
-      ))}
-    </Box>
-  );
-};
+      );
+    })}
+  </Box>
+);
 
 export default StepIndicator;

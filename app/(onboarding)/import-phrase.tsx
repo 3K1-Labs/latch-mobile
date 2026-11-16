@@ -1,4 +1,5 @@
 import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
+import { requestDiscoveryAfterRestore } from '@/src/lib/membership';
 import { restoreStellarWallet } from '@/src/lib/seed-wallet';
 import { useWalletStore } from '@/src/store/wallet';
 import { validateMnemonic } from '@scure/bip39';
@@ -95,6 +96,7 @@ const ImportPhrase = () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
       const wallet = restoreStellarWallet(mnemonic);
       setPendingWallet(wallet);
+      await requestDiscoveryAfterRestore();
 
       router.push({
         pathname: '/(auth)/biometric',

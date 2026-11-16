@@ -1,182 +1,279 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { Dimensions, Image, TouchableOpacity } from 'react-native';
+import { Linking, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Line } from 'react-native-svg';
 
+import type { DepositStatus } from '@/src/api/latch-auth';
+import { SetupButton } from '@/src/components/onboarding/SetupChrome';
 import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+import TokenIcon from '@/src/components/shared/TokenIcon';
+import { getTransactionExplorerUrl } from '@/src/constants/config';
+import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
+import { usePrices } from '@/src/hooks/use-prices';
+import AddFundsHeader, { useAddFundsSheetStyles } from './AddFundsHeader';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const OPEN = require('@/src/assets/images/transaction/open.svg');
+const CAUTION = require('@/src/assets/images/fund/caution.svg');
+
+const GREEN = '#76B101';
+const RED = '#FB3748';
+const RAIL_IDLE = '#1A1A1A';
+const RAIL_FILL = '#0F0F0F';
 
 export type FundingStepStatus = 'success' | 'error' | 'inactive';
+type Tone = 'pending' | 'failed' | 'completed';
 
 interface FundingStep {
   label: string;
-  sublabel?: string;
   status: FundingStepStatus;
   time?: string;
 }
 
-interface Props {
-  visible: boolean;
-  onClose: () => void;
-  amount?: string;
-  statusLabel?: string;
-  steps?: FundingStep[];
-  txHash?: string;
+interface Derived {
+  /** Null until a deposit has been seen against the memo. */
+  amount: string | null;
+  code: string;
+  tone: Tone;
+  statusLabel: string;
+  steps: FundingStep[];
+  txHash: string;
 }
 
-const FundingStatusSheet: React.FC<Props> = ({
-  visible,
-  onClose,
-  amount = '+$505.00',
-  statusLabel = 'Pending',
-  steps = [
-    { label: 'Deposit\ninitiated', time: '05-07 13:38:58', status: 'success' },
-    { label: 'Deposit\nDetected', sublabel: '05-07 13:38:58', status: 'success' },
-    { label: 'Forwarding to\nSmart Account', sublabel: '05-07 13:38:58', status: 'error' },
-    { label: 'Deposit\nCompleted', time: '05-07 13:38:58', status: 'inactive' },
-  ],
-  txHash = '7a8f9e2c3d4b5a6c7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d',
-}) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
-  const insets = useSafeAreaInsets();
+const formatTime = (iso: string) => {
+  const d = new Date(iso);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, '0'))
+    .join(':');
+};
 
-  const getStepIcon = (status: FundingStepStatus) => {
-    switch (status) {
-      case 'success':
-        return require('@/src/assets/icon/star.png');
-      case 'error':
-        return require('@/src/assets/icon/star-error.png');
-      case 'inactive':
-      default:
-        return require('@/src/assets/icon/star-inactive.png');
-    }
+const STEP_LABELS = [
+  'Deposit Initiated',
+  'Deposit Detected',
+  'Forwarding to Smart Account',
+  'Deposit Completed',
+];
+
+function derive(deposit: DepositStatus | undefined): Derived {
+  const latest = deposit?.forwards[0];
+
+  // No inbound payment yet. An intent that runs out its TTL first is terminal:
+  // anything arriving against it is swept to recovery, not credited.
+  if (!latest) {
+    const dead = deposit?.status === 'expired' || deposit?.status === 'failed';
+    return {
+      amount: null,
+      code: 'XLM',
+      tone: dead ? 'failed' : 'pending',
+      statusLabel: dead ? 'Expired' : 'Awaiting deposit',
+      steps: STEP_LABELS.map((label, i) => ({
+        label,
+        status: i === 0 ? (dead ? 'error' : 'success') : 'inactive',
+      })),
+      txHash: '',
+    };
+  }
+
+  // The relayer records a sweep-to-recovery as a failed forward, so a failed
+  // row means the funds did not reach the user.
+  const failed = latest.status === 'failed' || deposit?.status === 'failed';
+  const done = latest.status === 'done';
+  const statuses: FundingStepStatus[] = [
+    'success',
+    'success',
+    done ? 'success' : failed ? 'error' : 'inactive',
+    done ? 'success' : 'inactive',
+  ];
+
+  return {
+    amount: latest.amount,
+    code: latest.asset === 'native' ? 'XLM' : latest.asset.split(':')[0],
+    tone: done ? 'completed' : failed ? 'failed' : 'pending',
+    statusLabel: done ? 'Completed' : failed ? 'Failed' : 'Pending',
+    steps: STEP_LABELS.map((label, i) => ({
+      label,
+      status: statuses[i],
+      time:
+        i === 0 ? formatTime(latest.created_at) : i === 3 && done ? formatTime(latest.created_at) : undefined,
+    })),
+    txHash: latest.forward_tx ?? latest.tx_hash,
   };
+}
+
+const TONES: Record<Tone, { color: string; bg: string }> = {
+  pending: { color: '#F68B07', bg: 'rgba(246,139,7,0.08)' },
+  failed: { color: RED, bg: 'rgba(251,55,72,0.08)' },
+  completed: { color: '#27C11F', bg: 'rgba(39,193,31,0.08)' },
+};
+
+const StatusPill = ({ tone, label }: { tone: Tone; label: string }) => (
+  <Box style={[styles.pill, { backgroundColor: TONES[tone].bg }]}>
+    <Text fontSize={14} lineHeight={14} style={{ color: TONES[tone].color }}>
+      {label}
+    </Text>
+  </Box>
+);
+
+/** Splits "$500.00" into "$500" and ".00" so the cents can be set smaller, as in the design. */
+const splitCents = (text: string): [string, string] => {
+  const m = text.match(/^(.*?)([.,]\d+)(\D*)$/);
+  return m ? [m[1], m[2] + m[3]] : [text, ''];
+};
+
+// Rail geometry from the design: 18pt rings on a 52pt row pitch, joined by 22pt connectors.
+const ROW_PITCH = 52;
+const RING_R = 8.25;
+const RAIL_TOP = 13;
+const RAIL_X = 16;
+
+const Rail = ({ steps }: { steps: FundingStep[] }) => {
+  const lastReached = steps.reduce((acc, s, i) => (s.status === 'inactive' ? acc : i), 0);
+  const ringColor = (s: FundingStepStatus) =>
+    s === 'success' ? GREEN : s === 'error' ? RED : RAIL_IDLE;
+  const errorIndex = steps.findIndex((s) => s.status === 'error');
+
+  return (
+    <Box style={styles.rail}>
+      <LinearGradient
+        colors={['rgba(118,177,1,0.18)', 'rgba(118,177,1,0)']}
+        style={[styles.railGlow, { height: 51 + ROW_PITCH * lastReached }]}
+      />
+      <Svg width={32} height={180} style={StyleSheet.absoluteFill}>
+        {steps.slice(1).map((s, i) => (
+          <Line
+            key={`l${i}`}
+            x1={RAIL_X}
+            x2={RAIL_X}
+            y1={RAIL_TOP + ROW_PITCH * i + 15}
+            y2={RAIL_TOP + ROW_PITCH * i + 37}
+            stroke={s.status === 'inactive' ? RAIL_IDLE : GREEN}
+            strokeWidth={1.5}
+          />
+        ))}
+        {steps.map((s, i) => (
+          <Circle
+            key={`c${i}`}
+            cx={RAIL_X}
+            cy={RAIL_TOP + ROW_PITCH * i}
+            r={RING_R}
+            fill={RAIL_FILL}
+            stroke={ringColor(s.status)}
+            strokeWidth={1.5}
+          />
+        ))}
+      </Svg>
+      {errorIndex >= 0 && (
+        <Image
+          source={CAUTION}
+          contentFit="contain"
+          style={[styles.caution, { top: RAIL_TOP + ROW_PITCH * errorIndex - 10.5 }]}
+        />
+      )}
+    </Box>
+  );
+};
+
+interface Props {
+  visible: boolean;
+  deposit?: DepositStatus;
+  onBack: () => void;
+  onClose: () => void;
+  onRetry: () => void;
+}
+
+const FundingStatusSheet = ({ visible, deposit, onBack, onClose, onRetry }: Props) => {
+  const insets = useSafeAreaInsets();
+  const sheetStyles = useAddFundsSheetStyles();
+  const { data: prices } = usePrices();
+  const { formatToken } = useDisplayFiat();
+  const d = derive(deposit);
+
+  let headline: [string, string] | null = null;
+  if (d.amount) {
+    const fiat = formatToken(d.amount, prices?.[d.code]?.price, { approx: false });
+    headline = fiat.unpriced
+      ? splitCents(`+${parseFloat(d.amount).toFixed(2)} ${d.code}`)
+      : splitCents(`+${fiat.text}`);
+  }
 
   return (
     <BottomSheet
       visible={visible}
-      onClose={onClose}
+      onClose={onBack}
       snapPoints={['92%']}
       scrollable
-      contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+      backgroundStyle={sheetStyles.sheet}
+      handleIndicatorStyle={sheetStyles.grabber}
+      header={<AddFundsHeader onBack={onBack} onClose={onClose} />}
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 38 }]}
     >
-      {/* Header */}
+      <Box alignItems="center" style={styles.hero}>
+        <Box style={styles.tokenBg}>
+          <TokenIcon size={40} />
+        </Box>
+        <Box alignItems="center" style={styles.heroText}>
+          {headline ? (
+            <Text fontFamily="SFproSemibold" letterSpacing={-1.4} color="textPrimary" numberOfLines={1}>
+              <Text fontSize={40} lineHeight={40}>
+                {headline[0]}
+              </Text>
+              <Text fontSize={28} lineHeight={40} color="textSubheading">
+                {headline[1]}
+              </Text>
+            </Text>
+          ) : (
+            <Text fontSize={24} lineHeight={40} fontFamily="SFproSemibold" color="textSubheading">
+              --
+            </Text>
+          )}
+          <StatusPill tone={d.tone} label={d.statusLabel} />
+        </Box>
+      </Box>
+
+      <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textSubheading">
+        Transaction Timeline
+      </Text>
       <Box
         flexDirection="row"
         alignItems="center"
-        justifyContent="space-between"
-        paddingHorizontal="m"
-        height={60}
+        backgroundColor="inputBox"
+        borderColor="inputOutline"
+        borderWidth={1}
+        borderRadius={20}
+        style={styles.timeline}
       >
-        <TouchableOpacity
-          onPress={onClose}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="chevron-back" size={20} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text variant="p7" color="textPrimary" fontWeight="700">
-          Funding Status
-        </Text>
-        <Box width={20} />
-      </Box>
-
-      {/* Asset and Amount */}
-      <Box alignItems="center" mb="xl">
-        <Box backgroundColor="bg11" padding="m" borderRadius={12} overflow="hidden">
-          <Image
-            source={require('@/src/assets/token/stellar.png')}
-            style={{ width: 80, height: 80 }}
-            resizeMode="contain"
-          />
-        </Box>
-        <Text variant="h7" color="textPrimary" fontWeight="700" mb="s">
-          {amount}
-        </Text>
-        <Box
-          backgroundColor={
-            statusLabel === 'Completed' || statusLabel === 'Success'
-              ? 'success50'
-              : statusLabel === 'Failed' || statusLabel === 'Error'
-                ? 'danger50'
-                : 'labelBg'
-          }
-          paddingHorizontal="m"
-          paddingVertical="xs"
-          borderRadius={12}
-        >
-          <Text
-            variant="p7"
-            color={
-              statusLabel === 'Completed' || statusLabel === 'Success'
-                ? 'success700'
-                : statusLabel === 'Failed' || statusLabel === 'Error'
-                  ? 'inputError'
-                  : 'primary'
-            }
-            fontWeight="700"
-          >
-            {statusLabel}
-          </Text>
-        </Box>
-      </Box>
-
-      {/* Stepper */}
-      <Box paddingHorizontal="m" mb="xl">
-        <Box flexDirection="row" alignItems="center" justifyContent="space-between" px="s">
-          {steps.map((step, index) => (
-            <React.Fragment key={index}>
-              <Box alignItems="center" flex={1}>
-                <Image
-                  source={getStepIcon(step.status)}
-                  style={{ width: 32, height: 32 }}
-                  resizeMode="contain"
-                />
-              </Box>
-              {index < steps.length - 1 && (
-                <Box
-                  height={4}
-                  backgroundColor={
-                    steps[index + 1].status === 'success'
-                      ? 'mainColorHover'
-                      : steps[index + 1].status === 'error'
-                        ? 'inputError'
-                        : 'gray800'
-                  }
-                  flex={1}
-                  style={{ zIndex: -1, marginHorizontal: -24 }}
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </Box>
-
-        <Box flexDirection="row" justifyContent="space-between" mt="m">
-          {steps.map((step, index) => (
-            <Box key={index} width={(SCREEN_WIDTH - 40) / 4} alignItems="center">
+        <Rail steps={d.steps} />
+        <Box flex={1} style={styles.rows}>
+          {d.steps.map((step) => (
+            <Box
+              key={step.label}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="space-between"
+              style={styles.row}
+            >
               <Text
-                variant="h12"
-                color={
-                  step.status === 'success'
-                    ? 'textPrimary'
-                    : step.status === 'error'
-                      ? 'inputError'
-                      : 'textSecondary'
-                }
-                textAlign="center"
-                fontWeight="700"
+                fontSize={14}
+                lineHeight={22}
+                color={step.status === 'inactive' ? 'textSubheading' : 'textPrimary'}
+                numberOfLines={1}
+                style={styles.rowLabel}
               >
                 {step.label}
               </Text>
-              {(step.time || step.sublabel) && (
-                <Text variant="p8" color="textTertiary" textAlign="center" mt="xs">
-                  {step.time || step.sublabel}
+              {step.status === 'error' ? (
+                <StatusPill tone="failed" label="Failed" />
+              ) : (
+                <Text
+                  fontSize={14}
+                  lineHeight={22}
+                  fontFamily="SFproSemibold"
+                  color={step.status === 'inactive' ? 'textSubheading' : 'textPrimary'}
+                >
+                  {step.time ?? '--'}
                 </Text>
               )}
             </Box>
@@ -184,55 +281,123 @@ const FundingStatusSheet: React.FC<Props> = ({
         </Box>
       </Box>
 
-      {/* Transaction Hash */}
-      <Box paddingHorizontal="m" mb="xl">
-        <Text variant="p6" color="textPrimary" fontWeight="700" mb="m">
-          Transaction Hash
-        </Text>
-        <Box backgroundColor={isDark ? 'gray800' : 'gray200'} padding="m" borderRadius={16}>
-          <Text variant="p7" color="textSecondary" lineHeight={22}>
-            {txHash}
+      {!!d.txHash && (
+        <Box style={styles.hashSection}>
+          <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textSubheading">
+            Transaction Hash
           </Text>
-        </Box>
-      </Box>
-
-      {/* Footer */}
-      <Box paddingHorizontal="m" gap="m">
-        <TouchableOpacity activeOpacity={0.8} onPress={onClose}>
           <Box
-            height={56}
-            backgroundColor="primary"
-            borderRadius={28}
-            justifyContent="center"
-            alignItems="center"
-          >
-            <Text variant="p6" color="bg11" fontWeight="700">
-              Back To Home
-            </Text>
-          </Box>
-        </TouchableOpacity>
-
-        <TouchableOpacity activeOpacity={0.8}>
-          <Box
-            height={56}
-            backgroundColor="transparent"
-            borderRadius={28}
-            borderWidth={1}
-            borderColor="gray800"
             flexDirection="row"
-            justifyContent="center"
-            alignItems="center"
-            gap="s"
+            alignItems="flex-start"
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            borderRadius={16}
+            style={styles.hashBox}
           >
-            <Text variant="p6" color="textPrimary" fontWeight="700">
-              View On Stellar Explorer
+            <Text fontSize={16} lineHeight={24} color="textPrimary" style={styles.hashText}>
+              {d.txHash}
             </Text>
-            <Ionicons name="open-outline" size={16} color={theme.colors.textPrimary} />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="View on Stellar Explorer"
+              hitSlop={10}
+              onPress={() => Linking.openURL(getTransactionExplorerUrl(d.txHash))}
+            >
+              <Image source={OPEN} contentFit="contain" style={styles.openIcon} />
+            </TouchableOpacity>
           </Box>
-        </TouchableOpacity>
+        </Box>
+      )}
+
+      <Box style={styles.actions}>
+        {d.tone === 'failed' ? (
+          <SetupButton label="Retry Payment" onPress={onRetry} />
+        ) : (
+          <SetupButton label="Back to Home" onPress={onClose} />
+        )}
       </Box>
     </BottomSheet>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 34,
+  },
+  hero: {
+    gap: 24,
+    marginBottom: 48,
+  },
+  tokenBg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#121212',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroText: {
+    gap: 12,
+  },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 26,
+  },
+  timeline: {
+    marginTop: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 10,
+  },
+  rail: {
+    width: 32,
+    height: 180,
+  },
+  railGlow: {
+    position: 'absolute',
+    left: 5,
+    top: 2,
+    width: 22,
+    borderRadius: 23,
+  },
+  caution: {
+    position: 'absolute',
+    left: RAIL_X - 10.5,
+    width: 21,
+    height: 21,
+  },
+  rows: {
+    gap: 14,
+  },
+  row: {
+    height: 38,
+    gap: 12,
+  },
+  rowLabel: {
+    flexShrink: 1,
+  },
+  hashSection: {
+    marginTop: 28,
+    gap: 12,
+  },
+  hashBox: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  hashText: {
+    flex: 1,
+  },
+  openIcon: {
+    width: 16,
+    height: 16,
+  },
+  actions: {
+    marginTop: 40,
+  },
+});
 
 export default FundingStatusSheet;

@@ -1,19 +1,20 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
+import { FormikHelpers } from 'formik';
 import React, { useEffect, useMemo, useState } from 'react';
-import { TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import Toast from 'react-native-toast-message';
 
-import AddressBookForm from '@/src/components/address-book/AddressBookForm';
+import AddressBookForm, { AddressBookValues } from '@/src/components/address-book/AddressBookForm';
 import AddressBookItem from '@/src/components/address-book/AddressBookItem';
 import EmptyAddressBook from '@/src/components/address-book/EmptyAddressBook';
-import SheetHeader from '@/src/components/profile/SheetHeader';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
+import Text from '@/src/components/shared/Text';
 import { AddressBookEntry, useAddressBookStore } from '@/src/store/address-book';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+
+const PLUS = require('@/src/assets/images/address-book/plus.svg');
 
 type ScreenState = 'LIST' | 'FORM';
 
@@ -24,8 +25,6 @@ interface Props {
 }
 
 const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const [screenState, setScreenState] = useState<ScreenState>('LIST');
   const [editingEntry, setEditingEntry] = useState<AddressBookEntry | undefined>(undefined);
   const entries = useAddressBookStore((s) => s.entries);
@@ -81,7 +80,10 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
     });
   };
 
-  const handleSubmit = (values: { label: string; address: string }, formikHelpers: any) => {
+  const handleSubmit = (
+    values: AddressBookValues,
+    formikHelpers: FormikHelpers<AddressBookValues>,
+  ) => {
     const result = editingEntry
       ? updateEntry(editingEntry.id, values)
       : addEntry(values);
@@ -106,37 +108,47 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
       snapPoints={['92%']}
       keyboardBehavior="extend"
       android_keyboardInputMode="adjustResize"
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
+      backgroundStyle={styles.sheet}
+      handleIndicatorStyle={styles.grabber}
       header={
-        <SheetHeader
-          title={screenState === 'FORM' && editingEntry ? 'Edit Address' : 'Address Book'}
-          onBack={handleBack}
-          right={
-            screenState === 'LIST' && addresses.length > 0 ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setEditingEntry(undefined);
-                  setScreenState('FORM');
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="add" size={24} color={theme.colors.textPrimary} />
-              </TouchableOpacity>
-            ) : undefined
-          }
-        />
+        <Box
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="space-between"
+          style={styles.header}
+        >
+          <RoundBackButton onPress={handleBack} />
+          <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+            {screenState === 'FORM' && editingEntry ? 'Edit Address' : 'Address Book'}
+          </Text>
+          {screenState === 'LIST' ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Add address"
+              activeOpacity={0.7}
+              hitSlop={8}
+              onPress={() => {
+                setEditingEntry(undefined);
+                setScreenState('FORM');
+              }}
+              style={styles.addButton}
+            >
+              <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
+            </TouchableOpacity>
+          ) : (
+            <Box width={40} />
+          )}
+        </Box>
       }
       contentContainerStyle={{ flex: 1 }}
     >
       {screenState === 'LIST' ? (
         addresses.length === 0 ? (
-          <EmptyAddressBook onAdd={() => setScreenState('FORM')} />
+          <EmptyAddressBook />
         ) : (
           <Box flex={1}>
             <KeyboardAwareScrollView
-              contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 20 }}
+              contentContainerStyle={styles.list}
               bottomOffset={16}
             >
               {addresses.map((item) => (
@@ -162,5 +174,40 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
     </BottomSheet>
   );
 };
+
+const styles = StyleSheet.create({
+  sheet: {
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+  },
+  grabber: {
+    width: 126,
+    height: 8,
+    borderRadius: 69,
+    backgroundColor: '#1A1A1A',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: {
+    width: 20,
+    height: 20,
+  },
+  list: {
+    paddingHorizontal: 24,
+    paddingTop: 42,
+    gap: 12,
+  },
+});
 
 export default AddressBookSheet;

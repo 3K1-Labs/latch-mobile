@@ -1,48 +1,88 @@
-import { useTheme } from '@shopify/restyle';
 import React from 'react';
+import { Linking, StyleSheet } from 'react-native';
 
-import SheetHeader from '@/src/components/profile/SheetHeader';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import SupportItem from '@/src/components/profile/SupportItem';
 import BottomSheet from '@/src/components/shared/BottomSheet';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+import Box from '@/src/components/shared/Box';
+import Text from '@/src/components/shared/Text';
+import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
+
+// Same address as the privacy policy.
+const SUPPORT_EMAIL = 'support@getlatch.co';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-const HelpSupportSheet = ({ visible, onClose }: Props) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
-
-  return (
-    <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      snapPoints={['92%']}
-      scrollable
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
-      header={<SheetHeader title="Help & Support" onBack={onClose} />}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 20 }}
-    >
-      <SupportItem
-        title="Live Chat Support"
-        description="Chat with our support team"
-        icon="chatbubble-outline"
-        image={require('@/src/assets/icon/chatbubble.png')}
-        onPress={() => {}}
-      />
-      <SupportItem
-        title="Email Support"
-        description="support@latch.com"
-        icon="mail-outline"
-        onPress={() => {}}
-      />
-    </BottomSheet>
-  );
+const openSupportEmail = async () => {
+  try {
+    await Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+  } catch {
+    // No mail app configured — hand over the address instead.
+    await copyToClipboard(SUPPORT_EMAIL, 'Support email');
+  }
 };
+
+const HelpSupportSheet = ({ visible, onClose }: Props) => (
+  <BottomSheet
+    visible={visible}
+    onClose={onClose}
+    snapPoints={['92%']}
+    scrollable
+    backgroundStyle={styles.sheet}
+    handleIndicatorStyle={styles.grabber}
+    header={
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.header}>
+        <RoundBackButton onPress={onClose} />
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+          Help &amp; Support
+        </Text>
+        <Box width={40} />
+      </Box>
+    }
+    contentContainerStyle={styles.content}
+  >
+    <Box gap="s" mb="l">
+      <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+        Need a hand?
+      </Text>
+      <Text fontSize={14} lineHeight={20} letterSpacing={0.14} color="textSubheading">
+        Reach the Latch team and we&apos;ll get back to you. We will never ask for your recovery
+        phrase, PIN or password.
+      </Text>
+    </Box>
+
+    <SupportItem
+      title="Email Support"
+      description={SUPPORT_EMAIL}
+      icon="mail-outline"
+      onPress={openSupportEmail}
+    />
+  </BottomSheet>
+);
+
+const styles = StyleSheet.create({
+  sheet: {
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+  },
+  grabber: {
+    width: 126,
+    height: 8,
+    borderRadius: 69,
+    backgroundColor: '#1A1A1A',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 36,
+  },
+});
 
 export default HelpSupportSheet;

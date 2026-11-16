@@ -1,9 +1,10 @@
 import React from 'react';
-import { ScrollView, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 
+import { SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+import ActionChip from './ActionChip';
 
 interface Props {
   values: {
@@ -16,115 +17,100 @@ interface Props {
   onSubmit: () => void;
 }
 
-const ACTION_MAP: Record<string, string> = {
-  transfer: 'Transfer',
-  swap: 'Swap',
-  offers: 'Offers',
-};
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="m">
+    <Text fontSize={14} lineHeight={22} color="textMuted">
+      {label}
+    </Text>
+    {children}
+  </Box>
+);
 
-const SessionKeyStep3 = ({ values, onSubmit }: Props) => {
-  const { isDark } = useAppTheme();
-  return (
-    <Box flex={1}>
-      <ScrollView
-        bounces={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+const Value = ({ children }: { children: React.ReactNode }) => (
+  <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textPrimary" flexShrink={1}>
+    {children}
+  </Text>
+);
+
+const Divider = () => <Box height={1} backgroundColor="inputOutline" />;
+
+const SessionKeyStep3 = ({ values, onSubmit }: Props) => (
+  <Box flex={1}>
+    <ScrollView bounces={false} contentContainerStyle={styles.scroll}>
+      <Box
+        backgroundColor="inputBox"
+        borderColor="inputOutline"
+        borderWidth={1}
+        gap="m"
+        style={styles.card}
       >
-        {/* Summary Card */}
-        <Box backgroundColor="bg11" borderRadius={16} padding="m" mb="l">
-          <Box flexDirection="row" justifyContent="space-between" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Session Name
-            </Text>
-            <Text variant="p7" color="textPrimary" fontWeight="700">
-              {values.name || 'My Bot'}
-            </Text>
+        <Row label="Session Name">
+          <Value>{values.name || 'My Bot'}</Value>
+        </Row>
+        <Divider />
+        <Row label="Duration">
+          <Value>{values.duration}</Value>
+        </Row>
+        <Divider />
+        <Row label="Spending Limit">
+          <Value>
+            {values.spendingLimit || '0.00'} {values.spendingLimitAsset || 'USDC'}
+          </Value>
+        </Row>
+        <Divider />
+        <Row label="Allowed actions">
+          <Box flexDirection="row" flexWrap="wrap" justifyContent="flex-end" gap="s" flexShrink={1}>
+            {values.allowedActions.length > 0 ? (
+              values.allowedActions.map((id) => <ActionChip key={id} id={id} />)
+            ) : (
+              <Value>None</Value>
+            )}
           </Box>
-          <Box height={1} backgroundColor="gray800" mb="m" />
-
-          <Box flexDirection="row" justifyContent="space-between" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Duration
-            </Text>
-            <Text variant="p7" color="textPrimary" fontWeight="700">
-              {values.duration}
-            </Text>
-          </Box>
-          <Box height={1} backgroundColor="gray800" mb="m" />
-
-          <Box flexDirection="row" justifyContent="space-between" mb="m">
-            <Text variant="p7" color="textSecondary">
-              Spending Limit
-            </Text>
-            <Text variant="p7" color="textPrimary" fontWeight="700">
-              {values.spendingLimit || '0.00'} {values.spendingLimitAsset || 'USDC'}
-            </Text>
-          </Box>
-          <Box height={1} backgroundColor="gray800" mb="m" />
-
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-            <Text variant="p7" color="textSecondary">
-              Allowed transactions
-            </Text>
-            <Box flexDirection="row" flexWrap="wrap" justifyContent="flex-end">
-              {values.allowedActions.map((id) => (
-                <Box
-                  key={id}
-                  paddingHorizontal="m"
-                  py="xs"
-                  borderRadius={8}
-                  ml="xs"
-                  style={{
-                    backgroundColor: isDark ? 'rgba(255, 184, 0, 0.1)' : '#FFF4E6',
-                  }}
-                >
-                  <Text variant="p7" color="primary800" fontWeight="700">
-                    {ACTION_MAP[id] || id}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          </Box>
-        </Box>
-
-        {/* Security Warning */}
-        <Box
-          borderRadius={16}
-          padding="m"
-          borderWidth={1}
-          style={{
-            backgroundColor: isDark ? 'rgba(255, 184, 0, 0.1)' : '#FFF4E6',
-            borderColor: isDark ? 'rgba(255, 184, 0, 0.1)' : '#FFE8C8',
-          }}
-        >
-          <Text variant="h11" color="inputError" fontWeight="700" mb="s">
-            Security Warning
-          </Text>
-          <Text variant="p6" color="textSecondary" lineHeight={22}>
-            This session will be able to perform actions on your behalf without requiring your
-            explicit approval each time.
-          </Text>
-        </Box>
-      </ScrollView>
-
-      {/* Footer */}
-      <Box position="absolute" bottom={20} left={16} right={16}>
-        <TouchableOpacity activeOpacity={0.7} onPress={onSubmit}>
-          <Box
-            height={64}
-            backgroundColor="primary"
-            borderRadius={32}
-            justifyContent="center"
-            alignItems="center"
-          >
-            <Text variant="h10" color="black" fontWeight="700">
-              Confirm & Create Key
-            </Text>
-          </Box>
-        </TouchableOpacity>
+        </Row>
       </Box>
+
+      <Box gap="xs" style={styles.warning}>
+        <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" style={styles.warningTitle}>
+          Security Warning
+        </Text>
+        <Text fontSize={14} lineHeight={22} color="textMuted">
+          This session will be able to perform actions on your behalf without requiring your explicit
+          approval each time.
+        </Text>
+      </Box>
+    </ScrollView>
+
+    <Box style={styles.footer}>
+      <SetupButton label="Confirm & Create Key" onPress={onSubmit} />
     </Box>
-  );
-};
+  </Box>
+);
+
+const styles = StyleSheet.create({
+  scroll: {
+    paddingHorizontal: 24,
+    paddingTop: 26,
+    paddingBottom: 24,
+  },
+  card: {
+    borderRadius: 16,
+    padding: 18,
+  },
+  warning: {
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,197,8,0.16)',
+    backgroundColor: 'rgba(255,197,8,0.06)',
+  },
+  warningTitle: {
+    color: '#FFC508',
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+});
 
 export default SessionKeyStep3;

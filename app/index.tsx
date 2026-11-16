@@ -4,6 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect } from 'react';
 import { AccessibilityInfo, Dimensions, StyleSheet } from 'react-native';
 import Animated, {
@@ -273,7 +274,9 @@ const SplashAnimation = () => {
     ],
   }));
   return (
-    <Box flex={1} backgroundColor="onboardingbg">
+    // The splash keeps the dark brand look in both themes.
+    <Box flex={1} backgroundColor="gradientDark">
+      <StatusBar style="light" />
       <LinearGradient
         colors={['rgba(50, 60, 14, 0.74)', '#121212']}
         locations={[0, 0.2772]}

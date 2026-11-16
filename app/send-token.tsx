@@ -1,7 +1,8 @@
+import { RoundBackButton, SetupButton } from '@/src/components/onboarding/SetupChrome';
 import AddressBookSheet from '@/src/components/profile/AddressBookSheet';
 import AmountEntryStep from '@/src/components/send-token/AmountEntryStep';
 import RecipientStep from '@/src/components/send-token/RecipientStep';
-import SuccessStep from '@/src/components/send-token/SuccessStep';
+import SendSummarySheet from '@/src/components/send-token/SendSummarySheet';
 import TokenSelectionStep from '@/src/components/send-token/TokenSelectionStep';
 import {
   Recipient,
@@ -24,27 +25,32 @@ import { createTransfer } from '@/src/lib/cosign-transport';
 import { diagnoseAuthFailure, isAuthFailure } from '@/src/lib/tx-diagnostics';
 import type { NetworkFee } from '@/src/api/transaction-build';
 import { friendlyTxError, isWrongNetworkError, retryOnStaleFeeQuote } from '@/src/lib/tx-errors';
-import { sendTokenFromPasskeyAccount, sendTokenFromSmartAccount } from '@/src/services/send-token';
+import {
+  estimateSendFee,
+  sendTokenFromPasskeyAccount,
+  sendTokenFromSmartAccount,
+} from '@/src/services/send-token';
 import { getPasskeyStorageKeys, useWalletStore } from '@/src/store/wallet';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { maskAddress } from '@/src/utils';
-import { Ionicons } from '@expo/vector-icons';
+import { maskAddress, shortenAddress } from '@/src/utils';
 import * as Sentry from '@sentry/react-native';
-import { useTheme } from '@shopify/restyle';
 import { useQueryClient } from '@tanstack/react-query';
+import { Image as SvgImage } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { Dimensions, Image, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
+const ICONS = {
+  qr: require('@/src/assets/images/send/qr-scan.svg'),
+  check: require('@/src/assets/images/send/check.svg'),
+  success: require('@/src/assets/images/result/tx-success.svg'),
+  failed: require('@/src/assets/images/result/tx-failed.svg'),
+};
 
 const SendToken = () => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
-
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { address: scannedAddress } = useLocalSearchParams<{ address?: string }>();
   const { smartAccountAddress, accounts, activeAccountIndex, mnemonic } = useWalletStore();
@@ -82,6 +88,7 @@ const SendToken = () => {
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   const [saveAddressVisible, setSaveAddressVisible] = useState(false);
+  const [reviewVisible, setReviewVisible] = useState(false);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authPromptMessage, setAuthPromptMessage] = useState('');
@@ -118,7 +125,9 @@ const SendToken = () => {
       router.back();
       return;
     }
-    if (selectedWallet) {
+    if (reviewVisible) {
+      setReviewVisible(false);
+    } else if (selectedWallet) {
       setSelectedWallet(null);
       setAmount('0');
     } else if (selectedToken) {
@@ -128,14 +137,48 @@ const SendToken = () => {
     }
   };
 
-  const handleKeyPress = (key: string) => {
-    if (key === 'backspace') {
-      setAmount((prev) => (prev.length > 1 ? prev.slice(0, -1) : '0'));
-    } else if (key === '.') {
-      if (!amount.includes('.')) setAmount((prev) => prev + '.');
-    } else {
-      setAmount((prev) => (prev === '0' ? key : prev + key));
+  const [feeEstimate, setFeeEstimate] = useState<NetworkFee | 'loading' | 'failed'>('loading');
+  useEffect(() => {
+    if (!reviewVisible || !selectedToken || !selectedWallet || !smartAccountAddress) return;
+    // Shared wallets go through cosign, not build-send.
+    if (activeAccount?.isMultisig) {
+      setFeeEstimate('failed');
+      return;
     }
+    let cancelled = false;
+    setFeeEstimate('loading');
+    (async () => {
+      const signer = activeAccount?.gAddress
+        ? { keypair: (await import('@/src/lib/seed-wallet')).deriveWalletAtIndex(mnemonic!, activeAccount.index).keypair }
+        : { listIndex: activeAccountIndex };
+      return estimateSendFee({
+        smartAccountAddress,
+        signer,
+        sacContractId: selectedToken.sacContractId,
+        destinationAddress: selectedWallet.address,
+        amount,
+      });
+    })()
+      .then((fee) => !cancelled && setFeeEstimate(fee))
+      .catch(() => !cancelled && setFeeEstimate('failed'));
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewVisible, selectedToken, selectedWallet, smartAccountAddress, amount, activeAccount, activeAccountIndex, mnemonic]);
+
+  const shownFee = status === 'success' && networkFee ? networkFee : feeEstimate;
+  const feeLabel =
+    shownFee === 'loading'
+      ? 'Estimating…'
+      : shownFee === 'failed'
+        ? 'Calculated when signing'
+        : `${shownFee.maxAmount} ${shownFee.symbol} (max)`;
+
+  // The design's token pill on the amount screen: pick another token without
+  // losing the recipient.
+  const handleChangeToken = () => {
+    setSelectedToken(null);
+    setAmount('0');
   };
 
   const handleMaxPress = () => {
@@ -156,11 +199,15 @@ const SendToken = () => {
     return entered > 0 && entered <= parseFloat(selectedToken.amount);
   };
 
+  const recipientName = selectedWallet
+    ? (selectedWallet.label ?? shortenAddress(selectedWallet.address))
+    : '';
+
   const headerTitle = () => {
-    if (status === 'success' || status === 'error') return '';
+    if (status === 'error') return '';
     if (!selectedToken) return 'Select Token';
-    if (!selectedWallet) return 'Recipient';
-    return `Send ${selectedToken.code}`;
+    if (!selectedWallet) return 'Recipient Details';
+    return `Send to ${recipientName}`;
   };
 
   const handleSend = async () => {
@@ -416,69 +463,81 @@ const SendToken = () => {
     }
   };
 
-  const showNextButton = selectedWallet && status === 'initial';
+  const onAmountStep = !!selectedToken && !!selectedWallet && status !== 'error';
+  const canReview = onAmountStep && status === 'initial' && isAmountValid();
+  const price = selectedToken ? prices?.[selectedToken.code]?.price : undefined;
+  const networkLabel = getNetworkId() === 'testnet' ? 'Stellar Testnet' : 'Stellar Mainnet';
+  const recipientRow = selectedWallet
+    ? selectedWallet.label
+      ? `${selectedWallet.label} (${shortenAddress(selectedWallet.address)})`
+      : shortenAddress(selectedWallet.address)
+    : '';
+  const alreadySaved = !!selectedWallet && !!findAddressBookEntry(selectedWallet.address);
 
-  const renderContent = () => {
-    if (status === 'success') {
-      const recipientAddress = selectedWallet?.address ?? '';
-      const alreadySaved = !!findAddressBookEntry(recipientAddress);
+  const renderHeaderAction = () => {
+    if (status !== 'initial') return <Box width={40} />;
+    if (!selectedToken) return <Box width={40} />;
+    if (!selectedWallet) {
       return (
-        <SuccessStep
-          amount={amount}
-          tokenCode={selectedToken?.code ?? ''}
-          recipient={recipientAddress}
-          txHash={txHash}
-          networkFee={networkFee}
-          onContinue={() => router.back()}
-          onSaveAddress={!alreadySaved ? () => setSaveAddressVisible(true) : undefined}
-        />
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Scan QR code"
+          activeOpacity={0.7}
+          onPress={() => router.push({ pathname: '/qrcode-scan', params: { from: 'send' } })}
+          style={styles.headerButton}
+        >
+          <SvgImage source={ICONS.qr} contentFit="contain" style={styles.headerIcon} />
+        </TouchableOpacity>
       );
     }
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Review transfer"
+        activeOpacity={0.7}
+        disabled={!canReview}
+        onPress={() => setReviewVisible(true)}
+        style={[styles.headerButton, styles.confirmButton, !canReview && styles.disabled]}
+      >
+        <SvgImage source={ICONS.check} contentFit="contain" style={styles.headerIcon} />
+      </TouchableOpacity>
+    );
+  };
 
+  const renderContent = () => {
     if (status === 'error') {
       return (
         <Box flex={1} paddingHorizontal="l" justifyContent="space-between" pb="xl">
           <Box flex={1} justifyContent="center" alignItems="center" px="m">
-            <Image
-              source={require('@/src/assets/images/error.png')}
-              style={{ width: width, height: width * 0.55 }}
-              resizeMode="contain"
-            />
-            <Text variant="h8" color="textPrimary" fontWeight="700" mt="l" mb="s">
+            <SvgImage source={ICONS.failed} contentFit="contain" style={styles.resultIllustration} />
+            <Text
+              fontSize={24}
+              lineHeight={32}
+              fontFamily="SFproMedium"
+              color="textPrimary"
+              mt="l"
+              mb="s"
+            >
               Transaction Failed
             </Text>
-            <Text variant="p7" color="textSecondary" textAlign="center">
+            <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
               {errorMessage}
             </Text>
           </Box>
           {isKeyMismatch ? (
-            <TouchableOpacity activeOpacity={0.8} onPress={handleRedeploy} disabled={isRedeploying}>
-              <Box
-                height={56}
-                backgroundColor="primary"
-                borderRadius={28}
-                justifyContent="center"
-                alignItems="center"
-              >
-                <Text variant="p6" color="black" fontWeight="700">
-                  {isRedeploying ? 'Re-initializing…' : 'Re-initialize Account'}
-                </Text>
-              </Box>
-            </TouchableOpacity>
+            <SetupButton
+              label={isRedeploying ? 'Re-initializing…' : 'Re-initialize Account'}
+              busy={isRedeploying}
+              onPress={handleRedeploy}
+            />
           ) : (
-            <TouchableOpacity activeOpacity={0.8} onPress={() => setStatus('initial')}>
-              <Box
-                height={56}
-                backgroundColor="primary"
-                borderRadius={28}
-                justifyContent="center"
-                alignItems="center"
-              >
-                <Text variant="p6" color="black" fontWeight="700">
-                  Try Again
-                </Text>
-              </Box>
-            </TouchableOpacity>
+            <SetupButton
+              label="Try Again"
+              onPress={() => {
+                setReviewVisible(false);
+                setStatus('initial');
+              }}
+            />
           )}
         </Box>
       );
@@ -489,71 +548,85 @@ const SendToken = () => {
     }
 
     if (!selectedWallet) {
-      return <RecipientStep onSelectWallet={setSelectedWallet} initialAddress={scannedAddress} />;
+      // Keyed on the scanned address so a scan returning here prefills the field.
+      return (
+        <RecipientStep
+          key={scannedAddress ?? 'manual'}
+          onSelectWallet={setSelectedWallet}
+          initialAddress={scannedAddress}
+        />
+      );
     }
 
     return (
       <AmountEntryStep
         selectedToken={selectedToken}
-        selectedWallet={selectedWallet}
         amount={amount}
-        fiatLabel={formatToken(amount, prices?.[selectedToken.code]?.price).text}
-        onKeyPress={handleKeyPress}
+        canUsePresets={parseFloat(price ?? '0') > 0}
+        onChangeAmount={setAmount}
         onMaxPress={handleMaxPress}
         onPresetPress={handlePresetUSD}
+        onChangeToken={handleChangeToken}
       />
     );
   };
-  // yes, wire pending-approval to the delegated signer
+
   return (
     <Box
       flex={1}
-      backgroundColor="cardbg"
-      style={{ borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' }}
+      backgroundColor="surfaceBase"
+      style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
     >
       <StatusBar style="light" />
 
-      <Box alignItems="center" pt="m">
-        <Box width={36} height={4} borderRadius={2} backgroundColor="gray800" />
-      </Box>
-
       <Box
-        height={56}
         flexDirection="row"
         alignItems="center"
         justifyContent="space-between"
-        paddingHorizontal="m"
+        style={styles.header}
       >
-        <TouchableOpacity onPress={handleBack}>
-          <Ionicons
-            name="chevron-back"
-            size={24}
-            color={isDark ? theme.colors.white : theme.colors.black}
-          />
-        </TouchableOpacity>
-
-        {status === 'initial' && (
-          <Text variant="h10" color="textPrimary" fontWeight="700">
-            {headerTitle()}
-          </Text>
-        )}
-
-        {showNextButton ? (
-          <TouchableOpacity onPress={handleSend} disabled={!isAmountValid()}>
-            <Text
-              variant="p7"
-              color={isAmountValid() ? 'primary700' : 'textSecondary'}
-              fontWeight="700"
-            >
-              Send
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <Box width={40} />
-        )}
+        <RoundBackButton onPress={handleBack} />
+        <Text
+          flex={1}
+          textAlign="center"
+          fontSize={18}
+          lineHeight={26}
+          fontFamily="SFproMedium"
+          color="textPrimary"
+          numberOfLines={1}
+        >
+          {headerTitle()}
+        </Text>
+        {renderHeaderAction()}
       </Box>
 
       {renderContent()}
+
+      {selectedToken && selectedWallet && (
+        <SendSummarySheet
+          visible={status === 'success' || (reviewVisible && status !== 'error')}
+          title={
+            status === 'success' ? `Sent to ${recipientName}` : `Send to ${recipientName}`
+          }
+          token={selectedToken}
+          amount={amount}
+          fiatLabel={price ? formatToken(amount, price).text : undefined}
+          rows={[
+            { label: 'Recipient', value: recipientRow },
+            { label: 'Network', value: networkLabel },
+            { label: 'Network Fee', value: feeLabel },
+            ...(status === 'success' && txHash
+              ? [{ label: 'Transaction', value: shortenAddress(txHash) }]
+              : []),
+          ]}
+          primaryLabel={status === 'success' ? 'Back to Home' : 'Send'}
+          onPrimary={status === 'success' ? () => router.dismissTo('/(tabs)') : handleSend}
+          onClose={status === 'success' ? undefined : () => setReviewVisible(false)}
+          secondaryLabel={status === 'success' && !alreadySaved ? 'Save to Address Book' : undefined}
+          onSecondary={() => setSaveAddressVisible(true)}
+          illustration={status === 'success' ? ICONS.success : undefined}
+        />
+      )}
 
       <TxAuthModal
         visible={showAuthModal}
@@ -576,5 +649,36 @@ const SendToken = () => {
     </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  header: {
+    height: 64,
+    marginTop: 4,
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmButton: {
+    backgroundColor: '#76B101',
+  },
+  disabled: {
+    opacity: 0.4,
+  },
+  resultIllustration: {
+    width: 243,
+    height: 243,
+  },
+  headerIcon: {
+    width: 20,
+    height: 20,
+  },
+});
 
 export default SendToken;

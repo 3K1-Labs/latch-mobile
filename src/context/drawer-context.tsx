@@ -14,7 +14,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import AppToast from '@/src/components/toast/AppToast';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const DRAWER_WIDTH = SCREEN_WIDTH * 0.9;
+const DRAWER_WIDTH = SCREEN_WIDTH * 0.805;
 const DURATION_OPEN = 250;
 const DURATION_CLOSE = 200;
 

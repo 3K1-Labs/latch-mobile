@@ -13,7 +13,7 @@ import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Input from '@/src/components/shared/Input';
 import Text from '@/src/components/shared/Text';
-import { useWalletStore } from '@/src/store/wallet';
+import { avatarKey, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 
@@ -31,7 +31,7 @@ const AccountInfoSheet = ({ visible, onClose }: Props) => {
   const { isDark } = useAppTheme();
   const { accounts, activeAccountIndex, renameAccount, setAccountImage, avatars } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
-  const activeAvatar = activeAccount ? (avatars[activeAccount.publicKeyHex] ?? null) : null;
+  const activeAvatar = activeAccount ? (avatars[avatarKey(activeAccount)] ?? null) : null;
 
   const [selectedImage, setSelectedImage] = useState<string | null>(activeAvatar);
 

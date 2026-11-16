@@ -1,32 +1,48 @@
 import * as eva from '@eva-design/eva';
 import { ThemeProvider as RestyleThemeProvider } from '@shopify/restyle';
 import { ApplicationProvider } from '@ui-kitten/components';
-import React, { createContext, useContext } from 'react';
-import { darkTheme } from './theme';
+import React, { createContext, useContext, useMemo } from 'react';
+import { useColorScheme } from 'react-native';
 
-type ColorMode = 'dark';
+import { useAppearanceStore, type AppearancePreference } from '@/src/store/appearance';
+import { darkTheme, lightTheme } from './theme';
+
+type ColorMode = 'light' | 'dark';
 
 interface ThemeContextValue {
+  /** The mode actually on screen, after resolving 'system'. */
   colorMode: ColorMode;
-  isDark: true;
-  setColorMode: (mode: ColorMode) => void;
-  toggleTheme: () => void;
+  isDark: boolean;
+  preference: AppearancePreference;
+  setPreference: (preference: AppearancePreference) => void;
 }
 
-const themeValue: ThemeContextValue = {
+const ThemeContext = createContext<ThemeContextValue>({
   colorMode: 'dark',
   isDark: true,
-  setColorMode: () => {},
-  toggleTheme: () => {},
-};
-
-const ThemeContext = createContext<ThemeContextValue>(themeValue);
+  preference: 'system',
+  setPreference: () => {},
+});
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
+  const preference = useAppearanceStore((s) => s.preference);
+  const setPreference = useAppearanceStore((s) => s.setPreference);
+  const system = useColorScheme();
+
+  // An unknown system scheme falls back to dark, the app's original look.
+  const colorMode: ColorMode =
+    preference === 'system' ? (system === 'light' ? 'light' : 'dark') : preference;
+  const isDark = colorMode === 'dark';
+
+  const value = useMemo(
+    () => ({ colorMode, isDark, preference, setPreference }),
+    [colorMode, isDark, preference, setPreference],
+  );
+
   return (
-    <ThemeContext.Provider value={themeValue}>
-      <ApplicationProvider {...eva} theme={eva.dark}>
-        <RestyleThemeProvider theme={darkTheme}>{children}</RestyleThemeProvider>
+    <ThemeContext.Provider value={value}>
+      <ApplicationProvider {...eva} theme={isDark ? eva.dark : eva.light}>
+        <RestyleThemeProvider theme={isDark ? darkTheme : lightTheme}>{children}</RestyleThemeProvider>
       </ApplicationProvider>
     </ThemeContext.Provider>
   );

@@ -1,83 +1,120 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import React from 'react';
-import { Image, ImageSourcePropType, TouchableOpacity } from 'react-native';
+import { ImageSourcePropType, StyleSheet, TouchableOpacity } from 'react-native';
 
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
+
+const CHEVRON = require('@/src/assets/images/settings/chevron.svg');
+const ICON_GREY = '#8E8E8E';
 
 interface SettingItemProps {
-  icon: keyof typeof Ionicons.glyphMap;
+  /** Figma glyph; falls back to `icon` for rows the design has no glyph for. */
+  svg?: ImageSourcePropType;
+  /** Some Figma glyphs are drawn smaller than the 16pt default. */
+  svgSize?: number;
+  icon?: keyof typeof Ionicons.glyphMap;
   label: string;
   value?: string;
   onPress?: () => void;
   showChevron?: boolean;
   rightElement?: React.ReactNode;
-  image?: ImageSourcePropType;
 }
 
 const SettingItem = ({
+  svg,
+  svgSize = 16,
   icon,
   label,
   value,
   onPress,
   showChevron = true,
   rightElement,
-  image,
-}: SettingItemProps) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
+}: SettingItemProps) => (
+  <TouchableOpacity accessibilityRole="button" onPress={onPress} activeOpacity={0.7}>
+    <Box flexDirection="row" alignItems="center" gap="sm">
+      <Box
+        width={32}
+        height={32}
+        borderRadius={16}
+        backgroundColor="inputOutline"
+        justifyContent="center"
+        alignItems="center"
+      >
+        {svg ? (
+          <Image source={svg} contentFit="contain" style={{ width: svgSize, height: svgSize }} />
+        ) : icon ? (
+          <Ionicons name={icon} size={16} color={ICON_GREY} />
+        ) : null}
+      </Box>
+      <Text
+        flex={1}
+        fontSize={16}
+        lineHeight={24}
+        numberOfLines={1}
+        color="textPrimary"
+      >
+        {label}
+      </Text>
+      {value && (
+        <Text fontSize={16} lineHeight={24} color="textSubheading" numberOfLines={1}>
+          {value}
+        </Text>
+      )}
+      {rightElement}
+      {showChevron && <Image source={CHEVRON} contentFit="contain" style={styles.chevron} />}
+    </Box>
+  </TouchableOpacity>
+);
+
+/** Current settings search text; groups hide rows whose label doesn't match. */
+export const SettingsSearchContext = React.createContext('');
+
+export const SettingsGroup = ({
+  title,
+  children,
+}: {
+  title?: string;
+  children: React.ReactNode;
+}) => {
+  const query = React.useContext(SettingsSearchContext).trim().toLowerCase();
+  const rows = React.Children.toArray(children).filter(
+    (child) =>
+      !query ||
+      (React.isValidElement<{ label?: string }>(child) &&
+        child.props.label?.toLowerCase().includes(query)),
+  );
+  if (rows.length === 0) return null;
 
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
-      <Box
-        flexDirection="row"
-        alignItems="center"
-        paddingVertical="m"
-        paddingHorizontal="m"
-        backgroundColor="bg11"
-        borderRadius={16}
-        mb="s"
-      >
-        <Box
-          width={36}
-          height={36}
-          borderRadius={10}
-          style={{ backgroundColor: isDark ? '#1E1E1E' : theme.colors.gray200 }}
-          justifyContent="center"
-          alignItems="center"
-          mr="m"
-        >
-          {image ? (
-            <Image
-              source={image}
-              style={{
-                width: 24,
-                height: 24,
-                tintColor: !isDark ? theme.colors.gray900 : theme.colors.white,
-              }}
-            />
-          ) : (
-            <Ionicons name={icon} size={20} color={theme.colors.textPrimary} />
-          )}
-        </Box>
-        <Text variant="p7" color="textPrimary" flex={1}>
-          {label}
+    <Box style={styles.group}>
+      {title && (
+        <Text fontSize={12} lineHeight={20} fontFamily="SFproMedium" color="textSubheading">
+          {title}
         </Text>
-        {value && (
-          <Text variant="p7" color="textSecondary" mr="s">
-            {value}
-          </Text>
-        )}
-        {rightElement}
-        {showChevron && (
-          <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-        )}
+      )}
+      <Box backgroundColor="inputBox" borderRadius={16} style={styles.card}>
+        {rows}
       </Box>
-    </TouchableOpacity>
+    </Box>
   );
 };
+
+const styles = StyleSheet.create({
+  chevron: {
+    width: 20,
+    height: 20,
+    transform: [{ rotate: '-90deg' }],
+  },
+  group: {
+    gap: 12,
+  },
+  card: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    gap: 16,
+  },
+});
 
 export default SettingItem;

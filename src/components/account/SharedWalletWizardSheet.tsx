@@ -8,6 +8,7 @@ import { deployMultiSigSmartAccount } from '@/src/api/smart-account';
 import { multisigMembershipHash } from '@/src/lib/multisig-address';
 import { announceMembership } from '@/src/lib/membership';
 import { ensureWalletCosignKey, publishWckBundle } from '@/src/lib/wallet-cosign-key';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import AddMemberButton from '@/src/components/add-members/AddMemberButton';
 import ChooseMethodSheet from '@/src/components/add-members/ChooseMethodSheet';
 import AddMembersContinueButton from '@/src/components/add-members/ContinueButton';
@@ -23,7 +24,6 @@ import ApprovalRuleCard from '@/src/components/shared-wallet-review/ApprovalRule
 import CreateWalletButton from '@/src/components/shared-wallet-review/CreateWalletButton';
 import MemberReviewList from '@/src/components/shared-wallet-review/MemberReviewList';
 import WalletNameCard from '@/src/components/shared-wallet-review/WalletNameCard';
-import BottomSheetHandle from '@/src/components/shared/BottomSheetHandle';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import {
@@ -40,7 +40,6 @@ import {
   type WalletAccount,
 } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { StrKey } from '@stellar/stellar-sdk';
@@ -52,7 +51,6 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
@@ -80,11 +78,41 @@ interface Props {
   onNeedsBackup?: () => void;
 }
 
+// Name and owners carry their title in the header; approvals and review put
+// a heading in the body instead, as in the design.
 const STEP_TITLES: Record<Step, string> = {
   name: 'Create Multisig Wallet',
-  members: 'Add Owners',
-  threshold: 'Require Approval',
-  review: 'Preview',
+  members: 'Add Wallet Owners',
+  threshold: '',
+  review: '',
+};
+
+const STEP_INTRO: Record<Step, { heading?: string; body: string }> = {
+  name: { body: 'Name your wallet so owners recognize it.' },
+  members: { body: 'Add people who can approve transactions' },
+  threshold: {
+    heading: 'How many approvals are required?',
+    body: 'Enter the exact number required.',
+  },
+  review: { heading: 'Review Multisig Wallet', body: 'Check everything before creating.' },
+};
+
+const StepIntro = ({ step }: { step: Step }) => {
+  const { heading, body } = STEP_INTRO[step];
+  return heading ? (
+    <Box alignItems="center" gap="s" style={styles.introCentered}>
+      <Text fontSize={20} lineHeight={28} fontFamily="SFproMedium" color="textPrimary" textAlign="center">
+        {heading}
+      </Text>
+      <Text fontSize={16} lineHeight={24} color="textSubheading" textAlign="center">
+        {body}
+      </Text>
+    </Box>
+  ) : (
+    <Text fontSize={16} lineHeight={24} color="textSubheading" style={styles.intro}>
+      {body}
+    </Text>
+  );
 };
 
 /** Map a raw member-account read error to a short, user-facing reason. */
@@ -106,7 +134,6 @@ function describeMemberReadError(message: string): string {
 const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => {
   const insets = useSafeAreaInsets();
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
 
   const [step, setStep] = useState<Step>('name');
   const [walletName, setWalletName] = useState('');
@@ -463,12 +490,12 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
               style={{ flex: 1 }}
               bottomOffset={16}
             >
-              <Box flex={1} px="m" justifyContent="flex-start" mt="xs">
-                {/* <CreateSharedTitleSection /> */}
-                <Box width="100%" mt="s">
+              <Box flex={1} style={styles.body}>
+                <StepIntro step="name" />
+                <Box width="100%">
                   <InputField
                     label="Wallet Name"
-                    placeholder="e.g., Treasury"
+                    placeholder="e.g., My wallet"
                     value={walletName}
                     onChangeText={(t) => setWalletName(t)}
                     onBlur={() => setWalletNameTouched(true)}
@@ -479,14 +506,6 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
                         : undefined
                     }
                     autoFocus
-                    style={{
-                      flex: 1,
-                      color: theme.colors.textPrimary,
-                      fontFamily: 'SFproRegular',
-                      fontSize: 16,
-                      letterSpacing: -0.32,
-                      padding: 0,
-                    }}
                   />
                   <InputField
                     label="Purpose"
@@ -498,7 +517,7 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
                 </Box>
               </Box>
             </KeyboardAwareScrollView>
-            <Box px="m" style={{ paddingTop: 12, paddingBottom: 12 }}>
+            <Box style={styles.footer}>
               <CreateSharedContinueButton
                 disabled={!walletName.trim()}
                 onPress={handleContinueName}
@@ -510,17 +529,15 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
       case 'members':
         return (
           <>
-            <Box flex={1} px="m">
-              {/* <AddMembersTitleSection /> */}
-              <AddMemberButton onPress={() => setMethodSheetVisible(true)} />
-              <SelfMemberCard />
-              {/* {members.length === 0 ? (
-                <EmptyState />
-              ) : ( */}
-              <MemberList members={members} onRemove={(id) => setPendingRemoveId(id)} />
-              {/* )} */}
-            </Box>
-            <Box px="m" style={{ paddingTop: 12, paddingBottom: 12 }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.body}>
+              <StepIntro step="members" />
+              <Box gap="m">
+                <AddMemberButton onPress={() => setMethodSheetVisible(true)} />
+                <SelfMemberCard />
+                <MemberList members={members} onRemove={(id) => setPendingRemoveId(id)} />
+              </Box>
+            </ScrollView>
+            <Box style={styles.footer}>
               <AddMembersContinueButton
                 disabled={members.length === 0}
                 onPress={handleContinueMembers}
@@ -532,25 +549,19 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
       case 'threshold':
         return (
           <>
-            <Box flex={1} px="m" mt="xs">
-              {/* <ApprovalTitleSection /> */}
+            <Box flex={1} style={styles.body}>
+              <StepIntro step="threshold" />
               <ApprovalSlider value={approvals} total={totalSigners} onChange={setApprovals} />
-              {/* <ApprovalSegmentedBar
-                value={approvals}
-                total={totalSigners}
-                onChange={setApprovals}
-              /> */}
-              {/* <ApprovalStepper value={approvals} total={totalSigners} onChange={setApprovals} /> */}
               {approvals === totalSigners && totalSigners > 2 && (
-                <Box mt="s" px="m">
-                  <Text variant="p7" color="textSecondary" textAlign="center">
+                <Box mt="m" px="m">
+                  <Text fontSize={14} lineHeight={20} color="textSubheading" textAlign="center">
                     Recommended: require fewer approvals than total members so one offline member
                     doesn&apos;t lock the wallet.
                   </Text>
                 </Box>
               )}
             </Box>
-            <Box px="m" style={{ paddingTop: 12, paddingBottom: 12 }}>
+            <Box style={styles.footer}>
               <ApprovalContinueButton onPress={handleContinueThreshold} />
             </Box>
           </>
@@ -564,20 +575,27 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              <Box flex={1} px="m">
-                {/* <ReviewTitleSection /> */}
+              <Box flex={1} style={styles.body}>
+                <StepIntro step="review" />
                 <WalletNameCard name={walletName} />
                 <MemberReviewList members={members} selfEmail={selfEmail} />
                 <ApprovalRuleCard approvals={approvals} total={totalSigners} />
                 {existingSameMembers && (
-                  <Box flexDirection="row" backgroundColor="bg11" borderRadius={14} p="m" mt="m">
+                  <Box
+                    flexDirection="row"
+                    backgroundColor="inputBox"
+                    borderColor="inputOutline"
+                    borderWidth={1}
+                    borderRadius={14}
+                    p="m"
+                  >
                     <Ionicons
                       name="information-circle-outline"
                       size={18}
-                      color={theme.colors.textSecondary}
+                      color={theme.colors.textSubheading}
                       style={{ marginRight: 8, marginTop: 1 }}
                     />
-                    <Text variant="p8" color="textSecondary" style={{ flex: 1 }} lineHeight={18}>
+                    <Text fontSize={12} lineHeight={18} color="textSubheading" style={{ flex: 1 }}>
                       You already have a shared wallet ({existingSameMembers.name}) with these
                       members and threshold. You can still create a separate one.
                     </Text>
@@ -585,7 +603,7 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
                 )}
               </Box>
             </ScrollView>
-            <Box px="m" style={{ paddingTop: 12, paddingBottom: 12 }}>
+            <Box style={styles.footer}>
               <CreateWalletButton onPress={handleCreate} loading={submitting} />
             </Box>
           </>
@@ -615,35 +633,22 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
               styles.sheet,
               {
                 height: SHEET_HEIGHT,
-                backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
                 paddingBottom: Math.max(insets.bottom, 16),
                 transform: [{ translateY }],
               },
             ]}
           >
-            <BottomSheetHandle />
+            <Box alignItems="center" style={styles.grabberWrap}>
+              <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
+            </Box>
 
-            <Box
-              flexDirection="row"
-              alignItems="center"
-              justifyContent="space-between"
-              paddingHorizontal="m"
-              py="m"
-            >
-              <TouchableOpacity
-                onPress={handleHeaderBack}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons
-                  name={step === 'name' ? 'close' : 'chevron-back'}
-                  size={24}
-                  color={theme.colors.textPrimary}
-                />
-              </TouchableOpacity>
-              <Text variant="h9" color="textPrimary" fontWeight="700">
-                {STEP_TITLES[step]}
-              </Text>
-              <Box width={24} />
+            <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+              <RoundBackButton onPress={handleHeaderBack} style={styles.back} />
+              {STEP_TITLES[step] ? (
+                <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+                  {STEP_TITLES[step]}
+                </Text>
+              ) : null}
             </Box>
 
             <View style={{ flex: 1 }}>{renderStep()}</View>
@@ -693,18 +698,39 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 20,
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+  },
+  grabberWrap: {
+    paddingTop: 10,
+  },
+  header: {
+    marginTop: 24,
+    height: 40,
+    paddingHorizontal: 24,
+  },
+  back: {
+    position: 'absolute',
+    left: 24,
+  },
+  body: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+  },
+  intro: {
+    marginBottom: 24,
+  },
+  introCentered: {
+    marginBottom: 24,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
 });
 

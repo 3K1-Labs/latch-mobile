@@ -1,74 +1,15 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import TokenIcon from '@/src/components/shared/TokenIcon';
-import { useTokenIcon } from '@/src/hooks/use-token-list';
-import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
+import TokenBalanceRow from '@/src/components/shared/TokenBalanceRow';
 import { usePrices } from '@/src/hooks/use-prices';
 import { Theme } from '@/src/theme/theme';
 import { useTheme } from '@shopify/restyle';
-import React from 'react';
-import { ScrollView, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, TextInput } from 'react-native';
 import { SendToken } from './types';
 
-interface TokenRowProps {
-  token: SendToken;
-  onPress: () => void;
-  theme: Theme;
-}
-
-function TokenRow({ token, onPress, theme }: TokenRowProps) {
-  const iconUrl = useTokenIcon(token.code, token.issuer);
-  const { data: prices } = usePrices();
-  const { formatToken } = useDisplayFiat();
-  const amount = parseFloat(token.amount);
-  const formatted = amount.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: token.code === 'XLM' ? 7 : 2,
-  });
-
-  return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
-      <Box
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor="bg11"
-        borderRadius={16}
-        padding="m"
-        mb="s"
-        height={82}
-      >
-        <Box
-          width={44}
-          height={44}
-          borderRadius={12}
-          backgroundColor="black"
-          justifyContent="center"
-          alignItems="center"
-          mr="m"
-          overflow="hidden"
-        >
-          <TokenIcon iconUrl={iconUrl} size={44} />
-        </Box>
-        <Box flex={1}>
-          <Text variant="h10" color="textPrimary" fontWeight="700" mb="xs">
-            {token.code}
-          </Text>
-          <Box flexDirection="row" alignItems="center">
-            <Text variant="captionSemibold" color="textSecondary" style={{ letterSpacing: 0.5 }}>
-              BALANCE{' '}
-            </Text>
-            <Text variant="captionBold" color="textPrimary" style={{ letterSpacing: 0.5 }}>
-              {formatted} {token.code}
-            </Text>
-          </Box>
-          <Text variant="p8" color="textSecondary" mt="xs">
-            {formatToken(token.amount, prices?.[token.code]?.price, { approx: false }).text}
-          </Text>
-        </Box>
-      </Box>
-    </TouchableOpacity>
-  );
-}
+const SEARCH = require('@/src/assets/images/swap/search.svg');
 
 interface Props {
   tokens: SendToken[];
@@ -77,32 +18,100 @@ interface Props {
 
 const TokenSelectionStep = ({ tokens, onSelectToken }: Props) => {
   const theme = useTheme<Theme>();
+  const { data: prices } = usePrices();
+  const [query, setQuery] = useState('');
 
-  if (tokens.length === 0) {
-    return (
-      <Box flex={1} justifyContent="center" alignItems="center" px="l">
-        <Text variant="p7" color="textSecondary" textAlign="center">
-          No tokens found. Fund your smart account first.
-        </Text>
-      </Box>
-    );
-  }
+  const filtered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    return q ? tokens.filter((t) => t.code.toUpperCase().includes(q)) : tokens;
+  }, [tokens, query]);
 
   return (
     <ScrollView
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40, paddingTop: 8 }}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.content}
     >
-      {tokens.map((token) => (
-        <TokenRow
-          key={token.sacContractId}
-          token={token}
-          onPress={() => onSelectToken(token)}
-          theme={theme}
+      <Box
+        flexDirection="row"
+        alignItems="center"
+        backgroundColor="inputBox"
+        borderRadius={40}
+        style={styles.search}
+      >
+        <Image source={SEARCH} contentFit="contain" style={styles.searchIcon} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search for Token..."
+          placeholderTextColor={theme.colors.textSubheading}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          style={styles.searchInput}
         />
-      ))}
+      </Box>
+
+      <Box flexDirection="row" justifyContent="space-between" style={styles.columns}>
+        <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textMuted">
+          Assets
+        </Text>
+        <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textMuted">
+          Wallet Balance
+        </Text>
+      </Box>
+
+      {filtered.length === 0 ? (
+        <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center" mt="xl">
+          {tokens.length === 0 ? 'No tokens found. Fund your wallet first.' : 'No matching tokens.'}
+        </Text>
+      ) : (
+        <Box style={styles.list}>
+          {filtered.map((token) => (
+            <TokenBalanceRow
+              key={token.sacContractId}
+              token={token}
+              price={prices?.[token.code]}
+              onPress={() => onSelectToken(token)}
+            />
+          ))}
+        </Box>
+      )}
     </ScrollView>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 18,
+    paddingBottom: 40,
+  },
+  search: {
+    height: 48,
+    paddingHorizontal: 21,
+    gap: 10,
+  },
+  searchIcon: {
+    width: 13,
+    height: 15,
+  },
+  searchInput: {
+    flex: 1,
+    height: '100%',
+    padding: 0,
+    fontSize: 14,
+    // Keeps the bundled SF Pro vertically centred in an iOS TextInput.
+    lineHeight: 18,
+    fontFamily: 'SFproRegular',
+    color: '#FFFFFF',
+  },
+  columns: {
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  list: {
+    gap: 10,
+  },
+});
 
 export default TokenSelectionStep;

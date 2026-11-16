@@ -23,10 +23,12 @@ import AppToast from '../src/components/toast/AppToast';
 import { hydrateActiveNetwork } from '../src/constants/config';
 import { useDeviceIntegrity } from '../src/hooks/use-device-integrity';
 import { useInactivityLock } from '../src/hooks/use-inactivity-lock';
+import { useThemedStatusBar } from '../src/hooks/use-themed-status-bar';
 // import { useNetworkStatus } from '../src/hooks/use-network-status';
 import { useOtaUpdate } from '../src/hooks/use-ota-update';
 import { useWalletConnect } from '../src/hooks/use-walletconnect';
 import { useWalletConnectDeepLink } from '../src/hooks/use-walletconnect-deeplink';
+import { hydrateAppearance } from '../src/store/appearance';
 import { hydrateDisplayCurrency } from '../src/store/display-currency';
 import { AppThemeProvider, useAppTheme } from '../src/theme/ThemeContext';
 
@@ -82,14 +84,15 @@ function RootLayoutContent() {
   useWalletConnectDeepLink();
   // useNetworkStatus();
   useDeviceIntegrity();
+  useThemedStatusBar();
   const recordActivity = useInactivityLock();
 
   return (
     <Box flex={1} onTouchStart={recordActivity}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="send-token" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="receive-token" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="send-token" />
+        <Stack.Screen name="receive-token" />
         <Stack.Screen name="address-book" options={{ presentation: 'modal' }} />
         <Stack.Screen name="network-settings" options={{ presentation: 'modal' }} />
         <Stack.Screen name="notification" options={{ presentation: 'modal' }} />
@@ -97,6 +100,13 @@ function RootLayoutContent() {
         <Stack.Screen name="about" options={{ presentation: 'modal' }} />
         <Stack.Screen name="qrcode-scan" options={{ headerShown: false }} />
         <Stack.Screen name="filter-sheet" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="account-info" />
+        {/* Drawn as a sheet over the list it was opened from (dim + slide are in the screen). */}
+        <Stack.Screen
+          name="transaction/[id]"
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
+        />
         <Stack.Screen name="add-device" options={{ presentation: 'modal' }} />
         {/*
           gestureEnabled: false on both — each renders a ScrollView (added to
@@ -134,7 +144,7 @@ export default Sentry.wrap(function RootLayout() {
   const [networkReady, setNetworkReady] = useState(false);
 
   useEffect(() => {
-    Promise.all([hydrateActiveNetwork(), hydrateDisplayCurrency()]).finally(() =>
+    Promise.all([hydrateActiveNetwork(), hydrateDisplayCurrency(), hydrateAppearance()]).finally(() =>
       setNetworkReady(true),
     );
   }, []);

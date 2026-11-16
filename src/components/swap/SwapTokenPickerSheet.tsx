@@ -1,74 +1,28 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import TokenIcon from '@/src/components/shared/TokenIcon';
-import { useTokenIcon } from '@/src/hooks/use-token-list';
+import TokenBalanceRow from '@/src/components/shared/TokenBalanceRow';
+import { usePrices } from '@/src/hooks/use-prices';
 import type { SwapToken } from '@/src/services/swap/types';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import React, { useEffect, useRef } from 'react';
+import { Image } from 'expo-image';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Modal,
   ScrollView,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-interface RowProps {
-  token: SwapToken;
-  disabled: boolean;
-  onPress: () => void;
-}
-
-function TokenRow({ token, disabled, onPress }: RowProps) {
-  const iconUrl = useTokenIcon(token.code, token.issuer);
-  const amount = parseFloat(token.amount);
-  const formatted = amount.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: token.code === 'XLM' ? 7 : 2,
-  });
-
-  return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress} disabled={disabled}>
-      <Box
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor="bg11"
-        borderRadius={16}
-        padding="m"
-        mb="s"
-        height={72}
-        opacity={disabled ? 0.4 : 1}
-      >
-        <Box
-          width={40}
-          height={40}
-          borderRadius={12}
-          backgroundColor="black"
-          justifyContent="center"
-          alignItems="center"
-          mr="m"
-          overflow="hidden"
-        >
-          <TokenIcon iconUrl={iconUrl} size={40} />
-        </Box>
-        <Box flex={1}>
-          <Text variant="h10" color="textPrimary" fontWeight="700">
-            {token.code}
-          </Text>
-          <Text variant="p8" color="textSecondary">
-            {formatted} {token.code}
-          </Text>
-        </Box>
-      </Box>
-    </TouchableOpacity>
-  );
-}
+const ICONS = {
+  close: require('@/src/assets/images/swap/close.svg'),
+  search: require('@/src/assets/images/swap/search.svg'),
+};
 
 interface Props {
   visible: boolean;
@@ -82,9 +36,10 @@ interface Props {
 
 const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, onSelect }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { data: prices } = usePrices();
   const translateY = useRef(new Animated.Value(600)).current;
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -98,10 +53,24 @@ const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, o
     }
   }, [visible, translateY]);
 
+  const close = () => {
+    setQuery('');
+    onClose();
+  };
+  const select = (token: SwapToken) => {
+    setQuery('');
+    onSelect(token);
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    return q ? tokens.filter((t) => t.code.toUpperCase().includes(q)) : tokens;
+  }, [tokens, query]);
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <View style={styles.root}>
-        <TouchableWithoutFeedback onPress={onClose}>
+        <TouchableWithoutFeedback onPress={close}>
           <View style={styles.backdrop} />
         </TouchableWithoutFeedback>
 
@@ -109,52 +78,81 @@ const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, o
           style={[
             styles.sheet,
             {
-              backgroundColor: isDark ? theme.colors.gray900 : theme.colors.white,
+              backgroundColor: theme.colors.surfaceBase,
               paddingBottom: insets.bottom + 16,
               transform: [{ translateY }],
             },
           ]}
         >
-          <Box alignItems="center" pt="m" pb="s">
-            <Box width={36} height={4} borderRadius={2} backgroundColor="gray800" />
+          <Box alignItems="center" style={styles.grabberWrap}>
+            <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
+          </Box>
+
+          <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+            <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+              {title}
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={close}
+              hitSlop={8}
+              style={styles.close}
+            >
+              <Image source={ICONS.close} contentFit="contain" style={styles.closeIcon} />
+            </TouchableOpacity>
           </Box>
 
           <Box
             flexDirection="row"
             alignItems="center"
-            justifyContent="space-between"
-            paddingHorizontal="m"
-            mb="m"
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            borderRadius={40}
+            style={styles.search}
           >
-            <Text variant="h10" color="textPrimary" fontWeight="700">
-              {title}
-            </Text>
-            <TouchableOpacity
-              onPress={onClose}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="close" size={22} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
+            <Image source={ICONS.search} contentFit="contain" style={styles.searchIcon} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search for Token..."
+              placeholderTextColor={theme.colors.textSubheading}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              style={styles.searchInput}
+            />
           </Box>
 
-          {tokens.length === 0 ? (
+          <Box flexDirection="row" justifyContent="space-between" style={styles.columns}>
+            <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textMuted">
+              Assets
+            </Text>
+            <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textMuted">
+              Wallet Balance
+            </Text>
+          </Box>
+
+          {filtered.length === 0 ? (
             <Box justifyContent="center" alignItems="center" py="xl" px="l">
-              <Text variant="p7" color="textSecondary" textAlign="center">
-                No tokens found. Fund your wallet first.
+              <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
+                {tokens.length === 0 ? 'No tokens found. Fund your wallet first.' : 'No matching tokens.'}
               </Text>
             </Box>
           ) : (
             <ScrollView
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.list}
               style={styles.scroll}
             >
-              {tokens.map((token) => (
-                <TokenRow
+              {filtered.map((token) => (
+                <TokenBalanceRow
                   key={token.sacContractId}
                   token={token}
+                  price={prices?.[token.code]}
                   disabled={token.sacContractId === excludeSacId}
-                  onPress={() => onSelect(token)}
+                  onPress={() => select(token)}
                 />
               ))}
             </ScrollView>
@@ -172,19 +170,67 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
     maxHeight: '80%',
+  },
+  grabberWrap: {
+    paddingTop: 10,
+  },
+  header: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    height: 40,
+  },
+  close: {
+    position: 'absolute',
+    right: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeIcon: {
+    width: 20,
+    height: 20,
+  },
+  search: {
+    marginTop: 37,
+    marginHorizontal: 24,
+    height: 48,
+    paddingHorizontal: 21,
+    gap: 10,
+  },
+  searchIcon: {
+    width: 13,
+    height: 15,
+  },
+  searchInput: {
+    flex: 1,
+    height: '100%',
+    padding: 0,
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: 'SFproRegular',
+    color: '#FFFFFF',
+  },
+  columns: {
+    marginTop: 24,
+    marginBottom: 12,
+    paddingHorizontal: 24,
   },
   scroll: {
     flexGrow: 0,
   },
   list: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingBottom: 16,
+    gap: 10,
   },
 });
 

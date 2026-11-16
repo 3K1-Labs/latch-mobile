@@ -1,10 +1,11 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
-import { TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
+import { StyleSheet, TouchableOpacity } from 'react-native';
 
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
+
+const PLUS = require('@/src/assets/images/address-book/plus.svg');
 
 interface AccountSheetHeaderProps {
   onClose: () => void;
@@ -12,31 +13,43 @@ interface AccountSheetHeaderProps {
   label?: string;
 }
 
-const AccountSheetHeader = ({ onClose, onAdd, label }: AccountSheetHeaderProps) => {
-  const theme = useTheme<Theme>();
-
-  return (
-    <Box
-      flexDirection="row"
-      justifyContent="space-between"
-      alignItems="center"
-      paddingHorizontal="m"
-      py="m"
-      mb="s"
+const AccountSheetHeader = ({ onClose, onAdd, label }: AccountSheetHeaderProps) => (
+  <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.header}>
+    <RoundBackButton onPress={onClose} />
+    <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+      {label ? `${label} Accounts` : 'Accounts'}
+    </Text>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="Add account"
+      activeOpacity={0.7}
+      hitSlop={8}
+      onPress={onAdd}
+      style={styles.add}
     >
-      <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-      </TouchableOpacity>
+      <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
+    </TouchableOpacity>
+  </Box>
+);
 
-      <Text variant="h9" color="textPrimary" fontWeight="700">
-        {label} Accounts
-      </Text>
-
-      <TouchableOpacity onPress={onAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Ionicons name="add" size={24} color={theme.colors.textPrimary} />
-      </TouchableOpacity>
-    </Box>
-  );
-};
+const styles = StyleSheet.create({
+  header: {
+    marginTop: 23,
+    marginBottom: 36,
+    paddingHorizontal: 24,
+  },
+  add: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: {
+    width: 20,
+    height: 20,
+  },
+});
 
 export default AccountSheetHeader;

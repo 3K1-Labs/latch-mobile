@@ -1,4 +1,5 @@
 import HistoryItem from '@/src/components/history/HistoryItem';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import PendingCosignList from '@/src/components/history/PendingCosignList';
 import SearchHeader from '@/src/components/history/SearchHeader';
 import Box from '@/src/components/shared/Box';
@@ -10,8 +11,8 @@ import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
 import { groupByDate } from '@/src/utils/group-by-date';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
@@ -26,6 +27,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const height = Dimensions.get('window').height;
+const EMPTY_MASCOT = require('@/src/assets/images/home/empty-mascot.svg');
+const RowGap = () => <Box height={4} />;
 
 const History = () => {
   const theme = useTheme<Theme>();
@@ -117,35 +120,27 @@ const History = () => {
         item={item}
         smartAccountAddress={smartAccountAddress}
         handleRowPress={handleRowPress}
+        showDirection
       />
     );
   };
 
   const renderSectionHeader = ({ section: { title } }: { section: { title: string } }) => (
-    <Box paddingHorizontal="m" mt="l" mb="m" backgroundColor="mainBackground">
-      <Text variant="p7" color="textSecondary">
-        {title}
+    <Box style={styles.section}>
+      <Text fontSize={12} lineHeight={20} fontFamily="SFproMedium" color="textSubheading">
+        {title.toUpperCase()}
       </Text>
     </Box>
   );
 
   return (
-    <Box flex={1} backgroundColor="onboardingbg" style={{ paddingTop: insets.top }}>
-<StatusBar style={isDark ? 'light' : 'dark'} />
+    <Box flex={1} backgroundColor="surfaceBase" style={{ paddingTop: insets.top }}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* Header */}
-      <Box
-        height={56}
-        flexDirection="row"
-        alignItems="center"
-        justifyContent="center"
-        paddingHorizontal="m"
-      >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text variant="h10" color="textPrimary" fontFamily="SFproSemibold">
-          History
+      <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+        <RoundBackButton onPress={() => router.back()} style={styles.backButton} />
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+          Transaction History
         </Text>
       </Box>
 
@@ -163,18 +158,17 @@ const History = () => {
           flexDirection="row"
           alignItems="center"
           justifyContent="space-between"
-          paddingHorizontal="m"
-          paddingVertical="s"
-          backgroundColor={isDark ? 'gray900' : 'gray100'}
-          mx="m"
-          borderRadius={12}
-          mb="s"
+          backgroundColor="inputBox"
+          borderColor="inputOutline"
+          borderWidth={1}
+          borderRadius={16}
+          style={styles.errorBanner}
         >
-          <Text variant="p7" color="textSecondary">
+          <Text fontSize={14} lineHeight={22} color="textMuted">
             Could not load transactions.
           </Text>
-          <TouchableOpacity onPress={refetch as any}>
-            <Text variant="p7" color="primary700">
+          <TouchableOpacity onPress={() => refetch()} hitSlop={8}>
+            <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" style={styles.retry}>
               Retry
             </Text>
           </TouchableOpacity>
@@ -199,7 +193,7 @@ const History = () => {
           />
         </Box>
       ) : (
-        <Box paddingHorizontal="m">
+        <Box flex={1} paddingHorizontal="l">
           <SectionList
             {...tabBarScroll}
             sections={sections}
@@ -207,34 +201,31 @@ const History = () => {
             renderItem={renderItem}
             ListEmptyComponent={
               <Box
-                flex={1}
                 height={height / 2}
                 justifyContent="center"
                 alignItems="center"
                 paddingHorizontal="xl"
+                gap="xs"
               >
-                <Box
-                  width={64}
-                  height={64}
-                  borderRadius={32}
-                  backgroundColor={isDark ? 'gray900' : 'gray100'}
-                  justifyContent="center"
-                  alignItems="center"
-                  mb="m"
+                <Image source={EMPTY_MASCOT} contentFit="contain" style={styles.emptyMascot} />
+                <Text
+                  fontSize={18}
+                  lineHeight={26}
+                  fontFamily="SFproMedium"
+                  color="textPrimary"
+                  textAlign="center"
                 >
-                  <Ionicons name="receipt-outline" size={28} color={theme.colors.textSecondary} />
-                </Box>
-                <Text variant="h10" color="textPrimary" fontWeight="700" textAlign="center" mb="xs">
-                  No transactions yet
+                  {search || activeFilter !== 'All' ? 'No Matching Activity' : 'No Activity Yet'}
                 </Text>
-                <Text variant="p7" color="textSecondary" textAlign="center">
-                  {search
-                    ? 'No results match your search.'
-                    : 'Your transaction history will appear here.'}
+                <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
+                  {search || activeFilter !== 'All'
+                    ? 'Try a different search or filter.'
+                    : 'Fund your wallet & get started!'}
                 </Text>
               </Box>
             }
             renderSectionHeader={renderSectionHeader}
+            ItemSeparatorComponent={RowGap}
             stickySectionHeadersEnabled={false}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: insets.bottom + 280 }}
@@ -269,9 +260,31 @@ const History = () => {
 };
 
 const styles = StyleSheet.create({
+  header: {
+    height: 64,
+    marginTop: 4,
+  },
   backButton: {
     position: 'absolute',
-    left: 16,
+    left: 24,
+  },
+  section: {
+    marginTop: 40,
+    marginBottom: 16,
+  },
+  errorBanner: {
+    marginHorizontal: 24,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  retry: {
+    color: '#FFC508',
+  },
+  emptyMascot: {
+    width: 120,
+    height: 120,
+    marginBottom: 12,
   },
 });
 

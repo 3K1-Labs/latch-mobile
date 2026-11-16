@@ -64,7 +64,7 @@ const AddressBook = () => {
 
       {screenState === 'LIST' ? (
         addresses.length === 0 ? (
-          <EmptyAddressBook onAdd={() => setScreenState('FORM')} />
+          <EmptyAddressBook />
         ) : (
           <Box flex={1}>
             <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 20 }}>

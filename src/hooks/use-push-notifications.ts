@@ -13,12 +13,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { AppState, InteractionManager } from 'react-native';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 import { NOTIFICATIONS_QUERY_KEY } from '@/src/hooks/use-notifications';
-import { discoverSharedWallets, retryPendingAnnouncements } from '@/src/lib/membership';
 import { registerDevicePushToken, registerPushToken } from '@/src/lib/push-registration';
 import { useWalletStore } from '@/src/store/wallet';
 
@@ -52,56 +51,9 @@ export function usePushNotifications(): void {
     .map((a) => a.smartAccountAddress)
     .join(',');
 
-  // Discover shared wallets this device was added to (on a second signer's
-  // device). Runs on mount AND when the app returns to the foreground — the
-  // announcing device may have created the wallet while this app was
-  // backgrounded, and a `[]`-dep effect alone never re-runs on resume. Newly
-  // added wallets change `multisigKey`, so the effect below registers their push
-  // queues. Non-fatal.
-  //
-  // Throttled: each sweep fires up to 3 latch-api calls (auth challenge +
-  // sign-in + listMemberships). A biometric/auth prompt briefly backgrounds the
-  // app, so without a throttle the `active` re-fire collides with an in-flight
-  // multisig send (createCosignRequest) and trips the rate limiter. Skipping
-  // re-runs within the window keeps the burst off the send path; genuine
-  // returns-from-background after the window still pick up new wallets.
-  const lastSweepRef = useRef(0);
-  useEffect(() => {
-    const SWEEP_THROTTLE_MS = 30_000;
-    const run = () => {
-      const now = Date.now();
-      if (now - lastSweepRef.current < SWEEP_THROTTLE_MS) return;
-      lastSweepRef.current = now;
-      // Re-fire any announce a transient failure (e.g. 429) dropped, then poll
-      // for wallets this device was added to. Both are non-fatal.
-      // allowSignIn: false — this sweep runs on mount and on app-foreground, so
-      // it must never sign in. Sign-in reads the device passkey, and a
-      // biometric-gated key raises Face ID on read: an unexplained prompt the
-      // user didn't ask for, which also backgrounds the app and re-fires the
-      // `active` handler below. Both calls defer instead when there's no cached
-      // session; the throttle alone only bounded that, it didn't prevent it.
-      retryPendingAnnouncements({ allowSignIn: false }).catch((err) => {
-        if (__DEV__) console.log('[membership] re-announce sweep failed:', err?.message);
-      });
-      discoverSharedWallets({ allowSignIn: false }).catch((err) => {
-        if (__DEV__) console.log('[membership] discovery failed:', err?.message);
-      });
-    };
-    // Defer the initial sweep until after the dashboard's first paint and any
-    // in-flight touch/gesture settle. discoverSharedWallets() ends in a
-    // synchronous pure-JS P-256 signature (signWithPasskey) for passkey
-    // accounts signing in for the first time — running it on the mount tick
-    // froze the JS thread right as the user landed on the dashboard.
-    const interaction = InteractionManager.runAfterInteractions(run);
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') run();
-    });
-    return () => {
-      interaction.cancel();
-      sub.remove();
-    };
-  }, []);
-
+  // Shared-wallet discovery used to live here; it moved to
+  // useSharedWalletDiscovery so it survives push being disabled. Wallets it adds
+  // change `multisigKey`, so the effect below still registers their push queues.
   useEffect(() => {
     registerPushToken().catch((err) => {
       if (__DEV__) console.log('[push-registration] failed:', err?.message);

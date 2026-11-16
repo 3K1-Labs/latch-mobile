@@ -9,17 +9,9 @@ interface AccountSectionHeaderProps {
 }
 
 const AccountSectionHeader = ({ label, count }: AccountSectionHeaderProps) => (
-  <Box flexDirection="row" alignItems="center" gap="xs" mt="s" mb="s">
-    <Text
-      variant="p8"
-      color="textTertiary"
-      fontWeight="600"
-      style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}
-    >
-      {label}
-    </Text>
-    <Text variant="p8" color="textTertiary">
-      · {count}
+  <Box flexDirection="row" alignItems="center" gap="xs" mb="sm">
+    <Text fontSize={14} lineHeight={22} letterSpacing={0.14} color="textSubheading">
+      {label} · {count}
     </Text>
   </Box>
 );

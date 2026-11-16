@@ -1,21 +1,21 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { Image, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import SheetHeader from '@/src/components/profile/SheetHeader';
+import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import BottomSheet from '@/src/components/shared/BottomSheet';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { SessionKey, usePermissions } from '@/src/store/permissions';
 import { useWalletStore } from '@/src/store/wallet';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 import PermissionsInfoModal from './PermissionsInfoModal';
 import SessionKeyForm from './SessionKeyForm';
 import StepIndicator from './StepIndicator';
 import SwipeablePermissionItem from './SwipeablePermissionItem';
+
+const PLUS = require('@/src/assets/images/address-book/plus.svg');
+const EMPTY = require('@/src/assets/images/empty.png');
 
 interface Props {
   visible: boolean;
@@ -23,9 +23,6 @@ interface Props {
 }
 
 const PermissionsSheet = ({ visible, onClose }: Props) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
-
   const { accounts, activeAccountIndex } = useWalletStore();
   const accountAddress = accounts[activeAccountIndex]?.smartAccountAddress ?? '';
   const { byAccount, rehydrate, addSessionKey, revokeSessionKey } = usePermissions();
@@ -71,6 +68,26 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
           : 'Review & Confirm'
       : 'Permissions';
 
+  const headerRight = isCreating ? (
+    <StepIndicator currentStep={formStep} totalSteps={3} />
+  ) : revokeTarget ? (
+    <Box width={40} />
+  ) : (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="Create session key"
+      activeOpacity={0.7}
+      hitSlop={8}
+      onPress={() => {
+        setFormStep(1);
+        setIsCreating(true);
+      }}
+      style={styles.addButton}
+    >
+      <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
+    </TouchableOpacity>
+  );
+
   return (
     <BottomSheet
       visible={visible}
@@ -78,88 +95,69 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
       snapPoints={['92%']}
       keyboardBehavior="extend"
       android_keyboardInputMode="adjustResize"
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
+      backgroundStyle={styles.sheet}
+      handleIndicatorStyle={styles.grabber}
       header={
         isCreating && formStep === 4 ? undefined : (
-          <SheetHeader
-            title={headerTitle}
-            onBack={handleBack}
-            right={
-              isCreating ? (
-                <StepIndicator currentStep={formStep} totalSteps={3} />
-              ) : revokeTarget ? (
-                <Box width={24} />
-              ) : (
-                <TouchableOpacity
-                  onPress={() => {
-                    setFormStep(1);
-                    setIsCreating(true);
-                  }}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="add" size={24} color={theme.colors.textPrimary} />
-                </TouchableOpacity>
-              )
-            }
-          />
+          <Box
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="space-between"
+            style={styles.header}
+          >
+            <RoundBackButton onPress={handleBack} />
+            <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+              {headerTitle}
+            </Text>
+            {headerRight}
+          </Box>
         )
       }
-      contentContainerStyle={{ flex: 1 }}
+      contentContainerStyle={styles.fill}
     >
       {revokeTarget ? (
-        <Box flex={1} alignItems="center" justifyContent="center" paddingHorizontal="l">
-          <Text variant="h7" color="textPrimary" fontWeight="700" mb="xs" textAlign="center">
+        <Box flex={1} alignItems="center" justifyContent="center" style={styles.gutter}>
+          <Text
+            fontSize={20}
+            lineHeight={28}
+            fontFamily="SFproSemibold"
+            color="textPrimary"
+            textAlign="center"
+            mb="s"
+          >
             Revoke Session Key
           </Text>
-          <Text variant="p5" color="textSecondary" textAlign="center" lineHeight={24} mb="xl">
+          <Text fontSize={16} lineHeight={24} color="textSubheading" textAlign="center" mb="xl">
             Revoking{' '}
-            <Text variant="p5" color="textPrimary" fontWeight="700">
+            <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
               {revokeTarget.name}
             </Text>{' '}
             immediately removes its access. This can&apos;t be undone.
           </Text>
 
-          <Box flexDirection="row" width="100%" justifyContent="space-between">
+          <Box flexDirection="row" gap="sm" width="100%">
             <TouchableOpacity
-              onPress={() => setRevokeTarget(null)}
+              accessibilityRole="button"
               activeOpacity={0.7}
-              style={{ flex: 1, marginRight: 8 }}
+              onPress={() => setRevokeTarget(null)}
+              style={[styles.pill, styles.cancelPill]}
             >
-              <Box
-                height={56}
-                borderRadius={28}
-                borderWidth={1}
-                borderColor="gray800"
-                justifyContent="center"
-                alignItems="center"
-              >
-                <Text variant="h11" color="textPrimary" fontWeight="700">
-                  Cancel
-                </Text>
-              </Box>
+              <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
+                Cancel
+              </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
+              accessibilityRole="button"
+              activeOpacity={0.7}
               onPress={() => {
                 revokeSessionKey(accountAddress, revokeTarget.id);
                 setRevokeTarget(null);
               }}
-              activeOpacity={0.7}
-              style={{ flex: 1, marginLeft: 8 }}
+              style={[styles.pill, styles.revokePill]}
             >
-              <Box
-                height={56}
-                borderRadius={28}
-                justifyContent="center"
-                alignItems="center"
-                style={{ backgroundColor: '#E23A10' }}
-              >
-                <Text variant="h11" color="black" fontWeight="700">
-                  Revoke
-                </Text>
-              </Box>
+              <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="white">
+                Revoke
+              </Text>
             </TouchableOpacity>
           </Box>
         </Box>
@@ -180,52 +178,47 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
           }}
         />
       ) : sessionKeys.length > 0 ? (
-        /* Active State */
-        <KeyboardAwareScrollView
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
-          bottomOffset={16}
-        >
-          {/* Info Card */}
-          <Box backgroundColor="bg11" borderRadius={16} padding="m" mb="m">
-            <Text variant="h10" color="textPrimary" fontWeight="700" mb="s">
-              Session Keys & dApps
+        <KeyboardAwareScrollView contentContainerStyle={styles.list} bottomOffset={16}>
+          <Box
+            backgroundColor="inputBox"
+            borderColor="inputOutline"
+            borderWidth={1}
+            gap="xs"
+            style={styles.infoCard}
+          >
+            <Text fontSize={16} lineHeight={24} letterSpacing={0.32} color="textPrimary">
+              Session Keys &amp; dApps
             </Text>
-            <Text variant="p6" color="textSecondary" mb="m" lineHeight={22}>
+            <Text fontSize={14} lineHeight={22} color="textMuted">
               Active sessions with temporary permissions. Swipe a session left to revoke it —
               revoking immediately removes its access.
             </Text>
-            <TouchableOpacity onPress={() => setShowInfo(true)}>
-              <Text variant="p6" color="primary" fontWeight="700">
+            <TouchableOpacity accessibilityRole="link" hitSlop={8} onPress={() => setShowInfo(true)}>
+              <Text fontSize={12} lineHeight={20} color="accentGreen">
                 Learn how permissions work
               </Text>
             </TouchableOpacity>
           </Box>
 
           {sessionKeys.map((p) => (
-            <SwipeablePermissionItem
-              key={p.id}
-              permission={p}
-              onRevoke={() => setRevokeTarget(p)}
-            />
+            <SwipeablePermissionItem key={p.id} permission={p} onRevoke={() => setRevokeTarget(p)} />
           ))}
         </KeyboardAwareScrollView>
       ) : (
-        /* Content (Empty State) */
-        <Box flex={1} alignItems="center" justifyContent="center" paddingHorizontal="xl">
-          <Box mb="xl">
-            <Image
-              source={require('@/src/assets/images/empty.png')}
-              style={{ width: 220, height: 220 }}
-              resizeMode="contain"
-            />
-          </Box>
-
-          <Text variant="h7" color="textPrimary" textAlign={'center'} fontWeight="700" mb="xs">
+        <Box flex={1} alignItems="center" justifyContent="center" style={styles.gutter}>
+          <Image source={EMPTY} contentFit="contain" style={styles.emptyArt} />
+          <Text
+            fontSize={20}
+            lineHeight={28}
+            fontFamily="SFproSemibold"
+            color="textPrimary"
+            textAlign="center"
+            mb="xs"
+          >
             No Permissions Yet!
           </Text>
-
-          <Text variant="p5" color="textSecondary" textAlign="center" lineHeight={24}>
-            Tap the &quot;Add Icon&quot; to get started
+          <Text fontSize={16} lineHeight={24} color="textSubheading" textAlign="center">
+            Tap the &quot;Add Icon&quot; to get started.
           </Text>
         </Box>
       )}
@@ -233,5 +226,73 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
     </BottomSheet>
   );
 };
+
+const styles = StyleSheet.create({
+  sheet: {
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+  },
+  grabber: {
+    width: 126,
+    height: 8,
+    borderRadius: 69,
+    backgroundColor: '#1A1A1A',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  fill: {
+    flex: 1,
+  },
+  gutter: {
+    paddingHorizontal: 24,
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: {
+    width: 20,
+    height: 20,
+  },
+  list: {
+    paddingHorizontal: 24,
+    paddingTop: 26,
+    paddingBottom: 100,
+  },
+  infoCard: {
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    marginBottom: 16,
+  },
+  emptyArt: {
+    width: 220,
+    height: 220,
+    marginBottom: 32,
+  },
+  pill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelPill: {
+    backgroundColor: '#0F0F0F',
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+  },
+  revokePill: {
+    backgroundColor: '#E23A10',
+  },
+});
 
 export default PermissionsSheet;

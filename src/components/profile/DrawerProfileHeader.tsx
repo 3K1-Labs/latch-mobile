@@ -1,11 +1,15 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
 import { shortenAddress } from '@/src/utils';
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import React from 'react';
-import { Image, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
+
+const ICONS = {
+  chevron: require('@/src/assets/images/settings/card-chevron.svg'),
+  copy: require('@/src/assets/images/settings/copy.svg'),
+  fallbackAvatar: require('@/src/assets/token/user.png'),
+};
 
 interface DrawerProfileHeaderProps {
   name: string;
@@ -21,56 +25,82 @@ const DrawerProfileHeader = ({
   image,
   onCopyAddress,
   onPress,
-}: DrawerProfileHeaderProps) => {
-  const theme = useTheme<Theme>();
-
-  return (
-    <Box px="m" mb="xl">
-      <TouchableOpacity activeOpacity={0.85} onPress={onPress}>
-        <Box
-          backgroundColor="bg11"
-          borderRadius={24}
-          paddingHorizontal="m"
-          paddingVertical="m"
-          flexDirection="row"
-          alignItems="center"
-          height={96}
-        >
-          {/* Avatar Container */}
-          <Box width={56} height={56} borderRadius={16} overflow="hidden" backgroundColor="bg900">
-            <Image
-              source={image ? { uri: image } : require('@/src/assets/token/user.png')}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-            />
-          </Box>
-
-          {/* User Info */}
-          <Box flex={1} ml="m" justifyContent="center">
-            <Text variant="h9" color="textPrimary" fontWeight="700">
-              {name}
-            </Text>
-            <Box flexDirection="row" alignItems="center" mt="xs">
-              <Text variant="h11" color="textSecondary" mr="xs">
-                {shortenAddress(address)}
-              </Text>
-              <TouchableOpacity
-                onPress={onCopyAddress}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                <Ionicons name="copy-outline" size={14} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </Box>
-          </Box>
-
-          {/* Dropdown Arrow */}
-          <Box ml="s">
-            <Ionicons name="chevron-down" size={18} color={theme.colors.textSecondary} />
-          </Box>
+}: DrawerProfileHeaderProps) => (
+  <TouchableOpacity
+    accessibilityRole="button"
+    accessibilityLabel="Switch account"
+    activeOpacity={0.85}
+    onPress={onPress}
+  >
+    <Box
+      flexDirection="row"
+      alignItems="center"
+      gap="sm"
+      backgroundColor="inputBox"
+      borderColor="inputOutline"
+      borderWidth={1}
+      borderRadius={20}
+      style={styles.card}
+    >
+      <Image
+        source={image ? { uri: image } : ICONS.fallbackAvatar}
+        contentFit="cover"
+        style={styles.avatar}
+      />
+      <Box flex={1} style={styles.info}>
+        <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary" numberOfLines={1}>
+          {name}
+        </Text>
+        <Box flexDirection="row" alignItems="center" gap="s">
+          <Text fontSize={14} lineHeight={22} color="textSubheading">
+            {shortenAddress(address)}
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Copy address"
+            onPress={onCopyAddress}
+            hitSlop={10}
+            style={styles.copyChip}
+          >
+            <Image source={ICONS.copy} contentFit="contain" style={styles.copyIcon} />
+          </TouchableOpacity>
         </Box>
-      </TouchableOpacity>
+      </Box>
+      <Image source={ICONS.chevron} contentFit="contain" style={styles.chevron} />
     </Box>
-  );
-};
+  </TouchableOpacity>
+);
+
+const styles = StyleSheet.create({
+  card: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  info: {
+    gap: 4,
+  },
+  copyChip: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(241,246,225,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  copyIcon: {
+    width: 13.5,
+    height: 13.5,
+  },
+  chevron: {
+    width: 20,
+    height: 20,
+    transform: [{ rotate: '-90deg' }],
+  },
+});
 
 export default DrawerProfileHeader;

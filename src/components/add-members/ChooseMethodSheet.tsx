@@ -1,9 +1,5 @@
+import PopupHeader from '@/src/components/multisig/PopupHeader';
 import Box from '@/src/components/shared/Box';
-import Text from '@/src/components/shared/Text';
-import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -11,7 +7,6 @@ import {
   Keyboard,
   Modal,
   StyleSheet,
-  TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
@@ -32,8 +27,6 @@ interface Props {
 }
 
 const ChooseMethodSheet: React.FC<Props> = ({ visible, onClose, onScanQR, onMemberAdded }) => {
-  const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const [view, setView] = useState<SheetView>('method');
@@ -88,42 +81,16 @@ const ChooseMethodSheet: React.FC<Props> = ({ visible, onClose, onScanQR, onMemb
           style={[
             styles.sheet,
             {
-              backgroundColor: theme.colors.cardbg,
-              paddingBottom: Math.max(insets.bottom, 16),
+              paddingBottom: Math.max(insets.bottom, 24),
               transform: [{ translateY }],
             },
           ]}
         >
           {view === 'method' && (
             <>
-              <Box
-                flexDirection="row"
-                alignItems="center"
-                justifyContent="space-between"
-                paddingHorizontal="m"
-                pt="l"
-                pb="m"
-              >
-                <Text variant="h8" color="textPrimary" fontWeight="700">
-                  Choose Method
-                </Text>
-                <TouchableOpacity
-                  onPress={handleClose}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: isDark ? '#2A2A2A' : theme.colors.btnDisabled,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="close" size={18} color={theme.colors.textPrimary} />
-                </TouchableOpacity>
-              </Box>
+              <PopupHeader title="Add Owner" onClose={handleClose} />
 
-              <Box paddingHorizontal="m">
+              <Box gap="sm" style={styles.methods}>
                 <MethodOptionCard
                   icon="enter-outline"
                   title="Paste Address"
@@ -186,17 +153,17 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 20,
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    paddingHorizontal: 24,
+  },
+  methods: {
+    marginTop: 32,
   },
 });
 

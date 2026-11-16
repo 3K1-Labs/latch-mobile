@@ -1,12 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@shopify/restyle';
 import React from 'react';
 import { StyleSheet, TouchableOpacity } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Animated, { interpolate, SharedValue, useAnimatedStyle } from 'react-native-reanimated';
 
 import type { SessionKey } from '@/src/store/permissions';
-import { Theme } from '@/src/theme/theme';
 import PermissionItem from './PermissionItem';
 
 interface Props {
@@ -15,7 +13,6 @@ interface Props {
 }
 
 function RightAction({ dragX, onRevoke }: { dragX: SharedValue<number>; onRevoke: () => void }) {
-  const theme = useTheme<Theme>();
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: interpolate(dragX.value, [-80, 0], [0, 80], 'clamp') }],
   }));
@@ -23,7 +20,7 @@ function RightAction({ dragX, onRevoke }: { dragX: SharedValue<number>; onRevoke
   return (
     <TouchableOpacity onPress={onRevoke} activeOpacity={0.8} style={styles.revokeAction}>
       <Animated.View style={animatedStyle}>
-        <Ionicons name="trash-outline" size={24} color={theme.colors.inputError} />
+        <Ionicons name="trash-outline" size={24} color="#E23A10" />
       </Animated.View>
     </TouchableOpacity>
   );
@@ -54,9 +51,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 80,
-    height: '80%',
-    borderRadius: 16,
-    marginLeft: -10,
     marginBottom: 16,
   },
 });

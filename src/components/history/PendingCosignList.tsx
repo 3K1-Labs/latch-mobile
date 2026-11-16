@@ -6,9 +6,18 @@ import type { PendingPacketView } from '@/src/hooks/use-pending-packets';
 import { formatTimeRemaining, isExpiringSoon } from '@/src/lib/expiry';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, TouchableOpacity } from 'react-native';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
+
+const EMPTY_MASCOT = require('@/src/assets/images/home/empty-mascot.svg');
 
 interface Props {
   requests: PendingPacketView[];
@@ -65,7 +74,7 @@ const PendingCosignList: React.FC<Props> = ({
 
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insetBottom + 280 }}
+      contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: insetBottom + 280 }}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -77,21 +86,18 @@ const PendingCosignList: React.FC<Props> = ({
     >
       {requests.length === 0 ? (
         <Box flex={1} justifyContent={'center'} height={height} paddingTop="xl" alignItems="center">
-          <Box
-            width={64}
-            height={64}
-            borderRadius={32}
-            backgroundColor={isDark ? 'gray900' : 'gray100'}
-            justifyContent="center"
-            alignItems="center"
-            mb="m"
+          <Image source={EMPTY_MASCOT} contentFit="contain" style={styles.emptyMascot} />
+          <Text
+            fontSize={18}
+            lineHeight={26}
+            fontFamily="SFproMedium"
+            color="textPrimary"
+            textAlign="center"
+            mb="xs"
           >
-            <Ionicons name="checkmark-done-outline" size={28} color={theme.colors.textSecondary} />
-          </Box>
-          <Text variant="h10" color="textPrimary" fontWeight="700" textAlign="center" mb="xs">
-            Nothing pending
+            Nothing Pending
           </Text>
-          <Text variant="p7" color="textSecondary" textAlign="center">
+          <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
             Transactions awaiting signature will appear here.
           </Text>
         </Box>
@@ -104,7 +110,14 @@ const PendingCosignList: React.FC<Props> = ({
               activeOpacity={0.85}
               onPress={() => router.push({ pathname: '/cosign-review', params: { id: req.id } })}
             >
-              <Box backgroundColor="bg11" borderRadius={16} padding="m" mb="s">
+              <Box
+                backgroundColor="inputBox"
+                borderColor="inputOutline"
+                borderWidth={1}
+                borderRadius={16}
+                mb="s"
+                style={styles.card}
+              >
                 <Box flexDirection="row" alignItems="center" justifyContent="space-between" mb="s">
                   <Box flexDirection="row" alignItems="center" flex={1}>
                     <Box
@@ -163,5 +176,17 @@ const PendingCosignList: React.FC<Props> = ({
     </ScrollView>
   );
 };
+
+const styles = StyleSheet.create({
+  card: {
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  emptyMascot: {
+    width: 120,
+    height: 120,
+    marginBottom: 12,
+  },
+});
 
 export default PendingCosignList;

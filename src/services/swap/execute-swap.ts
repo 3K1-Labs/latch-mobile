@@ -6,6 +6,8 @@ import { toBase64 } from '@/src/api/smart-account';
 import { getStoredKeyDataHex } from '@/src/lib/passkey-webauthn';
 import {
   assertCredentialsAddressMatches,
+  buildSignerFields,
+  type FeeSigner,
   resolveRegisteredEd25519Verifier,
   resolveRegisteredWebAuthnVerifier,
   signPasskeyAuthEntryFromDigest,
@@ -41,6 +43,24 @@ export interface ExecuteSwapPasskeyParams extends SwapOperationInput {
   smartAccountAddress: string;
   /** Position of this account in the accounts array (selects the SecureStore keys) */
   listIndex: number;
+}
+
+/** Fee preview for the confirm screen. build-swap only simulates, so nothing is signed or sent. */
+export async function estimateSwapFee(
+  params: SwapOperationInput & { smartAccountAddress: string; signer: FeeSigner },
+): Promise<NetworkFee> {
+  const { smartAccountAddress, signer, operation, swapChainXdr, tokenInContractId, amountInRaw, amountOutMinRaw, routerContractId } =
+    params;
+  const built = await buildSwap({
+    smartAccountAddress,
+    ...(await buildSignerFields(signer)),
+    swapChainXdr: swapChainXdr ?? toBase64(new Uint8Array(operation.toXDR())),
+    tokenInContractId,
+    amountInRaw,
+    amountOutMinRaw,
+    routerContractId,
+  });
+  return built.networkFee;
 }
 
 // Mirrors sendTokenFromSmartAccount: latch-api builds the FeeForwarder-wrapped

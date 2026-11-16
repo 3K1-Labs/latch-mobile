@@ -1,6 +1,6 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { useTheme } from '@shopify/restyle';
+import { Image } from 'expo-image';
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme } from '@/src/theme/theme';
+
+const CLOSE = require('@/src/assets/images/swap/close.svg');
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -23,7 +24,6 @@ interface Props {
 }
 
 const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) => {
-  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -62,58 +62,63 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
         style={[
           styles.sheet,
           {
-            backgroundColor: theme.colors.cardbg,
-            paddingBottom: Math.max(insets.bottom, 20),
+            paddingBottom: Math.max(insets.bottom, 24),
             transform: [{ translateY }],
           },
         ]}
       >
-        {/* Handle */}
-        <Box alignItems="center" pt="m" pb="s">
-          <Box width={36} height={4} borderRadius={2} backgroundColor="gray800" />
+        <Box alignItems="center" style={styles.grabberWrap}>
+          <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
         </Box>
 
-        {/* Title */}
-        <Box px="m" pt="m" pb="s" alignItems="center">
-          <Text variant="h8" color="textPrimary" fontWeight="700" textAlign="center">
-            Remove Member
+        <Box flexDirection="row" alignItems="center" justifyContent="center" style={styles.header}>
+          <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+            Remove Owner
           </Text>
-        </Box>
-
-        {/* Subtitle with bold "Latch" */}
-        <Box px="xl" pb="xl" alignItems="center">
-          <Text variant="p6" color="textSecondary" textAlign="center">
-            Are you sure you want to remove this member from{' '}
-            <Text variant="p6" color="textPrimary" fontWeight="700">
-              Latch
-            </Text>
-            ?
-          </Text>
-        </Box>
-
-        {/* Buttons */}
-        <Box flexDirection="row" gap="m" px="m">
-          {/* No, Cancel */}
           <TouchableOpacity
-            style={[styles.btn, { backgroundColor: theme.colors.bg11, flex: 1 }]}
-            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            hitSlop={8}
             onPress={() => dismiss(onCancel)}
+            style={styles.close}
           >
-            <Text variant="h10" color="textPrimary" fontWeight="700">
-              No, Cancel
-            </Text>
+            <Image source={CLOSE} contentFit="contain" style={styles.closeIcon} />
           </TouchableOpacity>
+        </Box>
 
-          {/* Yes, Go Ahead */}
-          <TouchableOpacity
-            style={[styles.btn, { backgroundColor: theme.colors.danger900, flex: 1 }]}
-            activeOpacity={0.8}
-            onPress={() => dismiss(onConfirm)}
-          >
-            <Text variant="h10" color="white" fontWeight="700">
-              Yes, Go Ahead
-            </Text>
-          </TouchableOpacity>
+        <Box
+          alignItems="center"
+          justifyContent="center"
+          backgroundColor="inputBox"
+          borderColor="inputOutline"
+          borderWidth={1}
+          style={styles.card}
+        >
+          <Text fontSize={16} lineHeight={24} color="textMuted" textAlign="center" style={styles.copy}>
+            Are you sure you want to remove this owner from Latch?
+          </Text>
+          <Box flexDirection="row" style={styles.actions}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              activeOpacity={0.8}
+              onPress={() => dismiss(onCancel)}
+              style={[styles.pill, styles.cancel]}
+            >
+              <Text fontSize={12} lineHeight={20} style={{ color: '#27C11F' }}>
+                No, Cancel
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              activeOpacity={0.8}
+              onPress={() => dismiss(onConfirm)}
+              style={[styles.pill, styles.confirm]}
+            >
+              <Text fontSize={12} lineHeight={20} style={{ color: '#111111' }}>
+                Yes, Go Ahead
+              </Text>
+            </TouchableOpacity>
+          </Box>
         </Box>
       </Animated.View>
     </Modal>
@@ -123,25 +128,63 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     position: 'absolute',
     bottom: 0,
     width: '100%',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 20,
+    backgroundColor: '#020202',
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    paddingHorizontal: 24,
   },
-  btn: {
-    height: 56,
-    borderRadius: 28,
+  grabberWrap: {
+    paddingTop: 10,
+  },
+  header: {
+    marginTop: 24,
+    height: 40,
+  },
+  close: {
+    position: 'absolute',
+    right: 0,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  closeIcon: {
+    width: 20,
+    height: 20,
+  },
+  card: {
+    marginTop: 24,
+    height: 170,
+    borderRadius: 10,
+    gap: 16,
+  },
+  copy: {
+    width: 216,
+  },
+  actions: {
+    gap: 15,
+  },
+  pill: {
+    borderRadius: 33,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  cancel: {
+    width: 100,
+    backgroundColor: 'rgba(39,193,31,0.08)',
+  },
+  confirm: {
+    width: 122,
+    backgroundColor: '#FFFFFF',
   },
 });
 
