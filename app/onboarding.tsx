@@ -9,12 +9,13 @@ import Button from '@/src/components/shared/Button';
 import ProgressPagination from '@/src/components/shared/ProgressPagination';
 import Text from '@/src/components/shared/Text';
 import { LATCH_TERMS_URL } from '@/src/constants/constants';
+import { openInAppBrowser } from '@/src/lib/open-in-app-browser';
 import { clearProvisionedPasskeyAtIndex } from '@/src/lib/provision-passkey';
 import * as Sentry from '@sentry/react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useRef, useState } from 'react';
-import { FlatList, Linking, StyleSheet, useWindowDimensions } from 'react-native';
+import { FlatList, StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // const ONBOARDING_KEY = 'latch_onboarding_complete';
@@ -113,7 +114,7 @@ const Onboarding = () => {
           <Button
             label="Create Wallet"
             variant="ghost"
-            bg="white"
+            bg="buttonBg"
             labelColor="buttonLabel"
             labelStyle={styles.buttonLabel}
             onPress={async () => {
@@ -162,7 +163,7 @@ const Onboarding = () => {
             variant="caption"
             color="primary700"
             fontWeight="600"
-            onPress={() => LATCH_TERMS_URL && Linking.openURL(LATCH_TERMS_URL)}
+            onPress={() => openInAppBrowser(LATCH_TERMS_URL)}
           >
             Terms of Service.
           </Text>
@@ -171,7 +172,7 @@ const Onboarding = () => {
             variant="caption"
             color="primary700"
             fontWeight="600"
-            onPress={() => LATCH_PRIVACY_URL && Linking.openURL(LATCH_PRIVACY_URL)}
+            onPress={() => openInAppBrowser(LATCH_PRIVACY_URL)}
           >
             Privacy Policy
           </Text> */}

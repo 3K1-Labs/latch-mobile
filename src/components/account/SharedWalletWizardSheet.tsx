@@ -624,13 +624,14 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
         onRequestClose={resetAndClose}
       >
         <TouchableWithoutFeedback onPress={resetAndClose}>
-          <View style={styles.backdrop} />
+          <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} />
         </TouchableWithoutFeedback>
 
         <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
           <Animated.View
             style={[
               styles.sheet,
+              { backgroundColor: theme.colors.surfaceBase },
               {
                 height: SHEET_HEIGHT,
                 paddingBottom: Math.max(insets.bottom, 16),
@@ -698,11 +699,9 @@ const SharedWalletWizardSheet = ({ visible, onClose, onNeedsBackup }: Props) => 
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
   },

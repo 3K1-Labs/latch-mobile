@@ -146,6 +146,12 @@ function scValB64(val: xdr.ScVal): string {
 // NOTE: `/accounts/{C-addr}/operations` returns HTTP 400 — Horizon only accepts
 // G-addresses on the /accounts path. Use SAC events for passkey users.
 
+// Newest first; entries without a timestamp sort last instead of breaking the comparator.
+const timeOf = (p: StellarPayment) => {
+  const t = new Date(p.createdAt).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+
 async function fetchGAddressOps(gAddress: string, cAddress: string): Promise<StellarPayment[]> {
   const resp = await horizonGet(
     `${HORIZON_URL}/accounts/${encodeURIComponent(gAddress)}/operations?limit=50&order=desc&include_failed=false`,
@@ -525,7 +531,8 @@ async function fetchSacTransferEvents(cAddress: string): Promise<StellarPayment[
         amount: (Number(rawValue) / 10_000_000).toFixed(7),
         assetType: assetInfo.assetType,
         assetCode: assetInfo.code === 'XLM' ? undefined : assetInfo.code,
-        createdAt: event.ledgerClosedAt ?? new Date().toISOString(),
+        // No timestamp: leave empty (shown under "Unknown") rather than claim it happened now.
+        createdAt: event.ledgerClosedAt ?? '',
       };
     } catch (err) {
       if (__DEV__) console.error('[SAC events] parse error:', err);
@@ -672,7 +679,7 @@ export async function fetchStellarPayments(
   if (__DEV__) console.log('[merge] final after dedup:', merged.length);
 
   const sorted = merged.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => timeOf(b) - timeOf(a),
   );
 
   return classifyTxTypes(sorted, cAddress);
@@ -724,7 +731,7 @@ export async function fetchStellarPaymentsViaWalletBackend(
   }
 
   const sorted = payments.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => timeOf(b) - timeOf(a),
   );
   return classifyTxTypes(sorted, cAddress);
 }

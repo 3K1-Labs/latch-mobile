@@ -83,7 +83,7 @@ const ApprovalStepper: React.FC<Props> = ({ value, total, onChange }) => {
               fontSize: 56,
               lineHeight: 64,
               fontFamily: 'SFproBold',
-              color: theme.colors.textWhite,
+              color: theme.colors.textPrimary,
             }}
           >
             {value}

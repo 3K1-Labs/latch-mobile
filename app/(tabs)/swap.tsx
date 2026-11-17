@@ -552,7 +552,7 @@ const Swap = () => {
                           value={customSlippage}
                           onChangeText={applyCustomSlippage}
                           placeholder="Custom"
-                          placeholderTextColor={theme.colors.textSubheading}
+                          placeholderTextColor={theme.colors.textPlaceholder}
                           keyboardType="decimal-pad"
                         />
                         <Text fontSize={14} lineHeight={20} color="textSubheading">

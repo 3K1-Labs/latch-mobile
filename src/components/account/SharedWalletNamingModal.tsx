@@ -147,7 +147,7 @@ const SharedWalletNamingModal = () => {
             bottomOffset={16}
           >
             <Box
-              backgroundColor="cardbg"
+              backgroundColor="sheetBg"
               borderTopLeftRadius={32}
               borderTopRightRadius={32}
               paddingHorizontal="m"

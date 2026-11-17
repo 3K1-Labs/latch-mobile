@@ -138,9 +138,9 @@ export default function PairShowQR() {
               }
               setStage({ kind: 'scanReply' });
             }}
-            style={[styles.cta, { backgroundColor: theme.colors.textPrimary }]}
+            style={[styles.cta, { backgroundColor: theme.colors.buttonBg }]}
           >
-            <Text variant="p6" fontFamily="SFproSemibold" style={{ color: theme.colors.mainBackground }}>
+            <Text variant="p6" fontFamily="SFproSemibold" style={{ color: theme.colors.buttonLabel }}>
               Scan response
             </Text>
           </TouchableOpacity>

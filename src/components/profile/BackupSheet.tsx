@@ -256,7 +256,7 @@ const BackupSheet = ({ visible, onClose }: Props) => {
       backgroundStyle={{
         backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
       }}
-      header={<SheetHeader title="Wallet Backup" onBack={onClose} titleVariant="h8" iconSize={24} />}
+      header={<SheetHeader title="Wallet Backup" onBack={onClose} />}
       contentContainerStyle={{ flex: 1 }}
     >
       <KeyboardAwareScrollView

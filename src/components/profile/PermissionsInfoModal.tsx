@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import React from 'react';
 import { Modal, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,12 +29,13 @@ const SECTIONS = [
 ];
 
 const PermissionsInfoModal = ({ visible, onClose }: Props) => {
+  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
 
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <Box style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+      <Pressable style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} onPress={onClose} accessibilityLabel="Close" />
+      <Box style={[styles.sheet, { backgroundColor: theme.colors.surfaceBase }, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         <PopupHeader title="How permissions work" onClose={onClose} />
         <Box
           backgroundColor="inputBox"
@@ -62,10 +65,8 @@ const PermissionsInfoModal = ({ visible, onClose }: Props) => {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: 24,

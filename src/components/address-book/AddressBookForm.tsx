@@ -70,7 +70,7 @@ const FieldInput = (props: TextInputProps) => {
   const theme = useTheme<Theme>();
   return (
     <TextInput
-      placeholderTextColor={theme.colors.textSubheading}
+      placeholderTextColor={theme.colors.textPlaceholder}
       autoCorrect={false}
       {...props}
       style={styles.input}

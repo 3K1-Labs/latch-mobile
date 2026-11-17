@@ -231,12 +231,12 @@ export default function PendingApproval() {
                   ]}
                 >
                   {busyId === req.id ? (
-                    <ActivityIndicator color={theme.colors.mainBackground} />
+                    <ActivityIndicator color={theme.colors.black} />
                   ) : (
                     <Text
                       variant="p7"
                       fontFamily="SFproSemibold"
-                      style={{ color: theme.colors.mainBackground }}
+                      style={{ color: theme.colors.black }}
                     >
                       Broadcast
                     </Text>
@@ -248,17 +248,17 @@ export default function PendingApproval() {
                   disabled={busyId === req.id}
                   style={[
                     styles.btn,
-                    { backgroundColor: theme.colors.textPrimary, flex: 1, marginLeft: 8 },
+                    { backgroundColor: theme.colors.buttonBg, flex: 1, marginLeft: 8 },
                     busyId === req.id && { opacity: 0.5 },
                   ]}
                 >
                   {busyId === req.id ? (
-                    <ActivityIndicator color={theme.colors.mainBackground} />
+                    <ActivityIndicator color={theme.colors.buttonLabel} />
                   ) : (
                     <Text
                       variant="p7"
                       fontFamily="SFproSemibold"
-                      style={{ color: theme.colors.mainBackground }}
+                      style={{ color: theme.colors.buttonLabel }}
                     >
                       Approve
                     </Text>

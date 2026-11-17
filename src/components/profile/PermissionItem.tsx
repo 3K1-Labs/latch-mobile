@@ -10,12 +10,26 @@ interface Props {
   permission: SessionKey;
 }
 
-const Field = ({ label, children, flex }: { label: string; children: React.ReactNode; flex: number }) => (
+const Field = ({
+  label,
+  children,
+  flex,
+}: {
+  label: string;
+  children: React.ReactNode;
+  flex: number;
+}) => (
   <Box flex={flex} gap="s">
     <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" color="textSubheading">
       {label}
     </Text>
-    <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.value}>
+    <Box
+      flexDirection="row"
+      alignItems="center"
+      justifyContent="space-between"
+      backgroundColor="inputOutline"
+      style={styles.value}
+    >
       {children}
     </Box>
   </Box>
@@ -30,14 +44,20 @@ const ValueText = ({ children }: { children: React.ReactNode }) => (
 const PermissionItem = ({ permission }: Props) => {
   const expired = Date.now() > permission.expiresAt;
   return (
-    <Box backgroundColor="inputBox" borderColor="inputOutline" borderWidth={1} gap="m" style={styles.card}>
+    <Box
+      backgroundColor="inputBox"
+      borderColor="inputOutline"
+      borderWidth={1}
+      gap="m"
+      style={styles.card}
+    >
       <Box gap="s">
         <Box flexDirection="row" justifyContent="space-between" alignItems="center">
           <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
             {permission.name}
           </Text>
           {expired && (
-            <Box style={styles.expired}>
+            <Box backgroundColor="inputOutline" style={styles.expired}>
               <Text fontSize={12} lineHeight={16} fontFamily="SFproMedium" color="textMuted">
                 Expired
               </Text>
@@ -78,14 +98,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 60,
-    backgroundColor: '#1A1A1A',
   },
   value: {
     height: 40,
     paddingHorizontal: 16,
     borderRadius: 60,
     gap: 8,
-    backgroundColor: '#1A1A1A',
   },
 });
 

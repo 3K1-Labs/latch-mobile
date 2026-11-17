@@ -96,7 +96,7 @@ const SwapRoutePickerSheet = ({ visible, providers, selectedId, onClose, onSelec
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.root}>
         <TouchableWithoutFeedback onPress={onClose}>
-          <View style={styles.backdrop} />
+          <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} />
         </TouchableWithoutFeedback>
 
         <Animated.View
@@ -122,7 +122,7 @@ const SwapRoutePickerSheet = ({ visible, providers, selectedId, onClose, onSelec
               accessibilityLabel="Close"
               onPress={onClose}
               hitSlop={8}
-              style={styles.close}
+              style={[styles.close, { backgroundColor: theme.colors.inputOutline }]}
             >
               <Image source={CLOSE} contentFit="contain" style={styles.closeIcon} />
             </TouchableOpacity>
@@ -156,7 +156,6 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     borderTopLeftRadius: 40,
@@ -178,7 +177,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },

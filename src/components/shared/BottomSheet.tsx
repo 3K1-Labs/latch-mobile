@@ -11,6 +11,7 @@ import { View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAppTheme } from '@/src/theme/ThemeContext';
 import { Theme } from '@/src/theme/theme';
 
 interface Props extends Omit<BottomSheetModalProps, 'onDismiss' | 'children' | 'ref'> {
@@ -43,6 +44,7 @@ const BottomSheet = ({
   ...rest
 }: Props) => {
   const theme = useTheme<Theme>();
+  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const ref = useRef<BottomSheetModal>(null);
   const hasPresented = useRef(false);
@@ -67,11 +69,11 @@ const BottomSheet = ({
         {...props}
         disappearsOnIndex={-1}
         appearsOnIndex={0}
-        opacity={0.7}
+        opacity={isDark ? 0.7 : 0.35}
         pressBehavior="close"
       />
     ),
-    [],
+    [isDark],
   );
 
   // With explicit snap points, keep dynamic sizing off — otherwise gorhom adds a
@@ -91,7 +93,7 @@ const BottomSheet = ({
       {...modalProps}
       onDismiss={handleDismiss}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: theme.colors.bg11 }}
+      backgroundStyle={{ backgroundColor: isDark ? theme.colors.bg11 : theme.colors.sheetBg }}
       handleIndicatorStyle={{ backgroundColor: theme.colors.gray800, width: 36, height: 4 }}
       {...rest}
     >

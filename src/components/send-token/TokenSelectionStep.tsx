@@ -44,10 +44,10 @@ const TokenSelectionStep = ({ tokens, onSelectToken }: Props) => {
           value={query}
           onChangeText={setQuery}
           placeholder="Search for Token..."
-          placeholderTextColor={theme.colors.textSubheading}
+          placeholderTextColor={theme.colors.textPlaceholder}
           autoCapitalize="characters"
           autoCorrect={false}
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: theme.colors.textPrimary }]}
         />
       </Box>
 
@@ -103,7 +103,6 @@ const styles = StyleSheet.create({
     // Keeps the bundled SF Pro vertically centred in an iOS TextInput.
     lineHeight: 18,
     fontFamily: 'SFproRegular',
-    color: '#FFFFFF',
   },
   columns: {
     marginTop: 24,

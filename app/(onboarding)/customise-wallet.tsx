@@ -115,7 +115,7 @@ const CustomiseWallet = () => {
 
             <Box style={styles.addImage}>
               <Box flexDirection="row" justifyContent="space-between">
-                <Text style={styles.label}>Add Image</Text>
+                <Text color="textPrimary" style={styles.label}>Add Image</Text>
                 <Text variant="p7" lineHeight={22} letterSpacing={0} color="textMuted">
                   (Optional)
                 </Text>
@@ -142,14 +142,14 @@ const CustomiseWallet = () => {
                 </Box>
                 <Box style={styles.plusRing} backgroundColor="surfaceBase">
                   <Box style={styles.plus} backgroundColor="inputBox">
-                    <Ionicons name="add" size={28} color="#FFFFFF" />
+                    <Ionicons name="add" size={28} color={theme.colors.iconPrimary} />
                   </Box>
                 </Box>
               </Pressable>
             </Box>
 
             <Box style={styles.section}>
-              <Text style={styles.label}>Name Wallet</Text>
+              <Text color="textPrimary" style={styles.label}>Name Wallet</Text>
               <Box style={styles.input} backgroundColor="inputBox">
                 <Ionicons name="person-outline" size={16} color={theme.colors.textMuted} />
                 <TextInput
@@ -161,7 +161,10 @@ const CustomiseWallet = () => {
                   maxLength={24}
                   autoCorrect={false}
                   returnKeyType="done"
-                  style={[styles.inputText, values.name ? styles.value : styles.placeholder]}
+                  style={[
+                    styles.inputText,
+                    values.name ? [styles.value, { color: theme.colors.textPrimary }] : styles.placeholder,
+                  ]}
                 />
               </Box>
               {touched.name && errors.name ? (
@@ -172,7 +175,7 @@ const CustomiseWallet = () => {
             </Box>
 
             <Box style={styles.section}>
-              <Text style={styles.label}>Choose a Color</Text>
+              <Text color="textPrimary" style={styles.label}>Choose a Color</Text>
               <Box flexDirection="row" justifyContent="space-between" style={styles.colors}>
                 {WALLET_COLORS.map((color) => {
                   const selected = values.color === color;
@@ -187,13 +190,13 @@ const CustomiseWallet = () => {
                       <Box
                         style={[
                           styles.swatch,
-                          selected && styles.swatchSelected,
+                          selected && [styles.swatchSelected, { borderColor: theme.colors.inputOutline }],
                           { backgroundColor: color },
                         ]}
                       />
                       {selected && (
                         <Box style={styles.check} backgroundColor="inputOutline">
-                          <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                          <Ionicons name="checkmark" size={12} color={theme.colors.iconPrimary} />
                         </Box>
                       )}
                     </Pressable>
@@ -245,7 +248,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     letterSpacing: -0.65,
-    color: '#FFFFFF',
   },
   picker: {
     width: 148,
@@ -291,7 +293,6 @@ const styles = StyleSheet.create({
   },
   value: {
     fontSize: 16,
-    color: '#706F6F',
   },
   colors: {
     marginTop: 16,
@@ -303,7 +304,6 @@ const styles = StyleSheet.create({
   },
   swatchSelected: {
     borderWidth: 3,
-    borderColor: '#1A1A1A',
   },
   check: {
     position: 'absolute',

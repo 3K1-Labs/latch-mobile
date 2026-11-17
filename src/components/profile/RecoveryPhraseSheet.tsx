@@ -43,7 +43,7 @@ const RecoveryPhraseSheet = ({ visible, onClose }: Props) => {
       backgroundStyle={{
         backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
       }}
-      header={<SheetHeader title="Recovery Phrase" onBack={onClose} titleVariant="h9" />}
+      header={<SheetHeader title="Recovery Phrase" onBack={onClose} />}
       contentContainerStyle={{ flex: 1 }}
     >
       <Box paddingHorizontal="m" flex={1}>

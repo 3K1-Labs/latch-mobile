@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import PopupHeader from '@/src/components/multisig/PopupHeader';
 import Box from '@/src/components/shared/Box';
 import React, { useEffect, useRef, useState } from 'react';
@@ -27,6 +29,7 @@ interface Props {
 }
 
 const ChooseMethodSheet: React.FC<Props> = ({ visible, onClose, onScanQR, onMemberAdded }) => {
+  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const [view, setView] = useState<SheetView>('method');
@@ -67,7 +70,7 @@ const ChooseMethodSheet: React.FC<Props> = ({ visible, onClose, onScanQR, onMemb
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={handleClose}>
       {/* Dim overlay — pointer-events none so touches fall through to the flex layer */}
-      <View style={styles.backdrop} pointerEvents="none" />
+      <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} pointerEvents="none" />
 
       {/* Flex column: backdrop spacer (flex:1) + sheet at bottom */}
       <View style={styles.flex}>
@@ -80,6 +83,7 @@ const ChooseMethodSheet: React.FC<Props> = ({ visible, onClose, onScanQR, onMemb
         <Animated.View
           style={[
             styles.sheet,
+            { backgroundColor: theme.colors.surfaceBase },
             {
               paddingBottom: Math.max(insets.bottom, 24),
               transform: [{ translateY }],
@@ -153,11 +157,9 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: 24,

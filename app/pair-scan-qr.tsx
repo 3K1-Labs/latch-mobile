@@ -94,12 +94,12 @@ export default function PairScanQR() {
         </Text>
         <TouchableOpacity
           onPress={() => requestPermission()}
-          style={[styles.cta, { backgroundColor: theme.colors.textPrimary }]}
+          style={[styles.cta, { backgroundColor: theme.colors.buttonBg }]}
         >
           <Text
             variant="p6"
             fontFamily="SFproSemibold"
-            style={{ color: theme.colors.mainBackground }}
+            style={{ color: theme.colors.buttonLabel }}
           >
             Allow camera
           </Text>

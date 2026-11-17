@@ -1,6 +1,8 @@
 import ShareCard from '@/src/components/receive-token/ShareCard';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { type TokenBalance } from '@/src/hooks/use-portfolio';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
 import { shortenAddress } from '@/src/utils';
@@ -23,6 +25,7 @@ interface Props {
 }
 
 const AddressStage = ({ token, address, onCopy }: Props) => {
+  const theme = useTheme<Theme>();
   const iconUrl = useTokenIcon(token.code, token.issuer);
   const [showShareCard, setShowShareCard] = useState(false);
   const logoSource = iconUrl ? { uri: iconUrl } : STELLAR_LOGO;
@@ -71,9 +74,18 @@ const AddressStage = ({ token, address, onCopy }: Props) => {
           accessibilityRole="button"
           activeOpacity={0.8}
           onPress={() => setShowShareCard(true)}
-          style={[styles.button, styles.shareButton]}
+          style={[
+            styles.button,
+            styles.shareButton,
+            { backgroundColor: theme.colors.inputBox, borderColor: theme.colors.inputOutline },
+          ]}
         >
-          <Image source={ICONS.share} contentFit="contain" style={styles.buttonIcon} />
+          <Image
+            source={ICONS.share}
+            contentFit="contain"
+            tintColor={theme.colors.iconPrimary}
+            style={styles.buttonIcon}
+          />
           <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
             Share
           </Text>
@@ -83,10 +95,15 @@ const AddressStage = ({ token, address, onCopy }: Props) => {
           accessibilityLabel="Copy address"
           activeOpacity={0.8}
           onPress={onCopy}
-          style={[styles.button, styles.copyButton]}
+          style={[styles.button, { backgroundColor: theme.colors.buttonBg }]}
         >
-          <Image source={ICONS.copy} contentFit="contain" style={styles.buttonIcon} />
-          <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" style={styles.copyLabel}>
+          <Image
+            source={ICONS.copy}
+            contentFit="contain"
+            tintColor={theme.colors.buttonLabel}
+            style={styles.buttonIcon}
+          />
+          <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="buttonLabel">
             Copy
           </Text>
         </TouchableOpacity>
@@ -138,13 +155,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareButton: {
-    backgroundColor: '#0F0F0F',
-  },
-  copyButton: {
-    backgroundColor: '#FFFFFF',
-  },
-  copyLabel: {
-    color: '#111111',
+    borderWidth: 1,
   },
   buttonIcon: {
     width: 20,

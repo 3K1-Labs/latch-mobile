@@ -62,7 +62,7 @@ const ApprovalNumberChips: React.FC<Props> = ({ value, total, onChange }) => {
                 <Text
                   variant="h10"
                   fontWeight="700"
-                  color={selected ? 'black' : 'textWhite'}
+                  color={selected ? 'black' : 'textPrimary'}
                 >
                   {n}
                 </Text>
@@ -73,7 +73,7 @@ const ApprovalNumberChips: React.FC<Props> = ({ value, total, onChange }) => {
       </Box>
 
       <Text variant="p7" color="textSecondary" mt="l">
-        <Text variant="p7" color="textWhite" fontWeight="700">
+        <Text variant="p7" color="textPrimary" fontWeight="700">
           {value}
         </Text>{' '}
         of {total}

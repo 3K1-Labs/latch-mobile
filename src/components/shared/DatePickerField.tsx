@@ -55,7 +55,7 @@ const DatePickerField = ({ label, date, onChange }: DatePickerFieldProps) => {
           borderRadius={24}
           borderWidth={1}
           borderColor={show ? 'primary700' : isDark ? 'gray800' : 'gray400'}
-          backgroundColor="bg11"
+          backgroundColor="chipBg"
         >
           <Text variant="p6" color="textPrimary">
             {format(date, 'd MMMM yyyy')}
@@ -74,7 +74,7 @@ const DatePickerField = ({ label, date, onChange }: DatePickerFieldProps) => {
           borderRadius={20}
           borderWidth={1}
           borderColor={isDark ? 'gray800' : 'gray400'}
-          backgroundColor="bg11"
+          backgroundColor="chipBg"
           overflow="hidden"
         >
           <DateTimePicker
@@ -84,6 +84,7 @@ const DatePickerField = ({ label, date, onChange }: DatePickerFieldProps) => {
             onChange={handleDateChange}
             maximumDate={new Date()}
             textColor={theme.colors.textPrimary}
+            themeVariant={isDark ? 'dark' : 'light'}
             style={{ width: '100%' }}
           />
 

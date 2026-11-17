@@ -1,6 +1,7 @@
 import HistoryItem from '@/src/components/history/HistoryItem';
 import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import PendingCosignList from '@/src/components/history/PendingCosignList';
+import HistoryEmptyState from '@/src/components/history/HistoryEmptyState';
 import SearchHeader from '@/src/components/history/SearchHeader';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
@@ -10,15 +11,14 @@ import { StellarPayment, useStellarTransactions } from '@/src/hooks/use-stellar-
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useAppTheme } from '@/src/theme/ThemeContext';
+import { useHistoryFilterStore } from '@/src/store/history-filter';
 import { groupByDate } from '@/src/utils/group-by-date';
 import { useTheme } from '@shopify/restyle';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   RefreshControl,
   SectionList,
   StyleSheet,
@@ -26,8 +26,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const height = Dimensions.get('window').height;
-const EMPTY_MASCOT = require('@/src/assets/images/home/empty-mascot.svg');
 const RowGap = () => <Box height={4} />;
 
 const History = () => {
@@ -38,6 +36,7 @@ const History = () => {
   const [activeFilter, setActiveFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const range = useHistoryFilterStore((s) => s.range);
 
   const { smartAccountAddress } = useWalletStore();
 
@@ -77,6 +76,17 @@ const History = () => {
       result = result.filter((tx) => tx.txType === 'swap');
     }
 
+    if (range) {
+      const from = new Date(range.start);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(range.end);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter((tx) => {
+        const t = new Date(tx.createdAt).getTime();
+        return t >= from.getTime() && t <= to.getTime();
+      });
+    }
+
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
@@ -88,7 +98,7 @@ const History = () => {
     }
 
     return result;
-  }, [transactions, activeFilter, search, smartAccountAddress]);
+  }, [transactions, activeFilter, search, smartAccountAddress, range]);
 
   const sections = useMemo(() => groupByDate(filtered, (tx) => tx.createdAt), [filtered]);
 
@@ -200,29 +210,14 @@ const History = () => {
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             ListEmptyComponent={
-              <Box
-                height={height / 2}
-                justifyContent="center"
-                alignItems="center"
-                paddingHorizontal="xl"
-                gap="xs"
-              >
-                <Image source={EMPTY_MASCOT} contentFit="contain" style={styles.emptyMascot} />
-                <Text
-                  fontSize={18}
-                  lineHeight={26}
-                  fontFamily="SFproMedium"
-                  color="textPrimary"
-                  textAlign="center"
-                >
-                  {search || activeFilter !== 'All' ? 'No Matching Activity' : 'No Activity Yet'}
-                </Text>
-                <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
-                  {search || activeFilter !== 'All'
+              <HistoryEmptyState
+                title={search || range || activeFilter !== 'All' ? 'No Matching Activity' : 'No Activity Yet'}
+                subtitle={
+                  search || range || activeFilter !== 'All'
                     ? 'Try a different search or filter.'
-                    : 'Fund your wallet & get started!'}
-                </Text>
-              </Box>
+                    : 'Fund your wallet & get started!'
+                }
+              />
             }
             renderSectionHeader={renderSectionHeader}
             ItemSeparatorComponent={RowGap}
@@ -280,11 +275,6 @@ const styles = StyleSheet.create({
   },
   retry: {
     color: '#FFC508',
-  },
-  emptyMascot: {
-    width: 120,
-    height: 120,
-    marginBottom: 12,
   },
 });
 

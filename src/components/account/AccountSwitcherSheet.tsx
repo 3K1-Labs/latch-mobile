@@ -862,7 +862,7 @@ const AccountSwitcherSheet = ({
                 <MemberReviewList members={members} selfEmail={selfEmail} />
                 <ApprovalRuleCard approvals={approvals} total={totalSigners} />
                 {existingSameMembers && (
-                  <Box flexDirection="row" backgroundColor="bg11" borderRadius={14} p="m" mt="m">
+                  <Box flexDirection="row" backgroundColor="chipBg" borderRadius={14} p="m" mt="m">
                     <Ionicons
                       name="information-circle-outline"
                       size={18}
@@ -1122,7 +1122,7 @@ const AccountSwitcherSheet = ({
         onRequestClose={mandatory ? () => {} : onClose}
       >
         <TouchableWithoutFeedback onPress={mandatory ? undefined : onClose} disabled={mandatory}>
-          <View style={styles.backdrop} />
+          <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} />
         </TouchableWithoutFeedback>
 
         <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
@@ -1205,7 +1205,6 @@ const AccountSwitcherSheet = ({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     width: '100%',

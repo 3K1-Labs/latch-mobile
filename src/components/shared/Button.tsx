@@ -58,8 +58,14 @@ const Button: React.FC<Props> = ({
   const theme = useTheme<Theme>();
 
   // Determine label and icon colors based on variant
+  // Yellow variants take black; secondary's fixed dark brown takes white; the
+  // rest sit on the page, so their label follows the theme.
   const isLightBackground = variant === 'primary' || variant === 'highlight';
-  const defaultLabelColor = isLightBackground ? 'black' : 'white';
+  const defaultLabelColor: keyof Theme['colors'] = isLightBackground
+    ? 'black'
+    : variant === 'secondary'
+      ? 'white'
+      : 'textPrimary';
   const finalLabelColor = labelColor || defaultLabelColor;
 
   return (

@@ -2,6 +2,7 @@ import { logout } from '@/src/api/latch-auth';
 import AccountSwitcherSheet from '@/src/components/account/AccountSwitcherSheet';
 import { RoundBackButton } from '@/src/components/onboarding/SetupChrome';
 import AboutSheet from '@/src/components/profile/AboutSheet';
+import NotificationsSheet from '@/src/components/profile/NotificationsSheet';
 import AppearanceSheet from '@/src/components/profile/AppearanceSheet';
 import AddressBookSheet from '@/src/components/profile/AddressBookSheet';
 import BackupSheet from '@/src/components/profile/BackupSheet';
@@ -11,7 +12,8 @@ import HelpSupportSheet from '@/src/components/profile/HelpSupportSheet';
 import LogoutPromptSheet from '@/src/components/profile/LogoutPromptSheet';
 import NetworkSheet from '@/src/components/profile/NetworkSheet';
 import PermissionsSheet from '@/src/components/profile/PermissionsSheet';
-import PrivacyPolicySheet from '@/src/components/profile/PrivacyPolicySheet';
+import { LATCH_PRIVACY_URL } from '@/src/constants/constants';
+import { openInAppBrowser } from '@/src/lib/open-in-app-browser';
 import RecoveryPhraseSheet from '@/src/components/profile/RecoveryPhraseSheet';
 import SettingItem, {
   SettingsGroup,
@@ -58,7 +60,6 @@ const Settings = () => {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { clearAll, accounts, activeAccountIndex, avatars } = useWalletStore();
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [switcherVisible, setSwitcherVisible] = useState(false);
   // 'add-info' when a network switch lands on a network with no usable account.
   const [switcherInitialStep, setSwitcherInitialStep] = useState<'list' | 'add-info'>('list');
@@ -68,6 +69,7 @@ const Settings = () => {
   const [networkVisible, setNetworkVisible] = useState(false);
   const [currencyVisible, setCurrencyVisible] = useState(false);
   const [appearanceVisible, setAppearanceVisible] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
   // Held as state, not read straight off the ACTIVE_NETWORK module binding in
   // render: the binding is only reliably live at call time, so NetworkSheet's
   // onNetworkChanged reads the fresh value after the switch applies.
@@ -76,7 +78,6 @@ const Settings = () => {
   );
   const [helpSupportVisible, setHelpSupportVisible] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
-  const [privacyVisible, setPrivacyVisible] = useState(false);
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [backupVisible, setBackupVisible] = useState(false);
 
@@ -138,7 +139,7 @@ const Settings = () => {
             value={search}
             onChangeText={setSearch}
             placeholder="Search"
-            placeholderTextColor={theme.colors.textSubheading}
+            placeholderTextColor={theme.colors.textPlaceholder}
             autoCorrect={false}
             autoCapitalize="none"
             style={styles.searchInput}
@@ -198,12 +199,15 @@ const Settings = () => {
         />
         <CurrencySheet visible={currencyVisible} onClose={() => setCurrencyVisible(false)} />
         <AppearanceSheet visible={appearanceVisible} onClose={() => setAppearanceVisible(false)} />
+        <NotificationsSheet
+          visible={notificationsVisible}
+          onClose={() => setNotificationsVisible(false)}
+        />
         <HelpSupportSheet
           visible={helpSupportVisible}
           onClose={() => setHelpSupportVisible(false)}
         />
         <AboutSheet visible={aboutVisible} onClose={() => setAboutVisible(false)} />
-        <PrivacyPolicySheet visible={privacyVisible} onClose={() => setPrivacyVisible(false)} />
         <LogoutPromptSheet
           visible={logoutVisible}
           onClose={() => setLogoutVisible(false)}
@@ -267,29 +271,7 @@ const Settings = () => {
               <SettingItem
                 svg={ICONS.bell}
                 label="Notifications"
-                rightElement={
-                  unreadCount > 0 ? (
-                    <Box
-                      minWidth={20}
-                      height={20}
-                      borderRadius={10}
-                      paddingHorizontal="xs"
-                      justifyContent="center"
-                      alignItems="center"
-                      style={styles.badge}
-                    >
-                      <Text
-                        fontSize={11}
-                        lineHeight={14}
-                        fontFamily="SFproSemibold"
-                        style={styles.badgeText}
-                      >
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                      </Text>
-                    </Box>
-                  ) : undefined
-                }
-                onPress={() => router.push('/notification')}
+                onPress={() => setNotificationsVisible(true)}
               />
               <SettingItem
                 icon="cash"
@@ -317,7 +299,7 @@ const Settings = () => {
               <SettingItem
                 icon="document-text"
                 label="Privacy Policy"
-                onPress={() => setPrivacyVisible(true)}
+                onPress={() => openInAppBrowser(LATCH_PRIVACY_URL)}
               />
             </SettingsGroup>
 
@@ -368,12 +350,6 @@ const styles = StyleSheet.create({
   groups: {
     marginTop: 34,
     gap: 24,
-  },
-  badge: {
-    backgroundColor: '#FFC508',
-  },
-  badgeText: {
-    color: '#000000',
   },
 });
 

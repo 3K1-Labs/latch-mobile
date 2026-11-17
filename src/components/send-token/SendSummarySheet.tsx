@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
@@ -47,6 +49,7 @@ const SendSummarySheet = ({
   onSecondary,
   illustration,
 }: Props) => {
+  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const iconUrl = useTokenIcon(token.code, token.issuer);
   const [progress] = useState(() => new Animated.Value(0));
@@ -69,11 +72,11 @@ const SendSummarySheet = ({
       justifyContent="flex-end"
     >
       <TouchableWithoutFeedback onPress={onClose} disabled={!onClose}>
-        <Animated.View style={[styles.backdrop, { opacity: progress }]} />
+        <Animated.View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }, { opacity: progress }]} />
       </TouchableWithoutFeedback>
 
       <Animated.View
-        style={[styles.sheet, { paddingBottom: insets.bottom + 40, transform: [{ translateY }] }]}
+        style={[styles.sheet, { backgroundColor: theme.colors.surfaceBase }, { paddingBottom: insets.bottom + 40, transform: [{ translateY }] }]}
       >
         <Box alignItems="center" style={styles.grabberWrap}>
           <Box width={126} height={8} borderRadius={69} backgroundColor="inputOutline" />
@@ -96,7 +99,7 @@ const SendSummarySheet = ({
               accessibilityLabel="Close"
               hitSlop={8}
               onPress={onClose}
-              style={styles.close}
+              style={[styles.close, { backgroundColor: theme.colors.inputOutline }]}
             >
               <Image source={CLOSE} contentFit="contain" style={styles.closeIcon} />
             </TouchableOpacity>
@@ -107,7 +110,7 @@ const SendSummarySheet = ({
           {illustration ? (
             <Image source={illustration} contentFit="contain" style={styles.illustration} />
           ) : (
-            <Box width={64} height={64} borderRadius={32} overflow="hidden" style={styles.tokenBg}>
+            <Box width={64} height={64} borderRadius={32} overflow="hidden" style={[styles.tokenBg, { backgroundColor: theme.colors.badgeBg }]}>
               <TokenIcon iconUrl={iconUrl} size={64} />
             </Box>
           )}
@@ -195,10 +198,8 @@ const SendSummarySheet = ({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: 24,
@@ -219,7 +220,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
     height: 160,
   },
   tokenBg: {
-    backgroundColor: '#121212',
+
   },
   amount: {
     maxWidth: 260,

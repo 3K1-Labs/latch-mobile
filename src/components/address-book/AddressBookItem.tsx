@@ -47,7 +47,12 @@ const AddressBookItem = ({ label, address, onPress, onDelete }: AddressBookItemP
         borderRadius={20}
         style={styles.card}
       >
-        <Box justifyContent="center" alignItems="center" style={styles.avatar}>
+        <Box
+          justifyContent="center"
+          alignItems="center"
+          backgroundColor="avatarBgStrong"
+          style={styles.avatar}
+        >
           <Text fontSize={14} lineHeight={22} fontFamily="SFproSemibold" color="textPrimary">
             {initials(label)}
           </Text>
@@ -92,7 +97,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#413F3F',
   },
   info: {
     gap: 4,

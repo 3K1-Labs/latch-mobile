@@ -41,7 +41,7 @@ const NicknameModal: React.FC<Props> = ({ visible, signerLabel, initialName, onS
         bottomOffset={16}
       >
         <Box
-          backgroundColor="cardbg"
+          backgroundColor="sheetBg"
           borderTopLeftRadius={32}
           borderTopRightRadius={32}
           paddingHorizontal="m"

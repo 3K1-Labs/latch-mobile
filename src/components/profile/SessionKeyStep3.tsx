@@ -1,3 +1,6 @@
+import { useAppTheme } from '@/src/theme/ThemeContext';
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import React from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
@@ -34,6 +37,36 @@ const Value = ({ children }: { children: React.ReactNode }) => (
 
 const Divider = () => <Box height={1} backgroundColor="inputOutline" />;
 
+const SecurityWarning = () => {
+  const { isDark } = useAppTheme();
+  const theme = useTheme<Theme>();
+  return (
+    <Box
+      gap="xs"
+      style={[
+        styles.warning,
+        !isDark && {
+          backgroundColor: theme.colors.warningSurface,
+          borderColor: theme.colors.warningBorder,
+        },
+      ]}
+    >
+      <Text
+        fontSize={14}
+        lineHeight={22}
+        fontFamily="SFproMedium"
+        style={isDark ? styles.warningTitle : { color: theme.colors.warningTitle }}
+      >
+        Security Warning
+      </Text>
+      <Text fontSize={14} lineHeight={22} color="textMuted">
+        This session will be able to perform actions on your behalf without requiring your explicit
+        approval each time.
+      </Text>
+    </Box>
+  );
+};
+
 const SessionKeyStep3 = ({ values, onSubmit }: Props) => (
   <Box flex={1}>
     <ScrollView bounces={false} contentContainerStyle={styles.scroll}>
@@ -69,15 +102,7 @@ const SessionKeyStep3 = ({ values, onSubmit }: Props) => (
         </Row>
       </Box>
 
-      <Box gap="xs" style={styles.warning}>
-        <Text fontSize={14} lineHeight={22} fontFamily="SFproMedium" style={styles.warningTitle}>
-          Security Warning
-        </Text>
-        <Text fontSize={14} lineHeight={22} color="textMuted">
-          This session will be able to perform actions on your behalf without requiring your explicit
-          approval each time.
-        </Text>
-      </Box>
+      <SecurityWarning />
     </ScrollView>
 
     <Box style={styles.footer}>

@@ -71,7 +71,7 @@ const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, o
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <View style={styles.root}>
         <TouchableWithoutFeedback onPress={close}>
-          <View style={styles.backdrop} />
+          <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} />
         </TouchableWithoutFeedback>
 
         <Animated.View
@@ -97,7 +97,7 @@ const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, o
               accessibilityLabel="Close"
               onPress={close}
               hitSlop={8}
-              style={styles.close}
+              style={[styles.close, { backgroundColor: theme.colors.inputOutline }]}
             >
               <Image source={ICONS.close} contentFit="contain" style={styles.closeIcon} />
             </TouchableOpacity>
@@ -117,10 +117,10 @@ const SwapTokenPickerSheet = ({ visible, title, tokens, excludeSacId, onClose, o
               value={query}
               onChangeText={setQuery}
               placeholder="Search for Token..."
-              placeholderTextColor={theme.colors.textSubheading}
+              placeholderTextColor={theme.colors.textPlaceholder}
               autoCapitalize="characters"
               autoCorrect={false}
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: theme.colors.textPrimary }]}
             />
           </Box>
 
@@ -170,7 +170,6 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     borderTopLeftRadius: 40,
@@ -191,7 +190,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -217,7 +215,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     fontFamily: 'SFproRegular',
-    color: '#FFFFFF',
   },
   columns: {
     marginTop: 24,

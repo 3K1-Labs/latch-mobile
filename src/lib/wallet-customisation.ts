@@ -67,3 +67,12 @@ const mix = (hex: string, target: number, ratio: number) => {
 
 export const tintColor = (hex: string, ratio: number) => mix(hex, 255, ratio);
 export const shadeColor = (hex: string, ratio: number) => mix(hex, 0, ratio);
+
+/** True when dark text reads better than light text on `hex` (WCAG relative luminance). */
+export const isLightColor = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4;
+};

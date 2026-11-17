@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import { StyleSheet, TouchableOpacity } from 'react-native';
 
@@ -13,24 +15,32 @@ interface AccountSheetHeaderProps {
   label?: string;
 }
 
-const AccountSheetHeader = ({ onClose, onAdd, label }: AccountSheetHeaderProps) => (
-  <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.header}>
-    <RoundBackButton onPress={onClose} />
-    <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
-      {label ? `${label} Accounts` : 'Accounts'}
-    </Text>
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel="Add account"
-      activeOpacity={0.7}
-      hitSlop={8}
-      onPress={onAdd}
-      style={styles.add}
+const AccountSheetHeader = ({ onClose, onAdd, label }: AccountSheetHeaderProps) => {
+  const theme = useTheme<Theme>();
+  return (
+    <Box
+      flexDirection="row"
+      alignItems="center"
+      justifyContent="space-between"
+      style={styles.header}
     >
-      <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
-    </TouchableOpacity>
-  </Box>
-);
+      <RoundBackButton onPress={onClose} />
+      <Text fontSize={18} lineHeight={26} fontFamily="SFproMedium" color="textPrimary">
+        {label ? `${label} Accounts` : 'Accounts'}
+      </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Add account"
+        activeOpacity={0.7}
+        hitSlop={8}
+        onPress={onAdd}
+        style={[styles.add, { backgroundColor: theme.colors.inputOutline }]}
+      >
+        <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
+      </TouchableOpacity>
+    </Box>
+  );
+};
 
 const styles = StyleSheet.create({
   header: {
@@ -42,7 +52,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },

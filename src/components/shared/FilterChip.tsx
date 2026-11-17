@@ -18,7 +18,7 @@ const FilterChip = ({ label, selected, onPress }: FilterChipProps) => {
         px="m"
         py="s"
         borderRadius={16}
-        backgroundColor={selected ? 'transparent' : 'bg900'}
+        backgroundColor={selected ? 'transparent' : 'chipBg'}
         borderWidth={selected ? 1.5 : 1}
         borderColor={selected ? 'primary' : isDark ? 'gray800' : 'gray400'}
         mr="s"

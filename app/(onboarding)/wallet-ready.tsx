@@ -135,7 +135,7 @@ const WalletReady = () => {
               onPress={() => accountAddress && copyToClipboard(accountAddress)}
               style={styles.copy}
             >
-              <Text variant="p8" letterSpacing={0} color="buttonLabel">
+              <Text variant="p8" letterSpacing={0} color="black">
                 Copy
               </Text>
               <Ionicons name="copy-outline" size={14} color="#111111" />

@@ -68,7 +68,7 @@ const SharePacketModal: React.FC<SharePacketModalProps> = ({ visible, packet, on
       <View style={styles.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
 
-        <Box bg="bg11" style={styles.card}>
+        <Box bg="bg11" style={[styles.card, { borderColor: theme.colors.inputOutline }]}>
           <Text variant="h10" color="textPrimary" fontFamily="SFproSemibold" mb="xs">
             Send to the next owner
           </Text>
@@ -81,7 +81,7 @@ const SharePacketModal: React.FC<SharePacketModalProps> = ({ visible, packet, on
               <QRCode value={link} size={220} color="#000" backgroundColor="white" />
             </View>
           ) : (
-            <Box style={styles.qrFallback} alignItems="center" justifyContent="center">
+            <Box style={[styles.qrFallback, { backgroundColor: theme.colors.chipBg, borderColor: theme.colors.inputOutline }]} alignItems="center" justifyContent="center">
               <Ionicons name="qr-code-outline" size={40} color="#888" />
               <Text variant="p8" color="textSecondary" textAlign="center" mt="s" px="m">
                 This request is too large to show as a QR code. Use Share or Copy instead.
@@ -90,11 +90,11 @@ const SharePacketModal: React.FC<SharePacketModalProps> = ({ visible, packet, on
           )}
 
           <Box flexDirection="row" mt="l" style={{ gap: 12 }}>
-            <TouchableOpacity style={styles.actionBtn} activeOpacity={0.8} onPress={handleCopy}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: theme.colors.chipBg }]} activeOpacity={0.8} onPress={handleCopy}>
               <Ionicons
                 name={copied ? 'checkmark' : 'copy-outline'}
                 size={18}
-                color="#fff"
+                color={theme.colors.textPrimary}
               />
               <Text variant="p7" color="textPrimary" fontWeight="700" ml="s">
                 {copied ? 'Copied' : 'Copy'}
@@ -132,7 +132,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
   qrWrapper: {
     backgroundColor: 'white',
@@ -143,14 +142,11 @@ const styles = StyleSheet.create({
     width: 244,
     height: 244,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   actionBtn: {
     flex: 1,
     height: 52,
-    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 26,
     flexDirection: 'row',
     justifyContent: 'center',

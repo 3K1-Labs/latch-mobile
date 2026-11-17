@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
@@ -21,8 +23,6 @@ const CAUTION = require('@/src/assets/images/fund/caution.svg');
 
 const GREEN = '#76B101';
 const RED = '#FB3748';
-const RAIL_IDLE = '#1A1A1A';
-const RAIL_FILL = '#0F0F0F';
 
 export type FundingStepStatus = 'success' | 'error' | 'inactive';
 type Tone = 'pending' | 'failed' | 'completed';
@@ -130,6 +130,9 @@ const RAIL_TOP = 13;
 const RAIL_X = 16;
 
 const Rail = ({ steps }: { steps: FundingStep[] }) => {
+  const theme = useTheme<Theme>();
+  const RAIL_IDLE = theme.colors.inputOutline;
+  const RAIL_FILL = theme.colors.inputBox;
   const lastReached = steps.reduce((acc, s, i) => (s.status === 'inactive' ? acc : i), 0);
   const ringColor = (s: FundingStepStatus) =>
     s === 'success' ? GREEN : s === 'error' ? RED : RAIL_IDLE;
@@ -185,6 +188,7 @@ interface Props {
 }
 
 const FundingStatusSheet = ({ visible, deposit, onBack, onClose, onRetry }: Props) => {
+  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const sheetStyles = useAddFundsSheetStyles();
   const { data: prices } = usePrices();
@@ -211,7 +215,7 @@ const FundingStatusSheet = ({ visible, deposit, onBack, onClose, onRetry }: Prop
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 38 }]}
     >
       <Box alignItems="center" style={styles.hero}>
-        <Box style={styles.tokenBg}>
+        <Box style={[styles.tokenBg, { backgroundColor: theme.colors.badgeBg }]}>
           <TokenIcon size={40} />
         </Box>
         <Box alignItems="center" style={styles.heroText}>
@@ -334,7 +338,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#121212',
     alignItems: 'center',
     justifyContent: 'center',
   },

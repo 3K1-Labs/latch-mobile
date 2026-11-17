@@ -11,8 +11,8 @@ import { ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
 type NetworkId = 'testnet' | 'mainnet';
 
 const NETWORKS: { id: NetworkId; name: string; description: string }[] = [
-  { id: 'testnet', name: 'Testnet', description: 'Environment for testing' },
-  { id: 'mainnet', name: 'Public Network', description: 'Standard production environment' },
+  { id: 'mainnet', name: 'Public Network', description: 'Mainnet for real transactions' },
+  { id: 'testnet', name: 'Testnet', description: 'For testing and development' },
 ];
 
 const NetworkSettings = () => {

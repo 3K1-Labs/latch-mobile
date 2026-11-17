@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import React from 'react';
 import { TouchableOpacity } from 'react-native';
@@ -14,15 +15,25 @@ interface Props {
   onClose: () => void;
 }
 
-const OPTIONS: { value: AppearancePreference; name: string; description: string }[] = [
-  { value: 'system', name: 'System', description: "Match your phone's appearance" },
-  { value: 'light', name: 'Light', description: 'Always use light mode' },
-  { value: 'dark', name: 'Dark', description: 'Always use dark mode' },
+const OPTIONS: {
+  value: AppearancePreference;
+  name: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  {
+    value: 'system',
+    name: 'System',
+    description: "Match your phone's appearance",
+    icon: 'phone-portrait-outline',
+  },
+  { value: 'light', name: 'Light', description: 'Always use light mode', icon: 'sunny-outline' },
+  { value: 'dark', name: 'Dark', description: 'Always use dark mode', icon: 'moon-outline' },
 ];
 
 const AppearanceSheet = ({ visible, onClose }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark, preference, setPreference } = useAppTheme();
+  const { preference, setPreference } = useAppTheme();
 
   const handleSelect = (value: AppearancePreference) => {
     if (value !== preference) setPreference(value);
@@ -33,11 +44,9 @@ const AppearanceSheet = ({ visible, onClose }: Props) => {
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
+      backgroundStyle={{ backgroundColor: theme.colors.surfaceBase }}
       header={<SheetHeader title="Appearance" onBack={onClose} />}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24 }}
     >
       {OPTIONS.map((option) => (
         <TouchableOpacity
@@ -49,6 +58,7 @@ const AppearanceSheet = ({ visible, onClose }: Props) => {
             name={option.name}
             description={option.description}
             isSelected={preference === option.value}
+            icon={<Ionicons name={option.icon} size={22} color={theme.colors.tileGlyph} />}
           />
         </TouchableOpacity>
       ))}

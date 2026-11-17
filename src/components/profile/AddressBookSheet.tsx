@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import { FormikHelpers } from 'formik';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -25,6 +27,7 @@ interface Props {
 }
 
 const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
+  const theme = useTheme<Theme>();
   const [screenState, setScreenState] = useState<ScreenState>('LIST');
   const [editingEntry, setEditingEntry] = useState<AddressBookEntry | undefined>(undefined);
   const entries = useAddressBookStore((s) => s.entries);
@@ -108,8 +111,8 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
       snapPoints={['92%']}
       keyboardBehavior="extend"
       android_keyboardInputMode="adjustResize"
-      backgroundStyle={styles.sheet}
-      handleIndicatorStyle={styles.grabber}
+      backgroundStyle={[styles.sheet, { backgroundColor: theme.colors.surfaceBase }]}
+      handleIndicatorStyle={[styles.grabber, { backgroundColor: theme.colors.inputOutline }]}
       header={
         <Box
           flexDirection="row"
@@ -131,7 +134,7 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
                 setEditingEntry(undefined);
                 setScreenState('FORM');
               }}
-              style={styles.addButton}
+              style={[styles.addButton, { backgroundColor: theme.colors.inputOutline }]}
             >
               <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
             </TouchableOpacity>
@@ -177,7 +180,6 @@ const AddressBookSheet = ({ visible, onClose, prefillAddress }: Props) => {
 
 const styles = StyleSheet.create({
   sheet: {
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
   },
@@ -185,7 +187,6 @@ const styles = StyleSheet.create({
     width: 126,
     height: 8,
     borderRadius: 69,
-    backgroundColor: '#1A1A1A',
   },
   header: {
     paddingHorizontal: 24,
@@ -195,7 +196,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },

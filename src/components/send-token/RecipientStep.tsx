@@ -53,6 +53,7 @@ const ContactRow = ({
         borderRadius={20}
         justifyContent="center"
         alignItems="center"
+        backgroundColor="avatarBgStrong"
         style={styles.avatar}
       >
         <Text
@@ -161,7 +162,7 @@ const RecipientStep = ({ onSelectWallet, initialAddress }: Props) => {
             value={address}
             onChangeText={setAddress}
             placeholder="Select or Paste Address"
-            placeholderTextColor={theme.colors.textSubheading}
+            placeholderTextColor={theme.colors.textPlaceholder}
             autoCapitalize="characters"
             autoCorrect={false}
             style={styles.textInput}
@@ -264,7 +265,6 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   avatar: {
-    backgroundColor: '#413F3F',
   },
   rowText: {
     gap: 2,

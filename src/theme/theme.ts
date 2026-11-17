@@ -189,6 +189,8 @@ const sharedColors = {
   // holds the Light mode of the same variables.
   surfaceBase: '#020202',
   textSubheading: '#706F6F',
+  /** Placeholder text; fainter than readable secondary text in light mode. */
+  textPlaceholder: '#706F6F',
   textSubtle: '#413F3F',
   buttonBg: '#FFFFFF',
   buttonLabel: '#111111',
@@ -202,6 +204,17 @@ const sharedColors = {
   iconPrimary: '#FFFFFF',
   dotInactive: '#413F3F',
   chipBg: '#1F1F1F',
+  /** Circle behind an avatar initial or icon. */
+  avatarBg: '#1A1A1A',
+  avatarBgStrong: '#413F3F',
+  cardBorder: '#0F0F0F',
+  /** Glyph inside a settings option tile. */
+  tileGlyph: '#FFECC3',
+  switchOff: '#F3F3F3',
+  /** Bottom sheet surface. */
+  sheetBg: '#1c1c1c',
+  /** Dim layer behind sheets and modals. */
+  backdrop: 'rgba(18,18,18,0.9)',
   warningSurface: '#2C2000',
   warningBorder: '#4A3800',
   warningTitle: '#FFD666',
@@ -553,29 +566,45 @@ const darkTheme = createTheme({
 
 // Light mode of Figma's "Backround" collection, plus the light-page values the
 // design uses where that collection has no variable (cards, badges, controls).
+// Contrast-adjusted from Figma: a #F3F3F3 page (Figma Background 04) lets white
+// cards stand off it, and readable secondary text uses Text Color/Body
+// (#706F6F, 4.8:1) instead of Body 2 (#A09F9F, 2.5:1).
 const lightColors: Partial<typeof darkTheme.colors> = {
-  surfaceBase: '#FAFAFA',
-  mainBackground: '#FAFAFA',
-  onboardingbg: '#FAFAFA',
+  surfaceBase: '#F3F3F3',
+  mainBackground: '#F3F3F3',
+  onboardingbg: '#F3F3F3',
   secondaryBackground: '#FFFFFF',
   cardBackground: '#FFFFFF',
   cardbg: '#FFFFFF',
   inputBox: '#FFFFFF',
-  inputOutline: '#F5F5F5',
+  inputOutline: '#EBEBEB',
   buttonBg: '#111111',
   buttonLabel: '#FFFFFF',
   textPrimary: '#110F0F',
   textSecondary: '#706F6F',
   textTertiary: '#A09F9F',
-  textSubheading: '#A09F9F',
+  textSubheading: '#706F6F',
+  textPlaceholder: '#A09F9F',
   textMuted: '#706F6F',
   controlBg: '#FBFBFB',
-  badgeBg: '#F3F3F3',
+  badgeBg: '#EBEBEB',
   sheetDim: '#F3F3F3',
   btnDisabled: '#E3E3E3',
   iconPrimary: '#363636',
   dotInactive: '#E3E3E3',
   chipBg: '#F8F8F8',
+  avatarBg: '#EBEBEB',
+  avatarBgStrong: '#E3E3E3',
+  cardBorder: '#EBEBEB',
+  tileGlyph: '#363636',
+  switchOff: '#DADADA',
+  sheetBg: '#F3F3F3',
+  backdrop: 'rgba(0,0,0,0.35)',
+  // Fixed-dark palette entries the app uses as surfaces and lines, not text:
+  // bg11 is the raised-card colour, gray800/900 are handles, dividers, borders.
+  bg11: '#FFFFFF',
+  gray800: '#E3E3E3',
+  gray900: '#EBEBEB',
   warningSurface: '#FFF9EC',
   warningBorder: '#FFF4DD',
   warningTitle: '#907500',

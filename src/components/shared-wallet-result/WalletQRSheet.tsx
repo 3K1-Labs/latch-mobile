@@ -1,4 +1,6 @@
 import Text from '@/src/components/shared/Text';
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useRef } from 'react';
 import { Image, Modal, Share, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -16,6 +18,7 @@ interface WalletQRSheetProps {
 }
 
 const WalletQRSheet: React.FC<WalletQRSheetProps> = ({ visible, address, onClose }) => {
+  const theme = useTheme<Theme>();
   const cardRef = useRef<View>(null);
 
   const handleShare = async () => {
@@ -30,7 +33,7 @@ const WalletQRSheet: React.FC<WalletQRSheetProps> = ({ visible, address, onClose
       <View style={styles.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
 
-        <Box bg="bg11" ref={cardRef} style={styles.card} collapsable={false}>
+        <Box bg="bg11" ref={cardRef} style={[styles.card, { borderColor: theme.colors.inputOutline }]} collapsable={false}>
           <View style={styles.logoRow}>
             <Image source={LATCH_LOGO} style={styles.latchLogo} resizeMode="contain" />
             <Text variant="h9" color="textPrimary" fontWeight="700" style={{ letterSpacing: 1.5 }}>
@@ -62,7 +65,7 @@ const WalletQRSheet: React.FC<WalletQRSheetProps> = ({ visible, address, onClose
             />
           </View>
 
-          <View style={styles.addressPill}>
+          <View style={[styles.addressPill, { backgroundColor: theme.colors.chipBg, borderColor: theme.colors.inputOutline }]}>
             <Text
               variant="p8"
               color="textSecondary"
@@ -101,7 +104,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
   logoRow: {
     flexDirection: 'row',
@@ -120,12 +122,10 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   addressPill: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
     width: '100%',
   },
   shareBtn: {

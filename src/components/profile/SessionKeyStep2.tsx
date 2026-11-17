@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 
@@ -6,6 +7,7 @@ import { SetupButton } from '@/src/components/onboarding/SetupChrome';
 import Box from '@/src/components/shared/Box';
 import { PillField, PillInput } from '@/src/components/shared/PillField';
 import Text from '@/src/components/shared/Text';
+import { Theme } from '@/src/theme/theme';
 import SessionKeyTokenPicker, { largestBalanceCode, useHeldTokens } from './SessionKeyTokenPicker';
 
 interface Props {
@@ -34,6 +36,7 @@ const SectionLabel = ({ children }: { children: string }) => (
 );
 
 const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
+  const theme = useTheme<Theme>();
   const tokens = useHeldTokens();
   const [pickerVisible, setPickerVisible] = useState(false);
 
@@ -75,7 +78,14 @@ const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
                   accessibilityState={{ selected }}
                   activeOpacity={0.7}
                   onPress={() => setFieldValue('duration', d)}
-                  style={[styles.duration, selected && styles.durationSelected]}
+                  style={[
+                    styles.duration,
+                    {
+                      borderColor: theme.colors.inputOutline,
+                      backgroundColor: theme.colors.inputBox,
+                    },
+                    selected && styles.durationSelected,
+                  ]}
                 >
                   <Text
                     fontSize={14}
@@ -139,14 +149,30 @@ const SessionKeyStep2 = ({ values, setFieldValue, onNext }: Props) => {
                     <Box
                       alignItems="center"
                       justifyContent="center"
-                      style={[styles.radio, selected && styles.radioSelected]}
+                      style={[
+                        styles.radio,
+                        { borderColor: theme.colors.inputOutline },
+                        selected && styles.radioSelected,
+                      ]}
                     >
                       {selected && <Box style={styles.radioDot} />}
                     </Box>
-                    {next && <Box style={[styles.connector, linked && styles.connectorLinked]} />}
+                    {next && (
+                      <Box
+                        style={[
+                          styles.connector,
+                          { backgroundColor: theme.colors.inputOutline },
+                          linked && styles.connectorLinked,
+                        ]}
+                      />
+                    )}
                   </Box>
                   <Box flex={1} gap="xs" style={styles.actionText}>
-                    <Text fontSize={14} lineHeight={22} color={selected ? 'textPrimary' : 'textMuted'}>
+                    <Text
+                      fontSize={14}
+                      lineHeight={22}
+                      color={selected ? 'textPrimary' : 'textMuted'}
+                    >
                       {action.title}
                     </Text>
                     <Text fontSize={14} lineHeight={18} color="textMuted">
@@ -193,8 +219,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 60,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
-    backgroundColor: '#0F0F0F',
   },
   durationSelected: {
     borderColor: GREEN,
@@ -232,7 +256,6 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: '#2A2A2A',
   },
   radioSelected: {
     borderColor: GREEN,
@@ -249,7 +272,6 @@ const styles = StyleSheet.create({
     minHeight: 24,
     marginVertical: 4,
     borderRadius: 1,
-    backgroundColor: '#1A1A1A',
   },
   connectorLinked: {
     backgroundColor: GREEN,

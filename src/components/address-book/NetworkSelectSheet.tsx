@@ -39,7 +39,7 @@ const NetworkSelectSheet = ({
     >
       <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
       <Box
-        backgroundColor="cardbg"
+        backgroundColor="sheetBg"
         borderTopLeftRadius={32}
         borderTopRightRadius={32}
         paddingHorizontal="m"

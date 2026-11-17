@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { Image } from 'expo-image';
@@ -24,6 +26,7 @@ interface Props {
 }
 
 const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) => {
+  const theme = useTheme<Theme>();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -55,12 +58,13 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={() => dismiss(onCancel)}>
       <TouchableWithoutFeedback onPress={() => dismiss(onCancel)}>
-        <View style={styles.backdrop} />
+        <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }]} />
       </TouchableWithoutFeedback>
 
       <Animated.View
         style={[
           styles.sheet,
+          { backgroundColor: theme.colors.surfaceBase },
           {
             paddingBottom: Math.max(insets.bottom, 24),
             transform: [{ translateY }],
@@ -80,7 +84,7 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
             accessibilityLabel="Close"
             hitSlop={8}
             onPress={() => dismiss(onCancel)}
-            style={styles.close}
+            style={[styles.close, { backgroundColor: theme.colors.inputOutline }]}
           >
             <Image source={CLOSE} contentFit="contain" style={styles.closeIcon} />
           </TouchableOpacity>
@@ -112,9 +116,9 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
               accessibilityRole="button"
               activeOpacity={0.8}
               onPress={() => dismiss(onConfirm)}
-              style={[styles.pill, styles.confirm]}
+              style={[styles.pill, styles.confirm, { backgroundColor: theme.colors.buttonBg }]}
             >
-              <Text fontSize={12} lineHeight={20} style={{ color: '#111111' }}>
+              <Text fontSize={12} lineHeight={20} color="buttonLabel">
                 Yes, Go Ahead
               </Text>
             </TouchableOpacity>
@@ -128,13 +132,11 @@ const RemoveMemberSheet: React.FC<Props> = ({ visible, onCancel, onConfirm }) =>
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(18,18,18,0.9)',
   },
   sheet: {
     position: 'absolute',
     bottom: 0,
     width: '100%',
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: 24,
@@ -152,7 +154,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },

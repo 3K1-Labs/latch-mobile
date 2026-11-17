@@ -618,7 +618,7 @@ const Biometrics = () => {
                           accessibilityLabel={`Unlock with ${biometricLabel}`}
                           activeOpacity={0.6}
                           onPress={triggerBiometrics}
-                          style={[styles.key, { width: keySize }]}
+                          style={[styles.key, { borderColor: theme.colors.inputOutline, backgroundColor: theme.colors.inputBox }, { width: keySize }]}
                         >
                           {renderBiometricGlyph(26)}
                         </TouchableOpacity>
@@ -634,7 +634,7 @@ const Biometrics = () => {
                         accessibilityLabel={key === 'del' ? 'Delete' : key}
                         activeOpacity={0.6}
                         onPress={() => (!resetting ? handlePinKey(key) : handleResetPinKey(key))}
-                        style={[styles.key, { width: keySize }]}
+                        style={[styles.key, { borderColor: theme.colors.inputOutline, backgroundColor: theme.colors.inputBox }, { width: keySize }]}
                       >
                         {key === 'del' ? (
                           <Ionicons name="backspace-outline" size={26} color={theme.colors.textPrimary} />
@@ -684,7 +684,7 @@ const Biometrics = () => {
                 accessibilityRole="button"
                 activeOpacity={0.8}
                 onPress={() => setShowPin(true)}
-                style={styles.secondaryButton}
+                style={[styles.secondaryButton, { backgroundColor: theme.colors.inputBox, borderColor: theme.colors.inputOutline }]}
               >
                 <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
                   Use PIN instead
@@ -790,8 +790,6 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
-    backgroundColor: '#0F0F0F',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -806,9 +804,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     height: 48,
     borderRadius: 100,
-    backgroundColor: '#0F0F0F',
     borderWidth: 1,
-    borderColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },

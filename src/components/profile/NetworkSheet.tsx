@@ -10,13 +10,12 @@ import { ACTIVE_NETWORK, MAINNET_NETWORK, TESTNET_NETWORK } from '@/src/constant
 import { switchActiveNetwork } from '@/src/lib/network-switch';
 import { accountUsableOnNetwork, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 
 type NetworkId = 'testnet' | 'mainnet';
 
 const NETWORKS: { id: NetworkId; name: string; description: string }[] = [
-  { id: 'testnet', name: 'Testnet', description: 'Environment for testing' },
-  { id: 'mainnet', name: 'Public Network', description: 'Standard production environment' },
+  { id: 'mainnet', name: 'Public Network', description: 'Mainnet for real transactions' },
+  { id: 'testnet', name: 'Testnet', description: 'For testing and development' },
 ];
 
 interface Props {
@@ -32,7 +31,6 @@ interface Props {
 
 const NetworkSheet = ({ visible, onClose, onNetworkChanged, onNeedsAccount }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const [switching, setSwitching] = useState(false);
   // The optimistic pick while a switch is in flight. Null the rest of the time,
   // when the selection is read straight off ACTIVE_NETWORK — re-read on every
@@ -76,11 +74,9 @@ const NetworkSheet = ({ visible, onClose, onNetworkChanged, onNeedsAccount }: Pr
       onClose={onClose}
       snapPoints={['92%']}
       scrollable
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
+      backgroundStyle={{ backgroundColor: theme.colors.surfaceBase }}
       header={<SheetHeader title="Network" onBack={onClose} />}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 20 }}
+      contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8 }}
     >
       {NETWORKS.map((network) => (
         <TouchableOpacity
@@ -98,7 +94,7 @@ const NetworkSheet = ({ visible, onClose, onNetworkChanged, onNeedsAccount }: Pr
       ))}
       {switching && (
         <Box mt="m" alignItems="center">
-          <ActivityIndicator size="small" color="orange" />
+          <ActivityIndicator size="small" color={theme.colors.primary} />
         </Box>
       )}
     </BottomSheet>

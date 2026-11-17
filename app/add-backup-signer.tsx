@@ -1,3 +1,4 @@
+import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 /**
  * add-backup-signer.tsx — mint and authorize a solo backup signer.
  *
@@ -66,6 +67,7 @@ const NameSchema = Yup.object().shape({
 
 export default function AddBackupSigner() {
   const theme = useTheme<Theme>();
+  const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
   const { accounts, activeAccountIndex, updateAccountDevicesAt } = useWalletStore();
   const activeAccount = accounts[activeAccountIndex];
@@ -161,7 +163,7 @@ export default function AddBackupSigner() {
       backgroundColor="surfaceBase"
       style={{ paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 20) }}
     >
-      <StatusBar style="light" />
+      <StatusBar style={statusBarStyle} />
 
       <Box flexDirection="row" alignItems="center" style={styles.header}>
         <RoundBackButton onPress={() => router.back()} disabled={busy} />

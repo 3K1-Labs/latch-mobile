@@ -20,11 +20,7 @@ const TAGS: Record<OwnerTag, { label: string; color: string; bg: string }> = {
 export const OwnerTagPill = ({ tag }: { tag: OwnerTag }) => {
   const { label, color, bg } = TAGS[tag];
   return (
-    <Box
-      borderColor="inputOutline"
-      borderWidth={1}
-      style={[styles.tag, { backgroundColor: bg }]}
-    >
+    <Box borderColor="inputOutline" borderWidth={1} style={[styles.tag, { backgroundColor: bg }]}>
       <Text fontSize={14} lineHeight={14} style={{ color }}>
         {label}
       </Text>
@@ -50,7 +46,12 @@ const OwnerRow = ({ name, tag, onRemove }: OwnerRowProps) => (
     style={styles.row}
   >
     <Box flex={1} flexDirection="row" alignItems="center" gap="s">
-      <Box alignItems="center" justifyContent="center" style={styles.avatar}>
+      <Box
+        alignItems="center"
+        justifyContent="center"
+        backgroundColor="avatarBg"
+        style={styles.avatar}
+      >
         <Image source={ICONS.person} contentFit="contain" style={styles.personIcon} />
       </Box>
       <Box flexShrink={1} flexDirection="row" alignItems="center" gap="xs">
@@ -84,7 +85,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: '#1A1A1A',
   },
   personIcon: {
     width: 13,

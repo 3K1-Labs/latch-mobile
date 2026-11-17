@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, TouchableOpacity } from 'react-native';
@@ -6,6 +7,7 @@ import { StyleSheet, TouchableOpacity } from 'react-native';
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import { WalletAccount } from '@/src/store/wallet';
+import { Theme } from '@/src/theme/theme';
 import { shortenAddress } from '@/src/utils';
 import { copyToClipboard } from '@/src/utils/copy-to-clipboard';
 
@@ -32,6 +34,7 @@ const AccountItem = ({
   isDeploying,
   avatarDataUri,
 }: AccountItemProps) => {
+  const theme = useTheme<Theme>();
   const address = account.smartAccountAddress || account.gAddress || '';
 
   return (
@@ -46,10 +49,11 @@ const AccountItem = ({
         flexDirection="row"
         alignItems="center"
         backgroundColor="inputBox"
+        borderColor="cardBorder"
         gap="sm"
         style={[styles.card, isActive && styles.activeCard]}
       >
-        <Box style={styles.avatar}>
+        <Box backgroundColor="avatarBg" style={styles.avatar}>
           {avatarDataUri ? (
             <Image source={{ uri: avatarDataUri }} contentFit="cover" style={styles.avatarImage} />
           ) : (
@@ -94,7 +98,12 @@ const AccountItem = ({
           </TouchableOpacity>
         )}
 
-        <Image source={ICONS.chevron} contentFit="contain" style={styles.chevron} />
+        <Image
+          source={ICONS.chevron}
+          contentFit="contain"
+          tintColor={theme.colors.iconPrimary}
+          style={styles.chevron}
+        />
       </Box>
     </TouchableOpacity>
   );
@@ -104,7 +113,6 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#0F0F0F',
     paddingHorizontal: 20,
     paddingVertical: 14,
   },
@@ -117,7 +125,6 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: '#1A1A1A',
   },
   avatarImage: {
     width: '100%',

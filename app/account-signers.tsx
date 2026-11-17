@@ -1,3 +1,4 @@
+import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 /**
  * account-signers.tsx — every signer on the active account: the primary
  * device plus any solo backup signers (src/lib/backup-signer-tx.ts), each
@@ -39,6 +40,7 @@ const ICONS = {
 
 export default function AccountSigners() {
   const theme = useTheme<Theme>();
+  const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
   const { accounts, activeAccountIndex, updateAccountDevicesAt, syncSignersFromChain } =
     useWalletStore();
@@ -200,7 +202,7 @@ export default function AccountSigners() {
       >
         {primary && (
           <Box alignSelf="flex-start" backgroundColor="inputOutline" style={styles.pill}>
-            <Text fontSize={12} lineHeight={12} style={styles.pillText}>
+            <Text fontSize={12} lineHeight={12} color="textTertiary">
               Primary Device
             </Text>
           </Box>
@@ -253,7 +255,7 @@ export default function AccountSigners() {
 
   return (
     <Box flex={1} backgroundColor="surfaceBase" style={{ paddingTop: insets.top }}>
-      <StatusBar style="light" />
+      <StatusBar style={statusBarStyle} />
 
       <Box flexDirection="row" alignItems="center" justifyContent="space-between" style={styles.header}>
         <RoundBackButton onPress={() => router.back()} />
@@ -266,9 +268,14 @@ export default function AccountSigners() {
           activeOpacity={0.7}
           hitSlop={8}
           onPress={() => router.push('/add-backup-signer')}
-          style={styles.addButton}
+          style={[styles.addButton, { backgroundColor: theme.colors.controlBg }]}
         >
-          <Image source={ICONS.plus} contentFit="contain" style={styles.addIcon} />
+          <Image
+            source={ICONS.plus}
+            contentFit="contain"
+            tintColor={theme.colors.iconPrimary}
+            style={styles.addIcon}
+          />
         </TouchableOpacity>
       </Box>
 
@@ -349,7 +356,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -388,9 +394,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 6,
-  },
-  pillText: {
-    color: '#413F3F',
   },
   deviceIcon: {
     width: 13.71,

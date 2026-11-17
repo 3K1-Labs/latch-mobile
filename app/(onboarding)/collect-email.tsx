@@ -29,6 +29,7 @@ import Box from '@/src/components/shared/Box';
 import LoadingBlur from '@/src/components/shared/LoadingBlur';
 import Text from '@/src/components/shared/Text';
 import { LATCH_PRIVACY_URL } from '@/src/constants/constants';
+import { openInAppBrowser } from '@/src/lib/open-in-app-browser';
 import { useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
 import { useTheme } from '@shopify/restyle';
@@ -36,7 +37,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useRef, useState } from 'react';
 import {
-  Linking,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -296,7 +296,7 @@ const CollectEmail = () => {
                 variant="caption"
                 color="primary700"
                 fontWeight="600"
-                onPress={() => LATCH_PRIVACY_URL && Linking.openURL(LATCH_PRIVACY_URL)}
+                onPress={() => openInAppBrowser(LATCH_PRIVACY_URL)}
               >
                 {' '}
                 privacy policy

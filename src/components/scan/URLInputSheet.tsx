@@ -25,13 +25,13 @@ const URLInputSheet = ({ url, onChangeUrl, onConnect, isConnecting = false }: UR
 
   return (
     <Box
-      backgroundColor="cardbg"
+      backgroundColor="sheetBg"
       borderTopLeftRadius={32}
       borderTopRightRadius={32}
       padding="m"
       paddingBottom="xl"
     >
-      <Text variant="p6" color="textWhite" fontWeight="700" mb="m">
+      <Text variant="p6" color="textPrimary" fontWeight="700" mb="m">
         Input URL
       </Text>
 
@@ -52,7 +52,7 @@ const URLInputSheet = ({ url, onChangeUrl, onConnect, isConnecting = false }: UR
           }
           style={{
             flex: 1,
-            color: theme.colors.textWhite,
+            color: theme.colors.textPrimary,
             fontSize: 16,
             fontFamily: 'SFproRegular',
             width: '100%',

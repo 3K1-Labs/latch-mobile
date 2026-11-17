@@ -1,3 +1,5 @@
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, TouchableOpacity } from 'react-native';
@@ -23,6 +25,7 @@ interface Props {
 }
 
 const PermissionsSheet = ({ visible, onClose }: Props) => {
+  const theme = useTheme<Theme>();
   const { accounts, activeAccountIndex } = useWalletStore();
   const accountAddress = accounts[activeAccountIndex]?.smartAccountAddress ?? '';
   const { byAccount, rehydrate, addSessionKey, revokeSessionKey } = usePermissions();
@@ -82,9 +85,9 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
         setFormStep(1);
         setIsCreating(true);
       }}
-      style={styles.addButton}
+      style={[styles.addButton, { backgroundColor: theme.colors.inputOutline }]}
     >
-      <Image source={PLUS} contentFit="contain" style={styles.addIcon} />
+      <Image source={PLUS} contentFit="contain" tintColor={theme.colors.iconPrimary} style={styles.addIcon} />
     </TouchableOpacity>
   );
 
@@ -95,8 +98,8 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
       snapPoints={['92%']}
       keyboardBehavior="extend"
       android_keyboardInputMode="adjustResize"
-      backgroundStyle={styles.sheet}
-      handleIndicatorStyle={styles.grabber}
+      backgroundStyle={[styles.sheet, { backgroundColor: theme.colors.surfaceBase }]}
+      handleIndicatorStyle={[styles.grabber, { backgroundColor: theme.colors.inputOutline }]}
       header={
         isCreating && formStep === 4 ? undefined : (
           <Box
@@ -140,7 +143,11 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
               accessibilityRole="button"
               activeOpacity={0.7}
               onPress={() => setRevokeTarget(null)}
-              style={[styles.pill, styles.cancelPill]}
+              style={[
+                styles.pill,
+                styles.cancelPill,
+                { backgroundColor: theme.colors.inputBox, borderColor: theme.colors.inputOutline },
+              ]}
             >
               <Text fontSize={16} lineHeight={24} fontFamily="SFproMedium" color="textPrimary">
                 Cancel
@@ -229,7 +236,6 @@ const PermissionsSheet = ({ visible, onClose }: Props) => {
 
 const styles = StyleSheet.create({
   sheet: {
-    backgroundColor: '#020202',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
   },
@@ -237,7 +243,6 @@ const styles = StyleSheet.create({
     width: 126,
     height: 8,
     borderRadius: 69,
-    backgroundColor: '#1A1A1A',
   },
   header: {
     paddingHorizontal: 24,
@@ -254,7 +259,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -286,9 +290,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cancelPill: {
-    backgroundColor: '#0F0F0F',
     borderWidth: 1,
-    borderColor: '#1A1A1A',
   },
   revokePill: {
     backgroundColor: '#E23A10',

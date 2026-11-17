@@ -10,7 +10,6 @@ import { FIAT_CURRENCIES, type FiatCurrencyCode } from '@/src/constants/currenci
 import { useFxRates } from '@/src/hooks/use-fx-rates';
 import { useDisplayCurrencyStore } from '@/src/store/display-currency';
 import { Theme } from '@/src/theme/theme';
-import { useAppTheme } from '@/src/theme/ThemeContext';
 
 interface Props {
   visible: boolean;
@@ -19,7 +18,6 @@ interface Props {
 
 const CurrencySheet = ({ visible, onClose }: Props) => {
   const theme = useTheme<Theme>();
-  const { isDark } = useAppTheme();
   const selected = useDisplayCurrencyStore((s) => s.currency);
   const setCurrency = useDisplayCurrencyStore((s) => s.setCurrency);
   const { data: rates } = useFxRates();
@@ -36,19 +34,16 @@ const CurrencySheet = ({ visible, onClose }: Props) => {
       onClose={onClose}
       snapPoints={['92%']}
       scrollable
-      backgroundStyle={{
-        backgroundColor: isDark ? theme.colors.cardbg : theme.colors.mainBackground,
-      }}
+      backgroundStyle={{ backgroundColor: theme.colors.surfaceBase }}
       header={<SheetHeader title="Currency" onBack={onClose} />}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24 }}
     >
-      <Text variant="p8" color="textSecondary" mb="m">
-        This is a device setting. Token amounts stay the same; only fiat labels convert from USD. If a
-        rate is missing, figures fall back to USD and say so.
+      <Text fontSize={14} lineHeight={22} color="textSubheading" mb="l">
+        This is a device setting. Token amounts stay the same; only fiat labels convert from USD. If
+        a rate is missing, figures fall back to USD and say so.
       </Text>
       {FIAT_CURRENCIES.map((currency) => {
-        const rateMissing =
-          currency.code !== 'USD' && !(rates && Number(rates[currency.code]) > 0);
+        const rateMissing = currency.code !== 'USD' && !(rates && Number(rates[currency.code]) > 0);
         return (
           <TouchableOpacity
             key={currency.code}
@@ -61,6 +56,16 @@ const CurrencySheet = ({ visible, onClose }: Props) => {
                 rateMissing ? 'Rate unavailable — will show USD' : `${currency.symbol} display`
               }
               isSelected={selected === currency.code}
+              icon={
+                <Text
+                  fontSize={18}
+                  lineHeight={24}
+                  fontFamily="SFproSemibold"
+                  style={{ color: theme.colors.tileGlyph }}
+                >
+                  {currency.symbol}
+                </Text>
+              }
             />
           </TouchableOpacity>
         );

@@ -172,7 +172,7 @@ export default function TxAuthModal({
         />
 
         <Box
-          backgroundColor="cardbg"
+          backgroundColor="sheetBg"
           borderTopLeftRadius={32}
           borderTopRightRadius={32}
           paddingHorizontal="m"

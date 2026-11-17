@@ -1,12 +1,10 @@
 import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
-import { SHEET_HEIGHT } from '@/src/constants/constants';
 import { useNow } from '@/src/hooks/use-now';
 import type { PendingPacketView } from '@/src/hooks/use-pending-packets';
 import { formatTimeRemaining, isExpiringSoon } from '@/src/lib/expiry';
 import { Theme } from '@/src/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -17,7 +15,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-const EMPTY_MASCOT = require('@/src/assets/images/home/empty-mascot.svg');
+import HistoryEmptyState from './HistoryEmptyState';
 
 interface Props {
   requests: PendingPacketView[];
@@ -30,8 +28,6 @@ interface Props {
 
 const truncate = (addr: string): string =>
   addr.length > 10 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
-
-const height = SHEET_HEIGHT / 1.6;
 
 /**
  * History tab pending-filter content. Renders the cosign queue for the
@@ -74,7 +70,12 @@ const PendingCosignList: React.FC<Props> = ({
 
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: insetBottom + 280 }}
+      contentContainerStyle={{
+        paddingHorizontal: 24,
+        // The empty state lines up with the other filters', which have no top gap.
+        paddingTop: requests.length === 0 ? 0 : 24,
+        paddingBottom: insetBottom + 280,
+      }}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -85,22 +86,10 @@ const PendingCosignList: React.FC<Props> = ({
       }
     >
       {requests.length === 0 ? (
-        <Box flex={1} justifyContent={'center'} height={height} paddingTop="xl" alignItems="center">
-          <Image source={EMPTY_MASCOT} contentFit="contain" style={styles.emptyMascot} />
-          <Text
-            fontSize={18}
-            lineHeight={26}
-            fontFamily="SFproMedium"
-            color="textPrimary"
-            textAlign="center"
-            mb="xs"
-          >
-            Nothing Pending
-          </Text>
-          <Text fontSize={14} lineHeight={22} color="textSubheading" textAlign="center">
-            Transactions awaiting signature will appear here.
-          </Text>
-        </Box>
+        <HistoryEmptyState
+          title="Nothing Pending"
+          subtitle="Transactions awaiting signature will appear here."
+        />
       ) : (
         requests.map((req) => {
           const ready = req.signatureCount >= req.threshold;
@@ -181,11 +170,6 @@ const styles = StyleSheet.create({
   card: {
     paddingHorizontal: 18,
     paddingVertical: 16,
-  },
-  emptyMascot: {
-    width: 120,
-    height: 120,
-    marginBottom: 12,
   },
 });
 
