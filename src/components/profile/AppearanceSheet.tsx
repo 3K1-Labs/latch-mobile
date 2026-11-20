@@ -24,7 +24,7 @@ const OPTIONS: {
   {
     value: 'system',
     name: 'System',
-    description: "Match your phone's appearance",
+    description: 'Match your phone’s appearance',
     icon: 'phone-portrait-outline',
   },
   { value: 'light', name: 'Light', description: 'Always use light mode', icon: 'sunny-outline' },

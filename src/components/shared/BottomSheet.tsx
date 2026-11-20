@@ -97,7 +97,7 @@ const BottomSheet = ({
       handleIndicatorStyle={{ backgroundColor: theme.colors.gray800, width: 36, height: 4 }}
       {...rest}
     >
-      {header}
+      {scrollable || snapPoints ? header : null}
       {scrollable ? (
         <BottomSheetScrollView
           showsVerticalScrollIndicator={false}
@@ -120,9 +120,11 @@ const BottomSheet = ({
         </View>
       ) : (
         // Dynamic-sizing sheet: BottomSheetView measures its content so the sheet
-        // grows to fit.
-        <BottomSheetView style={contentContainerStyle ?? defaultContentStyle}>
-          {children}
+        // grows to fit. It is absolutely positioned, so the header goes inside it
+        // to be measured and to push the body down.
+        <BottomSheetView>
+          {header}
+          <View style={contentContainerStyle ?? defaultContentStyle}>{children}</View>
         </BottomSheetView>
       )}
     </BottomSheetModal>
