@@ -1,3 +1,4 @@
+import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { isDepositIntentExpired, ONRAMP_INTENT_TTL_SECONDS } from '@/src/api/latch-auth';
 import HistoryItem from '@/src/components/history/HistoryItem';
 import BuyXLMSheet from '@/src/components/home/BuyXLMSheet';
@@ -21,7 +22,6 @@ import { discoverMigration } from '@/src/lib/migration';
 import { useNotificationStore } from '@/src/store/notification-store';
 import { avatarKey, useWalletStore } from '@/src/store/wallet';
 import { Theme } from '@/src/theme/theme';
-import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import {
   calculatePortfolio24hChangeFormatted,
   getTotalUSDBalance,
@@ -444,7 +444,7 @@ const Home = () => {
                 numberOfLines={1}
                 style={styles.greeting}
               >
-                Hi, {activeAccountName}
+                 {activeAccountName}
               </Text>
               <Text
                 variant="p6"
