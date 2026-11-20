@@ -630,28 +630,6 @@ const Home = () => {
           ))}
         </Box>
 
-        {(portfolio ?? []).length > 0 && (
-          <Box paddingHorizontal="l" style={styles.section}>
-            <SectionHeader title="My Assets" />
-            <Box gap="s">
-              {(portfolio ?? []).map((token) => {
-                const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
-                return (
-                  <TokenRow
-                    key={token.code + (token.issuer ?? '')}
-                    token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
-                    fiatLabel={
-                      formatToken(token.amount, livePrices[token.code]?.price, { approx: false })
-                        .text
-                    }
-                    showBalance={showBalance}
-                  />
-                );
-              })}
-            </Box>
-          </Box>
-        )}
-
         <Box style={styles.banners}>
           <FlatList
             horizontal
@@ -686,6 +664,28 @@ const Home = () => {
             ))}
           </Box>
         </Box>
+
+        {(portfolio ?? []).length > 0 && (
+          <Box paddingHorizontal="l" style={styles.section}>
+            <SectionHeader title="My Assets" />
+            <Box gap="s">
+              {(portfolio ?? []).map((token) => {
+                const usd = parseFloat(token.amount) * (livePrices[token.code]?.price || 0);
+                return (
+                  <TokenRow
+                    key={token.code + (token.issuer ?? '')}
+                    token={{ ...token, usdValue: isNaN(usd) ? 0 : usd }}
+                    fiatLabel={
+                      formatToken(token.amount, livePrices[token.code]?.price, { approx: false })
+                        .text
+                    }
+                    showBalance={showBalance}
+                  />
+                );
+              })}
+            </Box>
+          </Box>
+        )}
 
         {migrationState?.state === 'not_started' && (
           <Box paddingHorizontal="l" mb="m">

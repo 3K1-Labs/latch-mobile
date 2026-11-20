@@ -2,6 +2,8 @@ import Box from '@/src/components/shared/Box';
 import Text from '@/src/components/shared/Text';
 import TokenIcon from '@/src/components/shared/TokenIcon';
 import { useTokenIcon } from '@/src/hooks/use-token-list';
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { Image } from 'expo-image';
 import React, { useRef } from 'react';
 import { Pressable, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
@@ -17,7 +19,12 @@ export const sanitizeAmount = (raw: string): string => {
   let s = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
   const dot = s.indexOf('.');
   if (dot !== -1) {
-    s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '').slice(0, MAX_DECIMALS);
+    s =
+      s.slice(0, dot + 1) +
+      s
+        .slice(dot + 1)
+        .replace(/\./g, '')
+        .slice(0, MAX_DECIMALS);
   }
   if (s.startsWith('.')) s = `0${s}`;
   s = s.replace(/^0+(?=\d)/, '');
@@ -43,6 +50,7 @@ const AmountEntryStep = ({
   onPresetPress,
   onChangeToken,
 }: Props) => {
+  const theme = useTheme<Theme>();
   const inputRef = useRef<TextInput>(null);
   const iconUrl = useTokenIcon(selectedToken.code, selectedToken.issuer);
   const isEmpty = amount === '0';
@@ -67,7 +75,16 @@ const AmountEntryStep = ({
           >
             {amount}
           </Text>
-          <Box style={[styles.caret, { height: big ? 57 : 41, marginBottom: big ? 7 : 5 }]} />
+          <Box
+            style={[
+              styles.caret,
+              {
+                backgroundColor: theme.colors.textPrimary,
+                height: big ? 57 : 41,
+                marginBottom: big ? 7 : 5,
+              },
+            ]}
+          />
           <Text
             fontFamily="SFproSemibold"
             fontSize={16}
@@ -102,8 +119,22 @@ const AmountEntryStep = ({
           activeOpacity={0.7}
           onPress={onChangeToken}
         >
-          <Box flexDirection="row" alignItems="center" style={[styles.pill, styles.tokenPill]}>
-            <Box width={20} height={20} borderRadius={10} overflow="hidden" style={styles.tokenBg}>
+          <Box
+            flexDirection="row"
+            alignItems="center"
+            style={[
+              styles.pill,
+              { borderColor: theme.colors.inputOutline, backgroundColor: theme.colors.inputBox },
+              styles.tokenPill,
+            ]}
+          >
+            <Box
+              width={20}
+              height={20}
+              borderRadius={10}
+              overflow="hidden"
+              style={[styles.tokenBg, { backgroundColor: theme.colors.badgeBg }]}
+            >
               <TokenIcon iconUrl={iconUrl} size={20} />
             </Box>
             <Text fontSize={12} lineHeight={20} color="textSubheading">
@@ -113,7 +144,12 @@ const AmountEntryStep = ({
           </Box>
         </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" activeOpacity={0.7} onPress={onMaxPress}>
-          <Box style={styles.pill}>
+          <Box
+            style={[
+              styles.pill,
+              { borderColor: theme.colors.inputOutline, backgroundColor: theme.colors.inputBox },
+            ]}
+          >
             <Text fontSize={12} lineHeight={20} color="textSubheading">
               Max
             </Text>
@@ -121,7 +157,7 @@ const AmountEntryStep = ({
         </TouchableOpacity>
       </Box>
 
-      <Box style={styles.divider} />
+      <Box style={[styles.divider, { backgroundColor: theme.colors.inputOutline }]} />
 
       <Box flexDirection="row" gap="sm" style={styles.presets}>
         {PRESETS.map((usd) => (
@@ -133,7 +169,13 @@ const AmountEntryStep = ({
             onPress={() => onPresetPress(usd)}
             style={styles.flex}
           >
-            <Box style={[styles.preset, !canUsePresets && styles.disabled]}>
+            <Box
+              style={[
+                styles.preset,
+                { borderColor: theme.colors.inputOutline, backgroundColor: theme.colors.inputBox },
+                !canUsePresets && styles.disabled,
+              ]}
+            >
               <Text fontSize={16} lineHeight={24} letterSpacing={0.32} color="textPrimary">
                 ${usd}
               </Text>
@@ -158,7 +200,6 @@ const styles = StyleSheet.create({
   caret: {
     width: 2,
     borderRadius: 2,
-    backgroundColor: '#FFFFFF',
     marginLeft: 2,
     marginRight: 2,
   },
@@ -173,15 +214,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 40,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
-    backgroundColor: '#0F0F0F',
   },
   tokenPill: {
     gap: 8,
   },
-  tokenBg: {
-    backgroundColor: '#121212',
-  },
+  tokenBg: {},
   chevron: {
     width: 16,
     height: 16,
@@ -191,7 +228,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 24,
     marginTop: 18,
     marginBottom: 18,
-    backgroundColor: '#1A1A1A',
   },
   presets: {
     paddingHorizontal: 24,
@@ -202,8 +238,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 40,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
-    backgroundColor: '#0F0F0F',
   },
   disabled: {
     opacity: 0.4,

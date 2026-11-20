@@ -48,9 +48,7 @@ export default {
     // (Settings → Appearance → System).
     userInterfaceStyle: 'automatic',
     splash: {
-      // image: './assets/images/icon.png',
-      // resizeMode: 'cover',
-      backgroundColor: '#121212',
+      backgroundColor: '#F3F3F3',
     },
     ios: {
       supportsTablet: true,
@@ -115,16 +113,15 @@ export default {
       [
         'expo-splash-screen',
         {
-          // 1x1 transparent image: keeps a logo-less dark splash while still
-          // generating the splashscreen_logo drawable that Theme.App.SplashScreen
-          // hard-references, so AAPT2 release resource linking succeeds.
-          image: './assets/images/splash-transparent.png',
-          imageWidth: 48,
+          // Same logo, size and backgrounds as the first frame of app/index.tsx,
+          // so the native-to-JS hand-off is invisible.
+          image: './assets/images/splash-logo.png',
+          imageWidth: 120,
           resizeMode: 'contain',
-          backgroundColor: '#121212',
+          backgroundColor: '#F3F3F3',
           dark: {
-            image: './assets/images/splash-transparent.png',
-            backgroundColor: '#121212',
+            image: './assets/images/splash-logo.png',
+            backgroundColor: '#020202',
           },
         },
       ],

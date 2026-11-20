@@ -17,7 +17,8 @@ import { Recipient } from './types';
 const PASTE = require('@/src/assets/images/send/paste.svg');
 const RECENT_LIMIT = 3;
 
-const isValidAddress = (a: string) => StrKey.isValidEd25519PublicKey(a) || StrKey.isValidContract(a);
+const isValidAddress = (a: string) =>
+  StrKey.isValidEd25519PublicKey(a) || StrKey.isValidContract(a);
 
 const initials = (label: string) =>
   label
@@ -165,7 +166,7 @@ const RecipientStep = ({ onSelectWallet, initialAddress }: Props) => {
             placeholderTextColor={theme.colors.textPlaceholder}
             autoCapitalize="characters"
             autoCorrect={false}
-            style={styles.textInput}
+            style={[styles.textInput, { color: theme.colors.textPrimary }]}
           />
         </Box>
         {showError && (
@@ -204,7 +205,13 @@ const RecipientStep = ({ onSelectWallet, initialAddress }: Props) => {
                   <ContactRow
                     key={to}
                     label={label ?? shortenAddress(to)}
-                    subtitle={label ? shortenAddress(to) : to.startsWith('C') ? 'Smart account' : 'Stellar account'}
+                    subtitle={
+                      label
+                        ? shortenAddress(to)
+                        : to.startsWith('C')
+                          ? 'Smart account'
+                          : 'Stellar account'
+                    }
                     onPress={() => select(to)}
                   />
                 );
@@ -246,7 +253,6 @@ const styles = StyleSheet.create({
     // Keeps the bundled SF Pro vertically centred in an iOS TextInput.
     lineHeight: 18,
     fontFamily: 'SFproRegular',
-    color: '#FFFFFF',
   },
   error: {
     marginTop: 8,
@@ -264,8 +270,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 14,
   },
-  avatar: {
-  },
+  avatar: {},
   rowText: {
     gap: 2,
   },

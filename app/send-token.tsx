@@ -15,7 +15,10 @@ import Text from '@/src/components/shared/Text';
 import TxAuthModal from '@/src/components/shared/TxAuthModal';
 import { getNetworkId } from '@/src/constants/config';
 import { useAddressBookStore } from '@/src/store/address-book';
+import { useStatusBarStyle } from '@/hooks/use-status-bar-style';
 import { usePortfolio } from '@/src/hooks/use-portfolio';
+import { Theme } from '@/src/theme/theme';
+import { useTheme } from '@shopify/restyle';
 import { usePrices } from '@/src/hooks/use-prices';
 import { useDisplayFiat } from '@/src/hooks/use-display-fiat';
 import { useTrackedTokens } from '@/src/hooks/use-tracked-tokens';
@@ -50,6 +53,8 @@ const ICONS = {
 };
 
 const SendToken = () => {
+  const theme = useTheme<Theme>();
+  const statusBarStyle = useStatusBarStyle();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { address: scannedAddress } = useLocalSearchParams<{ address?: string }>();
@@ -149,7 +154,12 @@ const SendToken = () => {
     setFeeEstimate('loading');
     (async () => {
       const signer = activeAccount?.gAddress
-        ? { keypair: (await import('@/src/lib/seed-wallet')).deriveWalletAtIndex(mnemonic!, activeAccount.index).keypair }
+        ? {
+            keypair: (await import('@/src/lib/seed-wallet')).deriveWalletAtIndex(
+              mnemonic!,
+              activeAccount.index,
+            ).keypair,
+          }
         : { listIndex: activeAccountIndex };
       return estimateSendFee({
         smartAccountAddress,
@@ -164,7 +174,16 @@ const SendToken = () => {
     return () => {
       cancelled = true;
     };
-  }, [reviewVisible, selectedToken, selectedWallet, smartAccountAddress, amount, activeAccount, activeAccountIndex, mnemonic]);
+  }, [
+    reviewVisible,
+    selectedToken,
+    selectedWallet,
+    smartAccountAddress,
+    amount,
+    activeAccount,
+    activeAccountIndex,
+    mnemonic,
+  ]);
 
   const shownFee = status === 'success' && networkFee ? networkFee : feeEstimate;
   const feeLabel =
@@ -339,7 +358,11 @@ const SendToken = () => {
             accountNetwork: deployedOn ?? 'unknown',
             accountKind: isPasskeyAccount ? 'passkey' : 'mnemonic',
           },
-          extra: { smartAccountAddress, activeAccountIndex, storedNetwork: activeAccount?.network ?? null },
+          extra: {
+            smartAccountAddress,
+            activeAccountIndex,
+            storedNetwork: activeAccount?.network ?? null,
+          },
         });
         setErrorMessage(
           deployedOn
@@ -369,9 +392,8 @@ const SendToken = () => {
         // platform credential or a device-local key. No key material: signer
         // kinds, verifier contract addresses and booleans only.
         const passkeyKind = isPasskeyAccount
-          ? ((await SecureStore.getItemAsync(
-              getPasskeyStorageKeys(activeAccountIndex).kind,
-            )) ?? 'unset')
+          ? ((await SecureStore.getItemAsync(getPasskeyStorageKeys(activeAccountIndex).kind)) ??
+            'unset')
           : 'n/a';
         Sentry.captureException(err instanceof Error ? err : new Error(msg), {
           tags: {
@@ -484,9 +506,14 @@ const SendToken = () => {
           accessibilityLabel="Scan QR code"
           activeOpacity={0.7}
           onPress={() => router.push({ pathname: '/qrcode-scan', params: { from: 'send' } })}
-          style={styles.headerButton}
+          style={[styles.headerButton, { backgroundColor: theme.colors.inputOutline }]}
         >
-          <SvgImage source={ICONS.qr} contentFit="contain" style={styles.headerIcon} />
+          <SvgImage
+            source={ICONS.qr}
+            contentFit="contain"
+            tintColor={theme.colors.iconPrimary}
+            style={styles.headerIcon}
+          />
         </TouchableOpacity>
       );
     }
@@ -497,7 +524,12 @@ const SendToken = () => {
         activeOpacity={0.7}
         disabled={!canReview}
         onPress={() => setReviewVisible(true)}
-        style={[styles.headerButton, styles.confirmButton, !canReview && styles.disabled]}
+        style={[
+          styles.headerButton,
+          { backgroundColor: theme.colors.inputOutline },
+          styles.confirmButton,
+          !canReview && styles.disabled,
+        ]}
       >
         <SvgImage source={ICONS.check} contentFit="contain" style={styles.headerIcon} />
       </TouchableOpacity>
@@ -509,7 +541,11 @@ const SendToken = () => {
       return (
         <Box flex={1} paddingHorizontal="l" justifyContent="space-between" pb="xl">
           <Box flex={1} justifyContent="center" alignItems="center" px="m">
-            <SvgImage source={ICONS.failed} contentFit="contain" style={styles.resultIllustration} />
+            <SvgImage
+              source={ICONS.failed}
+              contentFit="contain"
+              style={styles.resultIllustration}
+            />
             <Text
               fontSize={24}
               lineHeight={32}
@@ -577,7 +613,7 @@ const SendToken = () => {
       backgroundColor="surfaceBase"
       style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
     >
-      <StatusBar style="light" />
+      <StatusBar style={statusBarStyle} />
 
       <Box
         flexDirection="row"
@@ -605,9 +641,7 @@ const SendToken = () => {
       {selectedToken && selectedWallet && (
         <SendSummarySheet
           visible={status === 'success' || (reviewVisible && status !== 'error')}
-          title={
-            status === 'success' ? `Sent to ${recipientName}` : `Send to ${recipientName}`
-          }
+          title={status === 'success' ? `Sent to ${recipientName}` : `Send to ${recipientName}`}
           token={selectedToken}
           amount={amount}
           fiatLabel={price ? formatToken(amount, price).text : undefined}
@@ -622,7 +656,9 @@ const SendToken = () => {
           primaryLabel={status === 'success' ? 'Back to Home' : 'Send'}
           onPrimary={status === 'success' ? () => router.dismissTo('/(tabs)') : handleSend}
           onClose={status === 'success' ? undefined : () => setReviewVisible(false)}
-          secondaryLabel={status === 'success' && !alreadySaved ? 'Save to Address Book' : undefined}
+          secondaryLabel={
+            status === 'success' && !alreadySaved ? 'Save to Address Book' : undefined
+          }
           onSecondary={() => setSaveAddressVisible(true)}
           illustration={status === 'success' ? ICONS.success : undefined}
         />
@@ -661,7 +697,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
